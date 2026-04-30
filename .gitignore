@@ -1,0 +1,10 @@
+.data/
+.env
+.env.local.ps1
+.npm-cache/
+.tmp/
+.x-browser-profile/
+.x-browser-public-profile/
+data/
+dist/
+node_modules/

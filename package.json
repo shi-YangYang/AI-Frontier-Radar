@@ -1,0 +1,32 @@
+{
+  "name": "ai-frontier-monitor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "V1 foundation for AI frontier message monitoring.",
+  "scripts": {
+    "bootstrap": "npm install --cache ./.npm-cache --prefer-online --offline=false --registry=https://registry.npmmirror.com/",
+    "bootstrap:no-lock": "npm install --no-package-lock --cache ./.npm-cache --prefer-online --offline=false --registry=https://registry.npmmirror.com/",
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/server/main.ts",
+    "prisma:generate": "tsx src/config/prisma-cli.ts generate",
+    "prisma:migrate:deploy": "tsx src/config/prisma-cli.ts migrate deploy",
+    "prisma:migrate:status": "tsx src/config/prisma-cli.ts migrate status",
+    "smoke:e2e": "tsx scripts/smoke-e2e.ts",
+    "start": "node dist/server/main.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "fastify": "^5.6.1",
+    "playwright": "^1.59.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.7.2",
+    "prisma": "6.19.3",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}

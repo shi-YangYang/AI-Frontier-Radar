@@ -1,0 +1,97 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model WatchAccount {
+  id             String  @id
+  xUsername      String  @unique @map("x_username")
+  xUserId        String? @map("x_user_id")
+  displayName    String? @map("display_name")
+  enabled        Boolean @default(true)
+  baselinePostId String? @map("baseline_post_id")
+  lastSeenPostId String? @map("last_seen_post_id")
+  lastPolledAt   String? @map("last_polled_at")
+  lastPollStatus String? @map("last_poll_status")
+  lastPollError  String? @map("last_poll_error")
+  createdAt      String  @map("created_at")
+  updatedAt      String  @map("updated_at")
+
+  @@index([enabled])
+  @@map("watch_accounts")
+}
+
+model XPostRaw {
+  id             String          @id
+  xPostId        String          @unique @map("x_post_id")
+  authorUsername String          @map("author_username")
+  authorUserId   String?         @map("author_user_id")
+  postedAt       String          @map("posted_at")
+  textContent    String          @map("text_content")
+  permalinkUrl   String          @map("permalink_url")
+  isReply        Boolean         @default(false) @map("is_reply")
+  isRepost       Boolean         @default(false) @map("is_repost")
+  rawPayloadJson String          @map("raw_payload_json")
+  detectedAt     String          @map("detected_at")
+  createdAt      String          @map("created_at")
+  deliveryEvents DeliveryEvent[]
+
+  @@index([authorUsername, postedAt])
+  @@map("x_posts_raw")
+}
+
+model DeliveryTarget {
+  id             String          @id
+  targetKey      String          @unique @map("target_key")
+  channelType    String          @map("channel_type")
+  displayName    String          @map("display_name")
+  webhookUrl     String          @map("webhook_url")
+  enabled        Boolean         @default(true)
+  createdAt      String          @map("created_at")
+  updatedAt      String          @map("updated_at")
+  deliveryEvents DeliveryEvent[]
+
+  @@index([enabled])
+  @@map("delivery_targets")
+}
+
+model DeliveryEvent {
+  id             String         @id
+  xPostId        String         @map("x_post_id")
+  targetKey      String         @map("target_key")
+  status         String
+  attemptCount   Int            @default(0) @map("attempt_count")
+  nextRetryAt    String?        @map("next_retry_at")
+  lastError      String?        @map("last_error")
+  lockedAt       String?        @map("locked_at")
+  sentAt         String?        @map("sent_at")
+  createdAt      String         @map("created_at")
+  updatedAt      String         @map("updated_at")
+  deliveryTarget DeliveryTarget @relation(fields: [targetKey], references: [targetKey], onUpdate: Cascade)
+  xPost          XPostRaw       @relation(fields: [xPostId], references: [xPostId], onUpdate: Cascade)
+
+  @@unique([xPostId, targetKey])
+  @@index([status, nextRetryAt])
+  @@map("delivery_events")
+}
+
+model PollRun {
+  id                String @id
+  startedAt         String @map("started_at")
+  finishedAt        String? @map("finished_at")
+  status            String
+  accountsTotal     Int    @default(0) @map("accounts_total")
+  accountsSucceeded Int    @default(0) @map("accounts_succeeded")
+  accountsFailed    Int    @default(0) @map("accounts_failed")
+  newPostsDetected  Int    @default(0) @map("new_posts_detected")
+  eventsCreated     Int    @default(0) @map("events_created")
+  errorSummary      String? @map("error_summary")
+  createdAt         String @map("created_at")
+
+  @@index([startedAt])
+  @@map("poll_runs")
+}
