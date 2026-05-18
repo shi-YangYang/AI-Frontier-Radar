@@ -4,6 +4,9 @@ import type { AppConfig } from '../../../shared/config/types';
 import type { AdminActions } from '../controllers/admin-controller';
 import {
   createAdminWatchAccount,
+  deleteAdminDeliveryEvent,
+  deleteAdminPollRun,
+  deleteAdminWatchAccount,
   getAdminSummary,
   listAdminDeliveryEvents,
   listAdminPollRuns,
@@ -12,7 +15,6 @@ import {
   runAdminDeliveryNow,
   runAdminPollingNow,
   toAdminApiErrorPayload,
-  updateAdminWatchAccount,
 } from '../controllers/admin-controller';
 import { adminJsonResponseSchema } from '../schemas/admin';
 import type { StorageContext } from '../../storage';
@@ -79,7 +81,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     async (request, reply) => sendAdminResponse(reply, () => createAdminWatchAccount(request.body, options)),
   );
 
-  app.patch(
+  app.delete(
     '/admin/api/watch-accounts/:id',
     {
       schema: {
@@ -87,7 +89,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
       },
     },
     async (request, reply) =>
-      sendAdminResponse(reply, () => updateAdminWatchAccount(request.params, request.body, options)),
+      sendAdminResponse(reply, () => deleteAdminWatchAccount(request.params, options)),
   );
 
   app.get(
@@ -100,6 +102,16 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     async (request, reply) => sendAdminResponse(reply, () => listAdminPollRuns(request.query, options)),
   );
 
+  app.delete(
+    '/admin/api/poll-runs/:id',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) => sendAdminResponse(reply, () => deleteAdminPollRun(request.params, options)),
+  );
+
   app.get(
     '/admin/api/delivery-events',
     {
@@ -108,6 +120,16 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
       },
     },
     async (request, reply) => sendAdminResponse(reply, () => listAdminDeliveryEvents(request.query, options)),
+  );
+
+  app.delete(
+    '/admin/api/delivery-events/:id',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) => sendAdminResponse(reply, () => deleteAdminDeliveryEvent(request.params, options)),
   );
 
   app.post(

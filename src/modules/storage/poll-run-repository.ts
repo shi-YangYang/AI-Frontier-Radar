@@ -52,18 +52,26 @@ export class PollRunRepository {
     return pollRuns.map(mapPollRun);
   }
 
-  public async listPage(input: { page: number; pageSize: number }): Promise<PollRun[]> {
+  public async listPage(input: {
+    from?: string;
+    page: number;
+    pageSize: number;
+    to?: string;
+  }): Promise<PollRun[]> {
     const pollRuns = await this.prisma.pollRun.findMany({
       orderBy: { startedAt: 'desc' },
       skip: (input.page - 1) * input.pageSize,
       take: input.pageSize,
+      where: toPollRunWhereInput(input),
     });
 
     return pollRuns.map(mapPollRun);
   }
 
-  public async countAll(): Promise<number> {
-    return this.prisma.pollRun.count();
+  public async countAll(input: { from?: string; to?: string } = {}): Promise<number> {
+    return this.prisma.pollRun.count({
+      where: toPollRunWhereInput(input),
+    });
   }
 
   public async update(id: string, input: UpdatePollRunInput): Promise<PollRun | null> {
@@ -84,6 +92,19 @@ export class PollRunRepository {
 
     return this.findById(id);
   }
+}
+
+function toPollRunWhereInput(input: { from?: string; to?: string }): Prisma.PollRunWhereInput {
+  if (input.from === undefined && input.to === undefined) {
+    return {};
+  }
+
+  return {
+    startedAt: {
+      ...(input.from === undefined ? {} : { gte: input.from }),
+      ...(input.to === undefined ? {} : { lte: input.to }),
+    },
+  };
 }
 
 function mapPollRun(pollRun: Prisma.PollRunGetPayload<Record<string, never>>): PollRun {

@@ -169,18 +169,26 @@ export class DeliveryEventRepository {
     return deliveryEvents.map(mapDeliveryEvent);
   }
 
-  public async listPage(input: { page: number; pageSize: number }): Promise<DeliveryEvent[]> {
+  public async listPage(input: {
+    from?: string;
+    page: number;
+    pageSize: number;
+    to?: string;
+  }): Promise<DeliveryEvent[]> {
     const deliveryEvents = await this.prisma.deliveryEvent.findMany({
       orderBy: { createdAt: 'desc' },
       skip: (input.page - 1) * input.pageSize,
       take: input.pageSize,
+      where: toDeliveryEventWhereInput(input),
     });
 
     return deliveryEvents.map(mapDeliveryEvent);
   }
 
-  public async countAll(): Promise<number> {
-    return this.prisma.deliveryEvent.count();
+  public async countAll(input: { from?: string; to?: string } = {}): Promise<number> {
+    return this.prisma.deliveryEvent.count({
+      where: toDeliveryEventWhereInput(input),
+    });
   }
 
   public async restoreTimedOutSending(
@@ -318,6 +326,19 @@ export class DeliveryEventRepository {
 
     return mapDeliveryEvent(deliveryEvent);
   }
+}
+
+function toDeliveryEventWhereInput(input: { from?: string; to?: string }): Prisma.DeliveryEventWhereInput {
+  if (input.from === undefined && input.to === undefined) {
+    return {};
+  }
+
+  return {
+    createdAt: {
+      ...(input.from === undefined ? {} : { gte: input.from }),
+      ...(input.to === undefined ? {} : { lte: input.to }),
+    },
+  };
 }
 
 function mapDeliveryEvent(
