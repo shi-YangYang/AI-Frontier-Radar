@@ -21,9 +21,16 @@ export interface RuntimeSchedulerOptions {
   storage: StorageContext;
 }
 
+export interface RuntimeSchedulerRunNowResult {
+  job: 'delivery-worker' | 'polling';
+  message?: string;
+  status: 'completed' | 'failed' | 'skipped';
+  trigger: string;
+}
+
 export interface RuntimeScheduler {
-  runDeliveryWorkerNow(options?: { recoverStartupState?: boolean; trigger?: string }): Promise<void>;
-  runPollingNow(options?: { trigger?: string }): Promise<void>;
+  runDeliveryWorkerNow(options?: { recoverStartupState?: boolean; trigger?: string }): Promise<RuntimeSchedulerRunNowResult>;
+  runPollingNow(options?: { trigger?: string }): Promise<RuntimeSchedulerRunNowResult>;
   start(): void;
   stop(): Promise<void>;
 }
@@ -61,9 +68,9 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
   private readonly pollingIntervalMs: number;
   private readonly sourceProvider: SourceProvider;
   private deliveryInterval: TimerHandle | null = null;
-  private deliveryRunPromise: Promise<void> | null = null;
+  private deliveryRunPromise: Promise<RuntimeSchedulerRunNowResult> | null = null;
   private pollingInterval: TimerHandle | null = null;
-  private pollingRunPromise: Promise<void> | null = null;
+  private pollingRunPromise: Promise<RuntimeSchedulerRunNowResult> | null = null;
   private started = false;
 
   public constructor(private readonly options: RuntimeSchedulerOptions) {
@@ -125,52 +132,68 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
     ]);
   }
 
-  public async runPollingNow(options: { trigger?: string } = {}): Promise<void> {
+  public async runPollingNow(
+    options: { trigger?: string } = {},
+  ): Promise<RuntimeSchedulerRunNowResult> {
+    const trigger = options.trigger ?? 'manual';
+
     if (this.pollingRunPromise !== null) {
       this.logger.warn(
         {
           job: 'polling',
-          trigger: options.trigger ?? 'manual',
+          trigger,
         },
         'scheduler skipped polling tick because previous run is still active',
       );
-      return;
+      return {
+        job: 'polling',
+        message: 'Polling is already running.',
+        status: 'skipped',
+        trigger,
+      };
     }
 
-    const runPromise = this.runPollingTick(options.trigger ?? 'manual').finally(() => {
+    const runPromise = this.runPollingTick(trigger).finally(() => {
       this.pollingRunPromise = null;
     });
     this.pollingRunPromise = runPromise;
 
-    await runPromise;
+    return runPromise;
   }
 
   public async runDeliveryWorkerNow(
     options: { recoverStartupState?: boolean; trigger?: string } = {},
-  ): Promise<void> {
+  ): Promise<RuntimeSchedulerRunNowResult> {
+    const trigger = options.trigger ?? 'manual';
+
     if (this.deliveryRunPromise !== null) {
       this.logger.warn(
         {
           job: 'delivery-worker',
-          trigger: options.trigger ?? 'manual',
+          trigger,
         },
         'scheduler skipped delivery worker tick because previous run is still active',
       );
-      return;
+      return {
+        job: 'delivery-worker',
+        message: 'Delivery worker is already running.',
+        status: 'skipped',
+        trigger,
+      };
     }
 
     const runPromise = this.runDeliveryWorkerTick({
       recoverStartupState: options.recoverStartupState ?? false,
-      trigger: options.trigger ?? 'manual',
+      trigger,
     }).finally(() => {
       this.deliveryRunPromise = null;
     });
     this.deliveryRunPromise = runPromise;
 
-    await runPromise;
+    return runPromise;
   }
 
-  private async runPollingTick(trigger: string): Promise<void> {
+  private async runPollingTick(trigger: string): Promise<RuntimeSchedulerRunNowResult> {
     this.logger.info(
       {
         job: 'polling',
@@ -188,6 +211,11 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
       });
 
       this.logPollingCompleted(result, trigger);
+      return {
+        job: 'polling',
+        status: 'completed',
+        trigger,
+      };
     } catch (error) {
       this.logger.error(
         {
@@ -197,13 +225,20 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
         },
         'scheduler job failed',
       );
+
+      return {
+        job: 'polling',
+        message: toErrorMessage(error),
+        status: 'failed',
+        trigger,
+      };
     }
   }
 
   private async runDeliveryWorkerTick(input: {
     recoverStartupState: boolean;
     trigger: string;
-  }): Promise<void> {
+  }): Promise<RuntimeSchedulerRunNowResult> {
     this.logger.info(
       {
         job: 'delivery-worker',
@@ -221,6 +256,11 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
       });
 
       this.logDeliveryWorkerCompleted(result, input);
+      return {
+        job: 'delivery-worker',
+        status: 'completed',
+        trigger: input.trigger,
+      };
     } catch (error) {
       this.logger.error(
         {
@@ -231,6 +271,13 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
         },
         'scheduler job failed',
       );
+
+      return {
+        job: 'delivery-worker',
+        message: toErrorMessage(error),
+        status: 'failed',
+        trigger: input.trigger,
+      };
     }
   }
 
@@ -294,4 +341,12 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
       'scheduler job completed',
     );
   }
+}
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
 }

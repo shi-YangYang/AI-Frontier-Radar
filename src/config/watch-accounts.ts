@@ -20,7 +20,7 @@ export async function loadWatchAccountsSource(
   cwd: string,
 ): Promise<WatchAccountsSourceConfig> {
   const source = reader.readEnum('WATCH_ACCOUNTS_SOURCE', ['file', 'env', 'database'] as const, {
-    defaultValue: 'env',
+    defaultValue: 'database',
   });
 
   if (source === 'database') {

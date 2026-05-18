@@ -18,6 +18,10 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     storage,
   });
   const app = createApp({
+    adminActions: {
+      runDeliveryWorkerNow: (runOptions) => scheduler.runDeliveryWorkerNow(runOptions),
+      runPollingNow: (runOptions) => scheduler.runPollingNow(runOptions),
+    },
     config: options.config,
     logger: options.logger,
     storage,

@@ -85,6 +85,30 @@ export class DeliveryEventRepository {
     return deliveryEvent === null ? null : mapDeliveryEvent(deliveryEvent);
   }
 
+  public async countByStatus(): Promise<Record<DeliveryEvent['status'], number>> {
+    const groups = await this.prisma.deliveryEvent.groupBy({
+      by: ['status'],
+      _count: {
+        status: true,
+      },
+    });
+
+    return groups.reduce<Record<DeliveryEvent['status'], number>>(
+      (counts, group) => {
+        counts[group.status as DeliveryEvent['status']] = group._count.status;
+        return counts;
+      },
+      {
+        dead: 0,
+        failed: 0,
+        pending: 0,
+        retry_wait: 0,
+        sending: 0,
+        sent: 0,
+      },
+    );
+  }
+
   public async claimDueForSending(id: string, referenceTime: string): Promise<DeliveryEvent | null> {
     const result = await this.prisma.deliveryEvent.updateMany({
       data: {
@@ -131,6 +155,15 @@ export class DeliveryEventRepository {
           in: ['pending', 'retry_wait'],
         },
       },
+    });
+
+    return deliveryEvents.map(mapDeliveryEvent);
+  }
+
+  public async listRecent(limit = 20): Promise<DeliveryEvent[]> {
+    const deliveryEvents = await this.prisma.deliveryEvent.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: limit,
     });
 
     return deliveryEvents.map(mapDeliveryEvent);

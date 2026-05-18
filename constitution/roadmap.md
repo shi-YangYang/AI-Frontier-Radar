@@ -98,6 +98,26 @@ V2 再考虑进入：
 - 更完善的后台管理能力
 - 数据库从 SQLite 升级到 MySQL（如有必要）
 
+## V2 执行规范
+
+V2 起不再继续使用 V1 的 ad-hoc batch 文档作为主流程。
+
+V2 每个功能必须进入统一 harness：
+
+- 流程入口：`docs/harness/README.md`
+- 规格目录：`docs/specs/<feature-id>/`
+- 模板目录：`docs/harness/templates/`
+
+V2 功能必须至少具备以下文档后才能分发给实施 Agent：
+
+1. `00-intake.md`
+2. `01-spec.md`
+3. `02-design.md`
+4. `03-implementation-plan.md`
+5. `tasks/T*.md`
+
+协调 Agent 必须先维护这些文档，再组织实施。实施 Agent 不允许绕过 harness 直接改代码。
+
 ## 工作原则
 
 - 先 constitution，后 spec

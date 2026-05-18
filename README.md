@@ -2,43 +2,69 @@
 
 V1 是一个本地/单机优先的准实时监测服务：轮询指定 X 账号的新帖，写入 SQLite 状态表，创建 `delivery_events`，再通过飞书群自定义机器人 webhook 投递。
 
-## 必需环境变量
+## 环境变量
 
-从 `.env.example` 复制配置，并至少填写：
+运行时只需要一个实际配置文件：
 
-- `SQLITE_PATH`：SQLite 文件路径，例如 `.data/ai-news-monitor.sqlite`
-- `REDIS_URL`：Redis 连接，例如 `redis://127.0.0.1:6379`
+```text
+.env
+```
+
+本地和服务器都只需要至少填写：
+
 - `FEISHU_WEBHOOK_URL`：飞书群自定义机器人 webhook
-- `X_SOURCE_MODE`：X 数据源模式，默认建议 `browser`
-- `X_BROWSER_USER_DATA_DIR`：浏览器登录态保存目录，例如 `.x-browser-profile`
-- `X_BROWSER_HEADLESS`：首次登录建议 `false`
-- `WATCH_ACCOUNTS_SOURCE`：账号来源，`.env.example` 使用 `env`
-- `WATCH_ACCOUNTS`：启动时同步的监测账号，逗号分隔
 
 可选配置：
 
+- `SQLITE_PATH`：默认 `.data/ai-news-monitor.sqlite`
+- `REDIS_URL`：默认 `redis://127.0.0.1:1`
+- `X_SOURCE_MODE`：默认 `browser`
+- `X_BROWSER_USER_DATA_DIR`：默认 `.x-browser-public-profile`
+- `X_BROWSER_HEADLESS`：默认 `true`
 - `X_BROWSER_BASE_URL`：默认 `https://x.com`
 - `X_BROWSER_NAVIGATION_TIMEOUT_MS`：默认 `30000`
 - `X_BROWSER_POST_LOAD_TIMEOUT_MS`：默认 `15000`
 - `X_API_BASE_URL` / `X_API_BEARER_TOKEN`：仅 `X_SOURCE_MODE=api` 时需要
-- `POLL_INTERVAL_SECONDS`：轮询间隔，默认 `120`
-- `FETCH_LIMIT_PER_ACCOUNT`：每个账号单次拉取数量，默认 `10`
+- `POLL_INTERVAL_SECONDS`：轮询间隔，默认 `300`
+- `FETCH_LIMIT_PER_ACCOUNT`：每个账号单次拉取数量，默认 `5`
 - `EXCLUDE_REPLIES`：默认 `true`
 - `EXCLUDE_REPOSTS`：默认 `true`
+- `WATCH_ACCOUNTS_SOURCE`：默认 `database`
 - `HOST` / `PORT` / `LOG_LEVEL`
 
 ## 本地启动
 
-```powershell
+首次安装依赖：
+
+```bash
 npm run bootstrap
-Copy-Item .env.example .env
-# 按需编辑 .env 后，把变量加载到当前 PowerShell
-Get-Content .env | Where-Object { $_ -match '^\s*[^#][^=]+=' } | ForEach-Object {
-  $name, $value = $_ -split '=', 2
-  [Environment]::SetEnvironmentVariable($name.Trim(), $value.Trim(), 'Process')
-}
-npm run prisma:generate
-npm run prisma:migrate:deploy
+```
+
+创建本地配置文件 `.env`，至少填入你的飞书机器人 webhook：
+
+```text
+.env
+```
+
+示例：
+
+```dotenv
+FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/replace-with-real-token
+```
+
+之后启动只需要一条命令：
+
+```bash
+npm run local
+```
+
+`npm run local` 会自动读取 `.env`，并依次执行 Prisma generate、migration deploy、TypeScript build 和本地 server。系统环境变量仍可覆盖 `.env` 配置。
+
+如果本机 Windows 环境拦截 Prisma schema-engine 子进程，migration deploy 会自动退回到 SQLite 本地迁移 fallback。
+
+如果你正在开发代码并需要 watch 模式，也可以单独运行：
+
+```bash
 npm run dev
 ```
 
@@ -71,6 +97,40 @@ Invoke-RestMethod http://127.0.0.1:3000/config/summary
 ```
 
 `/config/summary` 只返回配置摘要，不返回完整 webhook。
+
+## 本地 Web 管理页
+
+V1.1 起，监测账号建议以 SQLite 数据库为准，并通过本地 Web 页面管理：
+
+```text
+http://127.0.0.1:3000/admin
+```
+
+页面支持查看运行摘要、账号列表、最近轮询、最近发送事件，也支持新增账号、启用/禁用账号、手动触发轮询和手动触发发送。新增账号请输入 X handle，例如 `openai` 或 `@openai`；系统会保存为不带 `@` 的小写 username。
+
+`/admin` 和 `/admin/api/*` 只允许从 `127.0.0.1`、`::1` 或 `::ffff:127.0.0.1` 访问。如果服务配置为 `HOST=0.0.0.0`，局域网其他机器也会被拒绝访问 admin 路由。
+
+如果需要从旧的 `WATCH_ACCOUNTS` 或文件列表做一次性导入，可以临时设置：
+
+```text
+WATCH_ACCOUNTS_SOURCE=env
+WATCH_ACCOUNTS=openai,AnthropicAI
+```
+
+或设置 `WATCH_ACCOUNTS_SOURCE=file` 与 `WATCH_ACCOUNTS_FILE_PATH`。启动时这些种子账号会写入或更新数据库中的 enabled 状态，但不会禁用仅通过 Web 页面新增的账号，也不会覆盖已有 `baseline_post_id` / `last_seen_post_id`。导入完成后，建议切回 `WATCH_ACCOUNTS_SOURCE=database`，后续都在 `/admin` 管理账号。
+
+## 开发协作和文档同步
+
+项目采用 Spec-Driven Development。新迭代应先在 `docs/specs/<feature-id>/` 下维护 spec、design、implementation plan、handoff 和验收记录。
+
+每次版本迭代验收后必须同步：
+
+- `README.md`：更新用户可见行为、启动方式、配置方式和限制。
+- `docs/specs/<feature-id>/handoff.md`：标记当前状态和后续任务。
+- `docs/specs/<feature-id>/verification/acceptance.md`：记录验收范围和验证结果。
+- `prompts/context-recovery.md`：当 Agent 分工、启动方式、项目边界或长期规则变化时同步更新。
+
+如果聊天上下文丢失，使用 `prompts/context-recovery.md` 中的协调、实施、验收 Agent 提示词恢复上下文。
 
 ## Migration / Generate
 
@@ -110,7 +170,7 @@ smoke 使用临时 SQLite、本地 mock X API、本地 mock 飞书 webhook，不
 ## 当前 V1 限制和真实接入注意事项
 
 - 不接 X 实时流，只使用 User Timeline Polling。
-- 不在飞书内管理监测账号，账号通过环境变量或数据库种子维护。
+- 不在飞书内管理监测账号，账号通过本地 `/admin` 页面维护。
 - 当前只支持一个默认飞书 webhook 投递目标。
 - Redis 在当前实现中用于就绪检查和后续队列依赖；本地真实运行需要可连接 Redis。
 - 首次接入已有历史帖的账号时，系统会建立基线，避免补发历史消息。

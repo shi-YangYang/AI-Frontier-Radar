@@ -1,10 +1,39 @@
-import type { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 
 import { createDatabaseId, createTimestamp } from './database';
 import type { CreateWatchAccountInput, UpdateWatchAccountInput, WatchAccount } from './types';
 
 export class WatchAccountRepository {
   public constructor(private readonly prisma: PrismaClient) {}
+
+  public async createIfAbsentByUsername(
+    input: CreateWatchAccountInput,
+  ): Promise<{ created: boolean; watchAccount: WatchAccount }> {
+    try {
+      const watchAccount = await this.create(input);
+
+      return {
+        created: true,
+        watchAccount,
+      };
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const existingWatchAccount = await this.findByUsername(input.xUsername);
+
+        if (existingWatchAccount !== null) {
+          return {
+            created: false,
+            watchAccount: existingWatchAccount,
+          };
+        }
+      }
+
+      throw error;
+    }
+  }
 
   public async create(input: CreateWatchAccountInput): Promise<WatchAccount> {
     const now = createTimestamp();
@@ -182,8 +211,8 @@ function mapWatchAccount(
   };
 }
 
-function normalizeXUsername(xUsername: string): string {
-  return xUsername.trim().replace(/^@/, '');
+export function normalizeXUsername(xUsername: string): string {
+  return xUsername.trim().replace(/^@+/, '').toLowerCase();
 }
 
 function toWatchAccountUpdateData(input: UpdateWatchAccountInput | CreateWatchAccountInput): Prisma.WatchAccountUpdateInput {

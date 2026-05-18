@@ -6,6 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { resolvePrismaSqliteDatabaseUrl } from '../shared/config';
 import { ConfigValidationError } from '../shared/env/config-validation-error';
 import { EnvReader } from '../shared/env/env-reader';
+import { loadLocalEnv } from './local-env';
 
 const localRequire = createRequire(__filename);
 const DEFAULT_SQLITE_PATH = '.data/ai-news-monitor.sqlite';
@@ -17,7 +18,8 @@ function main(): void {
     throw new Error('Prisma CLI arguments are required.');
   }
 
-  const reader = new EnvReader(process.env);
+  const env = loadLocalEnv(process.cwd());
+  const reader = new EnvReader(env);
   const sqlitePath = reader.readString('SQLITE_PATH', { defaultValue: DEFAULT_SQLITE_PATH });
   reader.assertValid();
 
@@ -31,6 +33,7 @@ function main(): void {
     cwd: process.cwd(),
     env: {
       ...process.env,
+      ...env,
       DATABASE_URL: databaseUrl,
     },
     shell: false,

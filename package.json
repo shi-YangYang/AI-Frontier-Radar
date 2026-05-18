@@ -8,9 +8,10 @@
     "bootstrap:no-lock": "npm install --no-package-lock --cache ./.npm-cache --prefer-online --offline=false --registry=https://registry.npmmirror.com/",
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/server/main.ts",
-    "prisma:generate": "tsx src/config/prisma-cli.ts generate",
-    "prisma:migrate:deploy": "tsx src/config/prisma-cli.ts migrate deploy",
-    "prisma:migrate:status": "tsx src/config/prisma-cli.ts migrate status",
+    "local": "npm run prisma:generate && npm run prisma:migrate:deploy && npm run build && npm run start",
+    "prisma:generate": "node scripts/prisma-cli.cjs generate",
+    "prisma:migrate:deploy": "node scripts/prisma-cli.cjs migrate deploy",
+    "prisma:migrate:status": "node scripts/prisma-cli.cjs migrate status",
     "smoke:e2e": "tsx scripts/smoke-e2e.ts",
     "start": "node dist/server/main.js",
     "typecheck": "tsc --noEmit -p tsconfig.json"

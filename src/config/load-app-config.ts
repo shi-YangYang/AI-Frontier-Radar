@@ -4,6 +4,7 @@ import { toPrismaSqliteDatabaseUrl } from '../shared/config';
 import type { AppConfig, AppLogLevel, RuntimeEnvironment } from '../shared/config/types';
 import { ConfigValidationError } from '../shared/env/config-validation-error';
 import { EnvReader, type EnvSource } from '../shared/env/env-reader';
+import { loadLocalEnv } from './local-env';
 import { loadWatchAccountsSource } from './watch-accounts';
 
 const DEFAULT_FETCH_LIMIT = 5;
@@ -30,8 +31,8 @@ interface LoadAppConfigOption {
 }
 
 export async function loadAppConfig(options: LoadAppConfigOption = {}): Promise<AppConfig> {
-  const env = options.env ?? process.env;
   const cwd = options.cwd ?? process.cwd();
+  const env = options.env ?? loadLocalEnv(cwd);
   const reader = new EnvReader(env);
 
   const serviceEnv = reader.readEnum('NODE_ENV', ['development', 'test', 'production'] as const, {

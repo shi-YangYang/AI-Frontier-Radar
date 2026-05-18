@@ -27,12 +27,9 @@ export async function syncWatchAccountSeeds(
       xUsername: seed.xUsername,
     });
   }
-  const disabledCount = await watchAccounts.disableAccountsExceptUsernames(
-    sourceConfig.items.map((seed) => seed.xUsername),
-  );
 
   return {
-    disabledCount,
+    disabledCount: 0,
     skipped: false,
     source: sourceConfig.type,
     syncedCount: sourceConfig.items.length,
