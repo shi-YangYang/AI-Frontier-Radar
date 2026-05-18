@@ -169,6 +169,20 @@ export class DeliveryEventRepository {
     return deliveryEvents.map(mapDeliveryEvent);
   }
 
+  public async listPage(input: { page: number; pageSize: number }): Promise<DeliveryEvent[]> {
+    const deliveryEvents = await this.prisma.deliveryEvent.findMany({
+      orderBy: { createdAt: 'desc' },
+      skip: (input.page - 1) * input.pageSize,
+      take: input.pageSize,
+    });
+
+    return deliveryEvents.map(mapDeliveryEvent);
+  }
+
+  public async countAll(): Promise<number> {
+    return this.prisma.deliveryEvent.count();
+  }
+
   public async restoreTimedOutSending(
     input: {
       cutoffLockedAt: string;

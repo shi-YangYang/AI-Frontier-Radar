@@ -52,6 +52,20 @@ export class PollRunRepository {
     return pollRuns.map(mapPollRun);
   }
 
+  public async listPage(input: { page: number; pageSize: number }): Promise<PollRun[]> {
+    const pollRuns = await this.prisma.pollRun.findMany({
+      orderBy: { startedAt: 'desc' },
+      skip: (input.page - 1) * input.pageSize,
+      take: input.pageSize,
+    });
+
+    return pollRuns.map(mapPollRun);
+  }
+
+  public async countAll(): Promise<number> {
+    return this.prisma.pollRun.count();
+  }
+
   public async update(id: string, input: UpdatePollRunInput): Promise<PollRun | null> {
     const data = toPollRunUpdateData(input);
 

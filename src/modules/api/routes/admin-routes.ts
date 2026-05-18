@@ -36,13 +36,13 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
         ok: false,
         error: {
           code: 'FORBIDDEN',
-          message: 'Admin routes are only available from localhost.',
+          message: '管理页只允许从本机访问。',
         },
       });
       return;
     }
 
-    await reply.type('text/plain; charset=utf-8').send('Admin routes are only available from localhost.');
+    await reply.type('text/plain; charset=utf-8').send('管理页只允许从本机访问。');
   });
 
   app.get('/admin', async (_, reply) => {
@@ -97,7 +97,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
         response: adminJsonResponseSchema,
       },
     },
-    async (_, reply) => sendAdminResponse(reply, () => listAdminPollRuns(options)),
+    async (request, reply) => sendAdminResponse(reply, () => listAdminPollRuns(request.query, options)),
   );
 
   app.get(
@@ -107,7 +107,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
         response: adminJsonResponseSchema,
       },
     },
-    async (_, reply) => sendAdminResponse(reply, () => listAdminDeliveryEvents(options)),
+    async (request, reply) => sendAdminResponse(reply, () => listAdminDeliveryEvents(request.query, options)),
   );
 
   app.post(

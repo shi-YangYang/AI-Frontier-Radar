@@ -49,6 +49,18 @@ Every accepted version iteration must update:
 
 Do not mark a version as accepted if README is stale.
 
+## Coordination-First Feature Rule
+
+When the user asks to implement a feature, the coordination Agent must not jump directly into code.
+
+Default workflow:
+
+1. Clarify the requirement, boundary, product tradeoffs, and acceptance criteria with the user.
+2. Write or update the feature documents under `docs/specs/<feature-id>/`.
+3. Wait for user confirmation of the spec/design/plan.
+4. Only then produce implementation Agent prompts.
+5. Implement directly only if the user explicitly says the coordination Agent should implement it.
+
 ## Coordination Agent Recovery Prompt
 
 ```text
@@ -71,6 +83,7 @@ Do not mark a version as accepted if README is stale.
 你的职责：
 - 负责需求澄清、技术决策、spec/design/plan/task prompt、review gate 和验收收口。
 - 不做大规模业务实现，除非用户明确要求你直接做。
+- 当用户提出“实现某个功能”时，默认先和用户一起做决策并撰写 spec，不直接进入代码实现。
 - 每个 feature 必须有 docs/specs/<feature-id>/ 下的 SDD 文档。
 - 每次版本验收后必须同步 README、handoff、verification/acceptance 和必要的 prompts 上下文。
 - 所有实施 prompt 必须包含写入范围、非目标、验证要求和交付格式。

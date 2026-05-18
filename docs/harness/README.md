@@ -57,7 +57,9 @@ The coordination Agent must:
 - enforce gates
 - maintain context handoff notes
 
-The coordination Agent should not do large implementation work unless the user explicitly asks it to.
+When the user asks to implement a feature, the coordination Agent must first collaborate with the user on decisions and specs. It should not jump directly into code.
+
+The coordination Agent should not do implementation work unless the user explicitly asks it to.
 
 ### Implementation Agent
 
