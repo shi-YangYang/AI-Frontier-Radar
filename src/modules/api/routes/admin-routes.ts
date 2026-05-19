@@ -1,3 +1,8 @@
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
+import fastifyStatic from '@fastify/static';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import type { AppConfig } from '../../../shared/config/types';
@@ -11,7 +16,6 @@ import {
   listAdminDeliveryEvents,
   listAdminPollRuns,
   listAdminWatchAccounts,
-  renderAdminPage,
   runAdminDeliveryNow,
   runAdminPollingNow,
   toAdminApiErrorPayload,
@@ -26,8 +30,11 @@ interface RegisterAdminRoutesOptions {
 }
 
 export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdminRoutesOptions): void {
+  const adminWebRoot = path.join(process.cwd(), 'dist-web', 'admin');
+  const adminIndexHtmlPath = path.join(adminWebRoot, 'index.html');
+
   app.addHook('onRequest', async (request, reply) => {
-    if (!isAdminPath(request.url) || isLocalRequest(request)) {
+    if (!isProtectedAdminPath(request.url) || isLocalRequest(request)) {
       return;
     }
 
@@ -47,9 +54,17 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     await reply.type('text/plain; charset=utf-8').send('管理页只允许从本机访问。');
   });
 
-  app.get('/admin', async (_, reply) => {
-    return reply.type('text/html; charset=utf-8').send(renderAdminPage());
-  });
+  if (existsSync(adminWebRoot)) {
+    app.register(fastifyStatic, {
+      decorateReply: false,
+      prefix: '/admin-assets/',
+      root: adminWebRoot,
+    });
+  }
+
+  for (const pageRoute of ['/', '/accounts', '/poll-runs', '/delivery-events']) {
+    app.get(pageRoute, async (_, reply) => sendAdminIndexHtml(reply, adminIndexHtmlPath));
+  }
 
   app.get(
     '/admin/api/summary',
@@ -153,6 +168,16 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
   );
 }
 
+async function sendAdminIndexHtml(reply: FastifyReply, adminIndexHtmlPath: string): Promise<FastifyReply> {
+  try {
+    const html = await readFile(adminIndexHtmlPath, 'utf8');
+    return reply.type('text/html; charset=utf-8').send(html);
+  } catch {
+    reply.code(503);
+    return reply.type('text/plain; charset=utf-8').send('管理前端尚未构建。请先运行 npm run build。');
+  }
+}
+
 async function sendAdminResponse<T>(
   reply: FastifyReply,
   handler: () => Promise<T>,
@@ -166,8 +191,23 @@ async function sendAdminResponse<T>(
   }
 }
 
-function isAdminPath(url: string): boolean {
-  return url === '/admin' || url.startsWith('/admin?') || url.startsWith('/admin/');
+function isProtectedAdminPath(url: string): boolean {
+  return (
+    url === '/' ||
+    url.startsWith('/?') ||
+    url === '/accounts' ||
+    url.startsWith('/accounts?') ||
+    url === '/poll-runs' ||
+    url.startsWith('/poll-runs?') ||
+    url === '/delivery-events' ||
+    url.startsWith('/delivery-events?') ||
+    url === '/admin' ||
+    url.startsWith('/admin?') ||
+    url.startsWith('/admin/') ||
+    url === '/admin-assets' ||
+    url.startsWith('/admin-assets?') ||
+    url.startsWith('/admin-assets/')
+  );
 }
 
 function isAdminApiPath(url: string): boolean {

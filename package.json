@@ -6,7 +6,11 @@
   "scripts": {
     "bootstrap": "npm install --cache ./.npm-cache --prefer-online --offline=false --registry=https://registry.npmmirror.com/",
     "bootstrap:no-lock": "npm install --no-package-lock --cache ./.npm-cache --prefer-online --offline=false --registry=https://registry.npmmirror.com/",
-    "build": "tsc -p tsconfig.json",
+    "admin:build": "vite build --config web/admin/vite.config.ts --configLoader native",
+    "admin:typecheck": "vue-tsc --noEmit -p web/admin/tsconfig.json",
+    "backend:build": "tsc -p tsconfig.json",
+    "backend:typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "npm run backend:build && npm run admin:build",
     "dev": "tsx watch src/server/main.ts",
     "local": "npm run prisma:generate && npm run prisma:migrate:deploy && npm run build && npm run start",
     "prisma:generate": "node scripts/prisma-cli.cjs generate",
@@ -14,20 +18,26 @@
     "prisma:migrate:status": "node scripts/prisma-cli.cjs migrate status",
     "smoke:e2e": "tsx scripts/smoke-e2e.ts",
     "start": "node dist/server/main.js",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "npm run backend:typecheck && npm run admin:typecheck"
   },
   "engines": {
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@fastify/static": "^9.1.3",
     "@prisma/client": "6.19.3",
     "fastify": "^5.6.1",
-    "playwright": "^1.59.1"
+    "playwright": "^1.59.1",
+    "vue": "^3.5.34",
+    "vue-router": "^5.0.7"
   },
   "devDependencies": {
     "@types/node": "^24.7.2",
+    "@vitejs/plugin-vue": "^6.0.7",
     "prisma": "6.19.3",
     "tsx": "^4.20.6",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite": "^8.0.13",
+    "vue-tsc": "^3.2.9"
   }
 }
