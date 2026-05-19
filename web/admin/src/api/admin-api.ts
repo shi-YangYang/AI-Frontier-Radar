@@ -93,8 +93,85 @@ export interface RunNowResult {
   status: string;
 }
 
+export type RuntimeSettingSource = 'database_override' | 'env_default';
+
+export interface RuntimePollingSettings {
+  excludeReplies: boolean;
+  excludeReposts: boolean;
+  fetchLimitPerAccount: number;
+  intervalSeconds: number;
+  sources: {
+    excludeReplies: RuntimeSettingSource;
+    excludeReposts: RuntimeSettingSource;
+    fetchLimitPerAccount: RuntimeSettingSource;
+    intervalSeconds: RuntimeSettingSource;
+  };
+}
+
+export interface RuntimeFeishuSettings {
+  configured: boolean;
+  webhookPreview: string | null;
+}
+
+export interface RuntimeReadonlySettings {
+  redisConfigured: boolean;
+  redisUrlPreview: string | null;
+  serviceEnv: string;
+  serviceHost: string;
+  servicePort: number;
+  sourceMode: string;
+  sqlitePath: string;
+  xBrowserBaseUrl: string;
+  xBrowserHeadless: boolean;
+  xBrowserUserDataDir: string;
+}
+
+export interface RuntimeSettingsSummary {
+  feishu: RuntimeFeishuSettings;
+  polling: RuntimePollingSettings;
+  readonly: RuntimeReadonlySettings;
+}
+
+export interface UpdatePollingSettingsInput {
+  excludeReplies: boolean;
+  excludeReposts: boolean;
+  fetchLimitPerAccount: number;
+  intervalSeconds: number;
+}
+
+export interface FeishuTestResult {
+  ok: true;
+  providerCode: number;
+  providerMessage?: string;
+  targetKey: string;
+}
+
 export async function getSummary(): Promise<AdminSummary> {
   return requestJson<AdminSummary>('/admin/api/summary');
+}
+
+export async function getSettings(): Promise<RuntimeSettingsSummary> {
+  return requestJson<RuntimeSettingsSummary>('/admin/api/settings');
+}
+
+export async function updatePollingSettings(
+  input: UpdatePollingSettingsInput,
+): Promise<RuntimePollingSettings> {
+  return requestJson<RuntimePollingSettings>('/admin/api/settings/polling', {
+    body: JSON.stringify(input),
+    method: 'PUT',
+  });
+}
+
+export async function updateFeishuSettings(webhookUrl: string): Promise<RuntimeFeishuSettings> {
+  return requestJson<RuntimeFeishuSettings>('/admin/api/settings/feishu', {
+    body: JSON.stringify({ webhookUrl }),
+    method: 'PUT',
+  });
+}
+
+export async function testFeishuSettings(): Promise<FeishuTestResult> {
+  return requestJson<FeishuTestResult>('/admin/api/settings/feishu/test', { method: 'POST' });
 }
 
 export async function listWatchAccounts(): Promise<{ watchAccounts: WatchAccount[] }> {

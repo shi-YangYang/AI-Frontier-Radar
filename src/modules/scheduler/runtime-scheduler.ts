@@ -17,8 +17,13 @@ export interface RuntimeSchedulerOptions {
   deliveryIntervalMs?: number;
   logger: AppLogger;
   pollingIntervalMs?: number;
+  runtimeSettings?: RuntimeSettingsProvider;
   sourceProvider?: SourceProvider;
   storage: StorageContext;
+}
+
+export interface RuntimeSettingsProvider {
+  getEffectiveAppConfig(): Promise<AppConfig>;
 }
 
 export interface RuntimeSchedulerRunNowResult {
@@ -33,6 +38,7 @@ export interface RuntimeScheduler {
   runPollingNow(options?: { trigger?: string }): Promise<RuntimeSchedulerRunNowResult>;
   start(): void;
   stop(): Promise<void>;
+  updatePollingSchedule(intervalSeconds: number): void;
 }
 
 const DEFAULT_DELIVERY_INTERVAL_MS = 30_000;
@@ -65,11 +71,11 @@ export function createRuntimeSourceProvider(config: AppConfig): SourceProvider {
 class IntervalRuntimeScheduler implements RuntimeScheduler {
   private readonly deliveryIntervalMs: number;
   private readonly logger: AppLogger;
-  private readonly pollingIntervalMs: number;
   private readonly sourceProvider: SourceProvider;
   private deliveryInterval: TimerHandle | null = null;
   private deliveryRunPromise: Promise<RuntimeSchedulerRunNowResult> | null = null;
   private pollingInterval: TimerHandle | null = null;
+  private pollingIntervalMs: number;
   private pollingRunPromise: Promise<RuntimeSchedulerRunNowResult> | null = null;
   private started = false;
 
@@ -110,6 +116,41 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
         trigger: 'interval',
       });
     }, this.deliveryIntervalMs);
+  }
+
+  public updatePollingSchedule(intervalSeconds: number): void {
+    const nextPollingIntervalMs = intervalSeconds * 1_000;
+
+    if (!Number.isSafeInteger(nextPollingIntervalMs) || nextPollingIntervalMs <= 0) {
+      throw new Error('Polling interval must be a positive integer number of milliseconds.');
+    }
+
+    this.pollingIntervalMs = nextPollingIntervalMs;
+
+    if (!this.started) {
+      this.logger.info(
+        {
+          pollingIntervalMs: this.pollingIntervalMs,
+        },
+        'runtime scheduler polling interval updated before start',
+      );
+      return;
+    }
+
+    if (this.pollingInterval !== null) {
+      clearInterval(this.pollingInterval);
+    }
+
+    this.pollingInterval = setInterval(() => {
+      void this.runPollingNow({ trigger: 'interval' });
+    }, this.pollingIntervalMs);
+
+    this.logger.info(
+      {
+        pollingIntervalMs: this.pollingIntervalMs,
+      },
+      'runtime scheduler polling interval updated',
+    );
   }
 
   public async stop(): Promise<void> {
@@ -203,8 +244,12 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
     );
 
     try {
+      const config =
+        this.options.runtimeSettings === undefined
+          ? this.options.config
+          : await this.options.runtimeSettings.getEffectiveAppConfig();
       const result = await runPollingJob({
-        config: this.options.config,
+        config,
         logger: this.options.logger,
         sourceProvider: this.sourceProvider,
         storage: this.options.storage,

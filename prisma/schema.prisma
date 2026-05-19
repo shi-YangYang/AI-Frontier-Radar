@@ -59,6 +59,16 @@ model DeliveryTarget {
   @@map("delivery_targets")
 }
 
+model AppSetting {
+  id         String @id
+  settingKey String @unique @map("setting_key")
+  valueJson  String @map("value_json")
+  createdAt  String @map("created_at")
+  updatedAt  String @map("updated_at")
+
+  @@map("app_settings")
+}
+
 model DeliveryEvent {
   id             String         @id
   xPostId        String         @map("x_post_id")

@@ -101,6 +101,24 @@ export interface UpdateDeliveryTargetInput {
   enabled?: boolean;
 }
 
+export interface AppSetting {
+  id: string;
+  settingKey: string;
+  valueJson: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateAppSettingInput {
+  id?: string;
+  settingKey: string;
+  valueJson: string;
+}
+
+export interface UpdateAppSettingInput {
+  valueJson?: string;
+}
+
 export interface DeliveryEvent {
   id: string;
   xPostId: string;

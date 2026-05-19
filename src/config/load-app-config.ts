@@ -52,10 +52,7 @@ export async function loadAppConfig(options: LoadAppConfigOption = {}): Promise<
     defaultValue: DEFAULT_REDIS_URL,
     protocols: ['redis:', 'rediss:'],
   });
-  const feishuWebhookUrl = reader.readUrl('FEISHU_WEBHOOK_URL', {
-    protocols: ['https:'],
-    required: true,
-  });
+  const feishuWebhookUrl = readOptionalUrl(reader, 'FEISHU_WEBHOOK_URL', ['https:']);
   const sourceMode = reader.readEnum('X_SOURCE_MODE', ['api', 'browser'] as const, {
     defaultValue: 'browser',
   });
@@ -175,4 +172,28 @@ export async function loadAppConfig(options: LoadAppConfigOption = {}): Promise<
     },
     watchAccounts,
   };
+}
+
+function readOptionalUrl(reader: EnvReader, name: string, protocols: readonly string[]): string {
+  const rawValue = reader.readString(name, {
+    allowEmpty: true,
+    defaultValue: '',
+  });
+
+  if (rawValue.length === 0) {
+    return '';
+  }
+
+  try {
+    const parsedUrl = new URL(rawValue);
+
+    if (!protocols.includes(parsedUrl.protocol)) {
+      reader.addIssue(`${name} must use one of these protocols: ${protocols.join(', ')}.`);
+    }
+
+    return parsedUrl.toString();
+  } catch {
+    reader.addIssue(`${name} must be a valid URL.`);
+    return '';
+  }
 }

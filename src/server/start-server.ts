@@ -3,7 +3,7 @@ import type { AppConfig } from '../shared/config/types';
 import { createApp } from '../app/create-app';
 import type { AppLogger } from '../lib/logger';
 import { createRuntimeScheduler } from '../modules/scheduler';
-import { createStorageFromConfig } from '../modules/storage';
+import { createRuntimeSettingsService, createStorageFromConfig } from '../modules/storage';
 
 export interface StartServerOptions {
   config: AppConfig;
@@ -12,18 +12,25 @@ export interface StartServerOptions {
 
 export async function startServer(options: StartServerOptions): Promise<void> {
   const storage = createStorageFromConfig(options.config);
+  const runtimeSettings = createRuntimeSettingsService({
+    config: options.config,
+    storage,
+  });
   const scheduler = createRuntimeScheduler({
     config: options.config,
     logger: options.logger,
+    runtimeSettings,
     storage,
   });
   const app = createApp({
     adminActions: {
       runDeliveryWorkerNow: (runOptions) => scheduler.runDeliveryWorkerNow(runOptions),
       runPollingNow: (runOptions) => scheduler.runPollingNow(runOptions),
+      updatePollingSchedule: (intervalSeconds) => scheduler.updatePollingSchedule(intervalSeconds),
     },
     config: options.config,
     logger: options.logger,
+    runtimeSettings,
     storage,
   });
   let closing = false;

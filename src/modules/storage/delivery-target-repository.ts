@@ -49,6 +49,28 @@ export class DeliveryTargetRepository {
     });
   }
 
+  public async createDefaultTargetIfWebhookConfigured(
+    input: DefaultDeliveryTargetInput,
+  ): Promise<DeliveryTarget | null> {
+    const existingTarget = await this.findByTargetKey(input.targetKey);
+
+    if (existingTarget !== null) {
+      return existingTarget;
+    }
+
+    if (input.webhookUrl.trim().length === 0) {
+      return null;
+    }
+
+    return this.create({
+      channelType: DEFAULT_CHANNEL_TYPE,
+      displayName: input.displayName ?? `Feishu Webhook (${input.targetKey})`,
+      enabled: true,
+      targetKey: input.targetKey,
+      webhookUrl: input.webhookUrl,
+    });
+  }
+
   public async findById(id: string): Promise<DeliveryTarget | null> {
     const deliveryTarget = await this.prisma.deliveryTarget.findUnique({
       where: { id },

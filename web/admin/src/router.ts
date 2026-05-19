@@ -4,6 +4,7 @@ import AccountsPage from './pages/AccountsPage.vue';
 import DeliveryEventsPage from './pages/DeliveryEventsPage.vue';
 import OverviewPage from './pages/OverviewPage.vue';
 import PollRunsPage from './pages/PollRunsPage.vue';
+import SettingsPage from './pages/SettingsPage.vue';
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -23,6 +24,10 @@ export const router = createRouter({
     {
       component: DeliveryEventsPage,
       path: '/delivery-events',
+    },
+    {
+      component: SettingsPage,
+      path: '/settings',
     },
   ],
 });

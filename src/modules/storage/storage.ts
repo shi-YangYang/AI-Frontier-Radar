@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 
 import type { AppConfig } from '../../shared/config/types';
+import { AppSettingRepository } from './app-setting-repository';
 import { DeliveryEventRepository } from './delivery-event-repository';
 import { DeliveryTargetRepository } from './delivery-target-repository';
 import { PollRunRepository } from './poll-run-repository';
@@ -13,6 +14,7 @@ import { syncWatchAccountSeeds, type WatchAccountSeedSyncResult } from './watch-
 import { XPostRepository } from './x-post-repository';
 
 export interface StorageContext {
+  appSettings: AppSettingRepository;
   close(): Promise<void>;
   deliveryEvents: DeliveryEventRepository;
   deliveryTargets: DeliveryTargetRepository;
@@ -30,6 +32,7 @@ export interface CreateStorageOptions {
 }
 
 class PrismaStorageContext implements StorageContext {
+  public readonly appSettings: AppSettingRepository;
   public readonly deliveryEvents: DeliveryEventRepository;
   public readonly deliveryTargets: DeliveryTargetRepository;
   public readonly pollRuns: PollRunRepository;
@@ -41,6 +44,7 @@ class PrismaStorageContext implements StorageContext {
 
   public constructor(private readonly options: CreateStorageOptions) {
     this.prisma = createPrismaClient(options.databaseUrl);
+    this.appSettings = new AppSettingRepository(this.prisma);
     this.watchAccounts = new WatchAccountRepository(this.prisma);
     this.xPosts = new XPostRepository(this.prisma);
     this.deliveryTargets = new DeliveryTargetRepository(this.prisma);
@@ -69,7 +73,9 @@ class PrismaStorageContext implements StorageContext {
     await this.prisma.$connect();
 
     if (this.options.defaultDeliveryTarget !== undefined) {
-      await this.deliveryTargets.ensureDefaultTarget(this.options.defaultDeliveryTarget);
+      await this.deliveryTargets.createDefaultTargetIfWebhookConfigured(
+        this.options.defaultDeliveryTarget,
+      );
     }
 
     if (this.options.watchAccountsSource !== undefined) {

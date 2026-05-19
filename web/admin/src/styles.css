@@ -81,6 +81,14 @@ input {
   padding: 0 11px;
 }
 
+input[type="checkbox"] {
+  min-width: 18px;
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+}
+
 code {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
@@ -278,6 +286,12 @@ tr:last-child td {
   gap: 16px;
 }
 
+.settings-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
 .panel {
   overflow: hidden;
 }
@@ -322,6 +336,85 @@ tr:last-child td {
 .detail-list dd {
   margin: 0;
   min-width: 0;
+}
+
+.compact-detail-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.compact-detail-list div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 12px;
+  border-bottom: 1px solid #eef2f7;
+  padding: 10px 0;
+}
+
+.compact-detail-list div:last-child {
+  border-bottom: 0;
+}
+
+.compact-detail-list dt {
+  color: var(--muted);
+}
+
+.compact-detail-list dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.settings-form {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.settings-form.inner-form {
+  padding: 0;
+}
+
+.settings-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--text);
+  font-weight: 650;
+}
+
+.settings-form small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.settings-form input:not([type="checkbox"]) {
+  width: 100%;
+}
+
+.checkbox-row {
+  grid-template-columns: 18px minmax(0, auto) minmax(0, 1fr);
+  align-items: center;
+}
+
+.checkbox-row small {
+  justify-self: end;
+  text-align: right;
+}
+
+.form-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.settings-wide {
+  grid-column: 1 / -1;
+}
+
+.empty-panel {
+  color: var(--muted);
+  padding: 18px;
 }
 
 .entry-grid {
@@ -508,6 +601,10 @@ tr:last-child td {
   .panel-grid {
     grid-template-columns: 1fr;
   }
+
+  .settings-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 680px) {
@@ -548,9 +645,27 @@ tr:last-child td {
     width: 100%;
   }
 
+  input[type="checkbox"] {
+    width: 18px;
+  }
+
   .detail-list div {
     grid-template-columns: 1fr;
     gap: 4px;
+  }
+
+  .compact-detail-list div,
+  .checkbox-row {
+    grid-template-columns: 1fr;
+  }
+
+  .checkbox-row input {
+    justify-self: start;
+  }
+
+  .checkbox-row small {
+    justify-self: start;
+    text-align: left;
   }
 
   .pagination {

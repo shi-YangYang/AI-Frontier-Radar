@@ -4,12 +4,17 @@ import type { AppConfig } from '../shared/config/types';
 import type { AppLogger } from '../lib/logger';
 import type { AdminActions } from '../modules/api/controllers/admin-controller';
 import { registerApiRoutes } from '../modules/api';
-import { createStorageFromConfig, type StorageContext } from '../modules/storage';
+import {
+  createStorageFromConfig,
+  type RuntimeSettingsService,
+  type StorageContext,
+} from '../modules/storage';
 
 export interface CreateAppOptions {
   adminActions?: AdminActions;
   config: AppConfig;
   logger: AppLogger;
+  runtimeSettings?: RuntimeSettingsService;
   storage?: StorageContext;
 }
 
@@ -30,6 +35,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   registerApiRoutes(app, {
     adminActions: options.adminActions,
     config: options.config,
+    runtimeSettings: options.runtimeSettings,
     storage,
   });
 

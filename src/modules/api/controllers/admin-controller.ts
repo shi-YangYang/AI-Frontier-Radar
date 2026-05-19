@@ -1,21 +1,37 @@
 import type { AppConfig } from '../../../shared/config/types';
+import { createFeishuWebhookClient, type FeishuWebhookFailureResult } from '../../delivery';
 import type { RuntimeSchedulerRunNowResult } from '../../scheduler';
-import type { DeliveryEvent, PollRun, StorageContext, WatchAccount } from '../../storage';
+import {
+  createRuntimeSettingsService,
+  previewSecretUrl,
+  type DeliveryEvent,
+  type PollRun,
+  type RuntimeFeishuSettings,
+  type RuntimePollingSettings,
+  type RuntimeSettingsService,
+  type RuntimeSettingsSummary,
+  type SavePollingSettingsInput,
+  type StorageContext,
+  type WatchAccount,
+} from '../../storage';
 import { normalizeXUsername } from '../../storage/watch-account-repository';
 
 export interface AdminActions {
   runDeliveryWorkerNow?(options?: { recoverStartupState?: boolean; trigger?: string }): Promise<RuntimeSchedulerRunNowResult>;
   runPollingNow?(options?: { trigger?: string }): Promise<RuntimeSchedulerRunNowResult>;
+  updatePollingSchedule?(intervalSeconds: number): void | Promise<void>;
 }
 
 export interface AdminControllerOptions {
   actions?: AdminActions;
   config: AppConfig;
+  runtimeSettings?: RuntimeSettingsService;
   storage: StorageContext;
 }
 
 export interface AdminApiErrorPayload {
   code: string;
+  details?: Record<string, unknown>;
   message: string;
 }
 
@@ -38,11 +54,18 @@ const MAX_ADMIN_PAGE_SIZE = 100;
 
 export class AdminApiError extends Error {
   public readonly code: string;
+  public readonly details?: Record<string, unknown>;
   public readonly statusCode: number;
 
-  public constructor(statusCode: number, code: string, message: string) {
+  public constructor(
+    statusCode: number,
+    code: string,
+    message: string,
+    details?: Record<string, unknown>,
+  ) {
     super(message);
     this.code = code;
+    this.details = details;
     this.statusCode = statusCode;
   }
 }
@@ -50,10 +73,11 @@ export class AdminApiError extends Error {
 export async function getAdminSummary(
   options: AdminControllerOptions,
 ): Promise<{ ok: true; data: AdminSummary }> {
-  const [watchAccounts, recentPollRuns, deliveryEventStatusCounts] = await Promise.all([
+  const [watchAccounts, recentPollRuns, deliveryEventStatusCounts, feishuSettings] = await Promise.all([
     options.storage.watchAccounts.listAll(),
     options.storage.pollRuns.listRecent(1),
     options.storage.deliveryEvents.countByStatus(),
+    resolveRuntimeSettings(options).getFeishuSettings(),
   ]);
 
   return {
@@ -61,7 +85,7 @@ export async function getAdminSummary(
     data: {
       deliveryEventStatusCounts,
       enabledWatchAccountsCount: watchAccounts.filter((account) => account.enabled).length,
-      feishuWebhookConfigured: options.config.delivery.feishu.webhookUrl.trim().length > 0,
+      feishuWebhookConfigured: feishuSettings.configured,
       latestPollRun: recentPollRuns[0] ?? null,
       service: {
         env: options.config.service.env,
@@ -236,6 +260,92 @@ export async function runAdminDeliveryNow(
   };
 }
 
+export async function getAdminSettings(
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: RuntimeSettingsSummary }> {
+  const runtimeSettings = resolveRuntimeSettings(options);
+  const settings = await runtimeSettings.getSettingsSummary();
+
+  return {
+    ok: true,
+    data: settings,
+  };
+}
+
+export async function updateAdminPollingSettings(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: RuntimePollingSettings }> {
+  const input = readPollingSettingsBody(body);
+  const runtimeSettings = resolveRuntimeSettings(options);
+  const polling = await runtimeSettings.savePollingSettings(input);
+
+  if (options.actions?.updatePollingSchedule !== undefined) {
+    await options.actions.updatePollingSchedule(polling.intervalSeconds);
+  }
+
+  return {
+    ok: true,
+    data: polling,
+  };
+}
+
+export async function updateAdminFeishuSettings(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: RuntimeFeishuSettings }> {
+  const webhookUrl = readFeishuWebhookUrl(body);
+  const runtimeSettings = resolveRuntimeSettings(options);
+  const feishu = await runtimeSettings.saveFeishuWebhook(webhookUrl);
+
+  return {
+    ok: true,
+    data: feishu,
+  };
+}
+
+export async function testAdminFeishuSettings(
+  options: AdminControllerOptions,
+): Promise<{
+  ok: true;
+  data: {
+    ok: true;
+    providerCode: number;
+    providerMessage?: string;
+    targetKey: string;
+  };
+}> {
+  const runtimeSettings = resolveRuntimeSettings(options);
+  const target = await options.storage.deliveryTargets.findByTargetKey(
+    runtimeSettings.getDefaultTargetKey(),
+  );
+  const webhookUrl = target?.webhookUrl.trim() ?? '';
+
+  if (target === null || webhookUrl.length === 0) {
+    throw new AdminApiError(409, 'FEISHU_WEBHOOK_NOT_CONFIGURED', '飞书 webhook 尚未配置。');
+  }
+
+  const result = await createFeishuWebhookClient().sendTextMessage({
+    targetKey: target.targetKey,
+    text: 'AI 前沿消息本地配置测试：如果你看到这条消息，说明飞书机器人 webhook 可用。',
+    webhookUrl,
+  });
+
+  if (!result.ok) {
+    throw toFeishuTestSendError(result, webhookUrl);
+  }
+
+  return {
+    ok: true,
+    data: {
+      ok: true,
+      providerCode: result.providerCode,
+      ...(result.providerMessage === undefined ? {} : { providerMessage: result.providerMessage }),
+      targetKey: result.targetKey,
+    },
+  };
+}
+
 export function toAdminApiErrorPayload(error: unknown): {
   payload: { ok: false; error: AdminApiErrorPayload };
   statusCode: number;
@@ -246,6 +356,7 @@ export function toAdminApiErrorPayload(error: unknown): {
         ok: false,
         error: {
           code: error.code,
+          ...(error.details === undefined ? {} : { details: error.details }),
           message: error.message,
         },
       },
@@ -428,6 +539,151 @@ function toPagination(input: AdminPaginationInput, total: number): AdminPaginati
     total,
     totalPages: total === 0 ? 0 : Math.ceil(total / input.pageSize),
   };
+}
+
+function resolveRuntimeSettings(options: AdminControllerOptions): RuntimeSettingsService {
+  return options.runtimeSettings ?? createRuntimeSettingsService({
+    config: options.config,
+    storage: options.storage,
+  });
+}
+
+function readPollingSettingsBody(body: unknown): SavePollingSettingsInput {
+  if (!isRecord(body)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
+  }
+
+  return {
+    excludeReplies: readRequiredBooleanBodyValue(body.excludeReplies, 'excludeReplies'),
+    excludeReposts: readRequiredBooleanBodyValue(body.excludeReposts, 'excludeReposts'),
+    fetchLimitPerAccount: readRequiredIntegerBodyValue(
+      body.fetchLimitPerAccount,
+      'fetchLimitPerAccount',
+      1,
+      100,
+    ),
+    intervalSeconds: readRequiredIntegerBodyValue(body.intervalSeconds, 'intervalSeconds', 10, 3600),
+  };
+}
+
+function readRequiredBooleanBodyValue(value: unknown, fieldName: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', fieldName + ' 必须是 boolean。');
+  }
+
+  return value;
+}
+
+function readRequiredIntegerBodyValue(
+  value: unknown,
+  fieldName: string,
+  min: number,
+  max: number,
+): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', fieldName + ' 必须是整数。');
+  }
+
+  if (value < min || value > max) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', `${fieldName} 必须在 ${min}-${max} 之间。`);
+  }
+
+  return value;
+}
+
+function readFeishuWebhookUrl(body: unknown): string {
+  if (!isRecord(body)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
+  }
+
+  if (typeof body.webhookUrl !== 'string') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'webhookUrl 必须是字符串。');
+  }
+
+  const webhookUrl = body.webhookUrl.trim();
+
+  if (webhookUrl.length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'webhookUrl 不能为空。');
+  }
+
+  try {
+    const parsedUrl = new URL(webhookUrl);
+
+    if (parsedUrl.protocol !== 'https:') {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'webhookUrl 必须使用 https。');
+    }
+
+    return parsedUrl.toString();
+  } catch (error) {
+    if (error instanceof AdminApiError) {
+      throw error;
+    }
+
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'webhookUrl 必须是有效 URL。');
+  }
+}
+
+function toFeishuTestSendError(
+  result: FeishuWebhookFailureResult,
+  webhookUrl: string,
+): AdminApiError {
+  const diagnostics = result.error.diagnostics;
+  const details: Record<string, unknown> = {
+    endpoint: diagnostics.endpoint,
+    retryable: result.error.retryable,
+  };
+
+  if (diagnostics.httpStatusCode !== undefined) {
+    details.httpStatusCode = diagnostics.httpStatusCode;
+  }
+  if (diagnostics.providerCode !== undefined) {
+    details.providerCode = diagnostics.providerCode;
+  }
+  if (diagnostics.providerMessage !== undefined) {
+    details.providerMessage = redactWebhookFromText(diagnostics.providerMessage, webhookUrl);
+  }
+  if (diagnostics.causeMessage !== undefined) {
+    details.causeMessage = redactWebhookFromText(diagnostics.causeMessage, webhookUrl);
+  }
+  if (diagnostics.responseBodySnippet !== undefined) {
+    details.responseBodySnippet = redactWebhookFromText(
+      diagnostics.responseBodySnippet,
+      webhookUrl,
+    );
+  }
+
+  return new AdminApiError(
+    502,
+    result.error.code,
+    '飞书 webhook 测试发送失败。',
+    details,
+  );
+}
+
+function redactWebhookFromText(value: string, webhookUrl: string): string {
+  const preview = previewSecretUrl(webhookUrl);
+  const variants = new Set<string>([
+    webhookUrl,
+    webhookUrl.replace(/\/+$/u, ''),
+  ]);
+
+  try {
+    const normalizedWebhookUrl = new URL(webhookUrl).toString();
+    variants.add(normalizedWebhookUrl);
+    variants.add(normalizedWebhookUrl.replace(/\/+$/u, ''));
+  } catch {
+    // Invalid URLs are rejected before test sends; keep this defensive.
+  }
+
+  let redactedValue = value;
+
+  for (const variant of variants) {
+    if (variant.length > 0) {
+      redactedValue = redactedValue.split(variant).join(preview);
+    }
+  }
+
+  return redactedValue;
 }
 
 function readUsername(body: unknown): string {

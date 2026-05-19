@@ -12,20 +12,25 @@ import {
   deleteAdminDeliveryEvent,
   deleteAdminPollRun,
   deleteAdminWatchAccount,
+  getAdminSettings,
   getAdminSummary,
   listAdminDeliveryEvents,
   listAdminPollRuns,
   listAdminWatchAccounts,
   runAdminDeliveryNow,
   runAdminPollingNow,
+  testAdminFeishuSettings,
   toAdminApiErrorPayload,
+  updateAdminFeishuSettings,
+  updateAdminPollingSettings,
 } from '../controllers/admin-controller';
 import { adminJsonResponseSchema } from '../schemas/admin';
-import type { StorageContext } from '../../storage';
+import type { RuntimeSettingsService, StorageContext } from '../../storage';
 
 interface RegisterAdminRoutesOptions {
   actions?: AdminActions;
   config: AppConfig;
+  runtimeSettings?: RuntimeSettingsService;
   storage: StorageContext;
 }
 
@@ -62,9 +67,51 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     });
   }
 
-  for (const pageRoute of ['/', '/accounts', '/poll-runs', '/delivery-events']) {
+  for (const pageRoute of ['/', '/accounts', '/poll-runs', '/delivery-events', '/settings']) {
     app.get(pageRoute, async (_, reply) => sendAdminIndexHtml(reply, adminIndexHtmlPath));
   }
+
+  app.get(
+    '/admin/api/settings',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => getAdminSettings(options)),
+  );
+
+  app.put(
+    '/admin/api/settings/polling',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => updateAdminPollingSettings(request.body, options)),
+  );
+
+  app.put(
+    '/admin/api/settings/feishu',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => updateAdminFeishuSettings(request.body, options)),
+  );
+
+  app.post(
+    '/admin/api/settings/feishu/test',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => testAdminFeishuSettings(options)),
+  );
 
   app.get(
     '/admin/api/summary',
@@ -201,6 +248,8 @@ function isProtectedAdminPath(url: string): boolean {
     url.startsWith('/poll-runs?') ||
     url === '/delivery-events' ||
     url.startsWith('/delivery-events?') ||
+    url === '/settings' ||
+    url.startsWith('/settings?') ||
     url === '/admin' ||
     url.startsWith('/admin?') ||
     url.startsWith('/admin/') ||
