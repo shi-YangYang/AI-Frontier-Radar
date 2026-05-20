@@ -35,6 +35,18 @@ export class PollRunRepository {
     return result.count > 0;
   }
 
+  public async deleteManyByIds(ids: string[]): Promise<number> {
+    const result = await this.prisma.pollRun.deleteMany({
+      where: {
+        id: {
+          in: ids,
+        },
+      },
+    });
+
+    return result.count;
+  }
+
   public async findById(id: string): Promise<PollRun | null> {
     const pollRun = await this.prisma.pollRun.findUnique({
       where: { id },

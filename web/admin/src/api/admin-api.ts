@@ -88,6 +88,11 @@ export interface PageQuery {
   to: string;
 }
 
+export interface DeliveryTargetPageQuery {
+  page: number;
+  pageSize: number;
+}
+
 export interface RunNowResult {
   job: string;
   status: string;
@@ -157,6 +162,11 @@ export interface DeliveryTarget {
   webhookPreview: string;
 }
 
+export interface DeliveryTargetSummary {
+  enabled: number;
+  total: number;
+}
+
 export interface CreateDeliveryTargetInput {
   displayName: string;
   enabled: boolean;
@@ -179,6 +189,10 @@ export interface DeliveryTargetTestResult {
 export interface DeleteDeliveryTargetResult {
   deadEventsCount: number;
   deleted: true;
+}
+
+export interface BatchDeleteResult {
+  deletedCount: number;
 }
 
 export async function getSummary(): Promise<AdminSummary> {
@@ -209,9 +223,17 @@ export async function testFeishuSettings(): Promise<FeishuTestResult> {
   return requestJson<FeishuTestResult>('/admin/api/settings/feishu/test', { method: 'POST' });
 }
 
-export async function listDeliveryTargets(): Promise<{ deliveryTargets: DeliveryTarget[] }> {
-  return requestJson<{ deliveryTargets: DeliveryTarget[] }>(
-    '/admin/api/settings/delivery-targets',
+export async function listDeliveryTargets(query: DeliveryTargetPageQuery): Promise<{
+  deliveryTargets: DeliveryTarget[];
+  pagination: AdminPagination;
+  summary: DeliveryTargetSummary;
+}> {
+  return requestJson<{
+    deliveryTargets: DeliveryTarget[];
+    pagination: AdminPagination;
+    summary: DeliveryTargetSummary;
+  }>(
+    '/admin/api/settings/delivery-targets?' + toDeliveryTargetPageQuery(query),
   );
 }
 
@@ -296,6 +318,13 @@ export async function deletePollRun(id: string): Promise<{ deleted: true }> {
   });
 }
 
+export async function batchDeletePollRuns(ids: string[]): Promise<BatchDeleteResult> {
+  return requestJson<BatchDeleteResult>('/admin/api/poll-runs/batch-delete', {
+    body: JSON.stringify({ ids }),
+    method: 'POST',
+  });
+}
+
 export async function listDeliveryEvents(query: PageQuery): Promise<{
   deliveryEvents: DeliveryEvent[];
   pagination: AdminPagination;
@@ -308,6 +337,13 @@ export async function listDeliveryEvents(query: PageQuery): Promise<{
 export async function deleteDeliveryEvent(id: string): Promise<{ deleted: true }> {
   return requestJson<{ deleted: true }>('/admin/api/delivery-events/' + encodeURIComponent(id), {
     method: 'DELETE',
+  });
+}
+
+export async function batchDeleteDeliveryEvents(ids: string[]): Promise<BatchDeleteResult> {
+  return requestJson<BatchDeleteResult>('/admin/api/delivery-events/batch-delete', {
+    body: JSON.stringify({ ids }),
+    method: 'POST',
   });
 }
 
@@ -355,6 +391,13 @@ function toPageQuery(query: PageQuery): string {
     params.set('to', to);
   }
 
+  return params.toString();
+}
+
+function toDeliveryTargetPageQuery(query: DeliveryTargetPageQuery): string {
+  const params = new URLSearchParams();
+  params.set('page', String(query.page));
+  params.set('pageSize', String(query.pageSize));
   return params.toString();
 }
 

@@ -564,6 +564,22 @@ tr:last-child td {
   overflow-x: auto;
 }
 
+.bulk-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  padding: 12px 14px;
+  flex-wrap: wrap;
+}
+
+.select-cell {
+  width: 46px;
+  text-align: center;
+}
+
 .empty-cell {
   color: var(--muted);
   text-align: center;

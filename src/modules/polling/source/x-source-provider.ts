@@ -3,6 +3,7 @@ import type {
   SourceProviderAccount,
   SourceProviderFetchInput,
   SourceProviderFetchResult,
+  SourceProviderValidateAccountInput,
   StandardizedPost,
 } from '../types';
 import type { XApiTimelineResponse, XApiTweet } from '../types/x-api';
@@ -51,6 +52,22 @@ export class XSourceProvider implements SourceProvider {
       posts,
     };
   }
+
+  public async validateAccount(
+    input: SourceProviderValidateAccountInput,
+  ): Promise<SourceProviderAccount> {
+    validateAccountInput(input);
+
+    const account = await this.timelineClient.resolveAccount({
+      xUsername: input.xUsername,
+    });
+
+    return {
+      displayName: account.displayName,
+      xUserId: account.xUserId,
+      xUsername: account.xUsername,
+    };
+  }
 }
 
 export function createXSourceProvider(options: XSourceProviderOptions): SourceProvider {
@@ -83,6 +100,20 @@ function validateFetchInput(input: SourceProviderFetchInput): void {
         provider: 'x',
         sincePostId: input.sincePostId,
         xUserId: input.xUserId,
+        xUsername: input.xUsername,
+      },
+    );
+  }
+}
+
+function validateAccountInput(input: SourceProviderValidateAccountInput): void {
+  if (!isPresent(input.xUsername)) {
+    throw new SourceProviderError(
+      'SOURCE_INVALID_INPUT',
+      'SourceProvider requires xUsername.',
+      {
+        operation: 'resolve-account',
+        provider: 'x',
         xUsername: input.xUsername,
       },
     );

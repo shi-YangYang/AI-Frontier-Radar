@@ -5,6 +5,10 @@ export interface SourceProviderFetchInput {
   xUsername?: string;
 }
 
+export interface SourceProviderValidateAccountInput {
+  xUsername: string;
+}
+
 export interface SourceProviderAccount {
   displayName?: string;
   xUserId: string;
@@ -39,6 +43,7 @@ export interface SourceProviderFetchResult {
 
 export interface SourceProvider {
   fetchPosts(input: SourceProviderFetchInput): Promise<SourceProviderFetchResult>;
+  validateAccount(input: SourceProviderValidateAccountInput): Promise<SourceProviderAccount>;
 }
 
 export type SourceProviderErrorCode =

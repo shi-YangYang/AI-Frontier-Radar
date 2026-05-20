@@ -8,6 +8,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AppConfig } from '../../../shared/config/types';
 import type { AdminActions } from '../controllers/admin-controller';
 import {
+  batchDeleteAdminDeliveryEvents,
+  batchDeleteAdminPollRuns,
   createAdminDeliveryTarget,
   createAdminWatchAccount,
   deleteAdminDeliveryTarget,
@@ -126,7 +128,8 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
         response: adminJsonResponseSchema,
       },
     },
-    async (_, reply) => sendAdminResponse(reply, () => listAdminDeliveryTargets(options)),
+    async (request, reply) =>
+      sendAdminResponse(reply, () => listAdminDeliveryTargets(request.query, options)),
   );
 
   app.post(
@@ -239,6 +242,17 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     async (request, reply) => sendAdminResponse(reply, () => listAdminPollRuns(request.query, options)),
   );
 
+  app.post(
+    '/admin/api/poll-runs/batch-delete',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => batchDeleteAdminPollRuns(request.body, options)),
+  );
+
   app.delete(
     '/admin/api/poll-runs/:id',
     {
@@ -257,6 +271,17 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
       },
     },
     async (request, reply) => sendAdminResponse(reply, () => listAdminDeliveryEvents(request.query, options)),
+  );
+
+  app.post(
+    '/admin/api/delivery-events/batch-delete',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => batchDeleteAdminDeliveryEvents(request.body, options)),
   );
 
   app.delete(

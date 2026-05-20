@@ -5,6 +5,7 @@ import type {
   SourceProviderAccount,
   SourceProviderFetchInput,
   SourceProviderFetchResult,
+  SourceProviderValidateAccountInput,
   StandardizedPost,
 } from '../types';
 import { SourceProviderError } from './source-provider-error';
@@ -49,6 +50,7 @@ export class BrowserXSourceProvider implements SourceProvider {
   private readonly navigationTimeoutMs: number;
   private readonly postLoadTimeoutMs: number;
   private readonly userDataDir: string;
+  private browserOperationQueue: Promise<void> = Promise.resolve();
 
   public constructor(options: BrowserXSourceProviderOptions = {}) {
     this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
@@ -60,6 +62,19 @@ export class BrowserXSourceProvider implements SourceProvider {
 
   public async fetchPosts(input: SourceProviderFetchInput): Promise<SourceProviderFetchResult> {
     validateBrowserFetchInput(input);
+
+    return this.runBrowserOperation(() => this.fetchPostsExclusive(input));
+  }
+
+  public async validateAccount(
+    input: SourceProviderValidateAccountInput,
+  ): Promise<SourceProviderAccount> {
+    return this.runBrowserOperation(() => this.validateAccountExclusive(input));
+  }
+
+  private async fetchPostsExclusive(
+    input: SourceProviderFetchInput,
+  ): Promise<SourceProviderFetchResult> {
 
     const xUsername = normalizeUsername(input.xUsername);
     if (xUsername === undefined) {
@@ -82,8 +97,9 @@ export class BrowserXSourceProvider implements SourceProvider {
         timeout: this.navigationTimeoutMs,
         waitUntil: 'domcontentloaded',
       });
-      await waitForTimelineOrKnownFailure(page, {
+      await waitForProfileOrKnownFailure(page, {
         input,
+        operation: 'fetch-timeline',
         postLoadTimeoutMs: this.postLoadTimeoutMs,
         profileUrl,
         xUsername,
@@ -121,6 +137,75 @@ export class BrowserXSourceProvider implements SourceProvider {
       );
     } finally {
       await context?.close();
+    }
+  }
+
+  private async validateAccountExclusive(
+    input: SourceProviderValidateAccountInput,
+  ): Promise<SourceProviderAccount> {
+    const xUsername = normalizeUsername(input.xUsername);
+    if (xUsername === undefined) {
+      throw new SourceProviderError(
+        'SOURCE_INVALID_INPUT',
+        'BrowserXSourceProvider requires xUsername.',
+        buildDiagnostics(input, 'resolve-account'),
+      );
+    }
+
+    let context: BrowserContext | undefined;
+    try {
+      context = await chromium.launchPersistentContext(this.userDataDir, {
+        headless: this.headless,
+      });
+      const page = context.pages()[0] ?? (await context.newPage());
+      const profileUrl = `${this.baseUrl.replace(/\/$/u, '')}/${encodeURIComponent(xUsername)}`;
+
+      await page.goto(profileUrl, {
+        timeout: this.navigationTimeoutMs,
+        waitUntil: 'domcontentloaded',
+      });
+      await waitForProfileOrKnownFailure(page, {
+        input,
+        operation: 'resolve-account',
+        postLoadTimeoutMs: this.postLoadTimeoutMs,
+        profileUrl,
+        xUsername,
+      });
+      await page.waitForTimeout(DEFAULT_RENDER_SETTLE_TIMEOUT_MS);
+
+      return await resolveAccountFromPage(page, input, xUsername);
+    } catch (error) {
+      if (error instanceof SourceProviderError) {
+        throw error;
+      }
+
+      throw new SourceProviderError(
+        'SOURCE_REQUEST_FAILED',
+        'Browser X source account validation failed.',
+        buildDiagnostics(input, 'resolve-account', {
+          causeMessage: error instanceof Error ? error.message : String(error),
+          xUsername,
+        }),
+        error,
+      );
+    } finally {
+      await context?.close();
+    }
+  }
+
+  private async runBrowserOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const previousOperation = this.browserOperationQueue;
+    let releaseCurrentOperation!: () => void;
+    this.browserOperationQueue = new Promise((resolve) => {
+      releaseCurrentOperation = resolve;
+    });
+
+    await previousOperation.catch(() => undefined);
+
+    try {
+      return await operation();
+    } finally {
+      releaseCurrentOperation();
     }
   }
 }
@@ -233,24 +318,29 @@ function validateBrowserFetchInput(input: SourceProviderFetchInput): void {
   }
 }
 
-async function waitForTimelineOrKnownFailure(
+async function waitForProfileOrKnownFailure(
   page: Page,
   options: {
-    input: SourceProviderFetchInput;
+    input: SourceProviderFetchInput | SourceProviderValidateAccountInput;
+    operation: 'fetch-timeline' | 'resolve-account';
     postLoadTimeoutMs: number;
     profileUrl: string;
     xUsername: string;
   },
 ): Promise<void> {
   try {
-    await page.waitForSelector('article[data-testid="tweet"], a[href="/login"], [data-testid="emptyState"]', {
-      timeout: options.postLoadTimeoutMs,
-    });
+    await page.waitForSelector(
+      '[data-testid="UserName"], article[data-testid="tweet"], a[href="/login"], [data-testid="emptyState"]',
+      {
+        timeout: options.postLoadTimeoutMs,
+      },
+    );
   } catch (error) {
     const pageText = await getBodyText(page);
     throw classifyBrowserPageError(pageText, options.input, {
       cause: error,
       endpoint: options.profileUrl,
+      operation: options.operation,
       xUsername: options.xUsername,
     });
   }
@@ -262,7 +352,7 @@ async function waitForTimelineOrKnownFailure(
     throw new SourceProviderError(
       'SOURCE_AUTH_FAILED',
       'Browser X source is not logged in. Open with headless=false and sign in with the user account.',
-      buildDiagnostics(options.input, 'fetch-timeline', {
+      buildDiagnostics(options.input, options.operation, {
         endpoint: options.profileUrl,
         xUsername: options.xUsername,
       }),
@@ -273,7 +363,7 @@ async function waitForTimelineOrKnownFailure(
     throw new SourceProviderError(
       'SOURCE_RATE_LIMITED',
       'Browser X source was rate limited.',
-      buildDiagnostics(options.input, 'fetch-timeline', {
+      buildDiagnostics(options.input, options.operation, {
         endpoint: options.profileUrl,
         responseBodySnippet: pageText.slice(0, 500),
         xUsername: options.xUsername,
@@ -281,7 +371,7 @@ async function waitForTimelineOrKnownFailure(
     );
   }
 
-  if (/\b(This account doesn.?t exist|Account suspended|User not found)\b/iu.test(pageText)) {
+  if (/\b(This account doesn.?t exist|This account does not exist|Account suspended|User not found)\b/iu.test(pageText)) {
     throw new SourceProviderError(
       'SOURCE_ACCOUNT_NOT_FOUND',
       'The requested X account was not found.',
@@ -296,10 +386,11 @@ async function waitForTimelineOrKnownFailure(
 
 function classifyBrowserPageError(
   pageText: string,
-  input: SourceProviderFetchInput,
+  input: SourceProviderFetchInput | SourceProviderValidateAccountInput,
   context: {
     cause: unknown;
     endpoint: string;
+    operation: 'fetch-timeline' | 'resolve-account';
     xUsername: string;
   },
 ): SourceProviderError {
@@ -307,7 +398,20 @@ function classifyBrowserPageError(
     return new SourceProviderError(
       'SOURCE_RATE_LIMITED',
       'Browser X source was rate limited.',
-      buildDiagnostics(input, 'fetch-timeline', {
+      buildDiagnostics(input, context.operation, {
+        endpoint: context.endpoint,
+        responseBodySnippet: pageText.slice(0, 500),
+        xUsername: context.xUsername,
+      }),
+      context.cause,
+    );
+  }
+
+  if (/\b(This account doesn.?t exist|This account does not exist|Account suspended|User not found)\b/iu.test(pageText)) {
+    return new SourceProviderError(
+      'SOURCE_ACCOUNT_NOT_FOUND',
+      'The requested X account was not found.',
+      buildDiagnostics(input, 'resolve-account', {
         endpoint: context.endpoint,
         responseBodySnippet: pageText.slice(0, 500),
         xUsername: context.xUsername,
@@ -318,8 +422,8 @@ function classifyBrowserPageError(
 
   return new SourceProviderError(
     'SOURCE_RESPONSE_INVALID',
-    'Browser X source did not render a readable timeline.',
-    buildDiagnostics(input, 'fetch-timeline', {
+    'Browser X source did not render a readable profile.',
+    buildDiagnostics(input, context.operation, {
       endpoint: context.endpoint,
       responseBodySnippet: pageText.slice(0, 500),
       xUsername: context.xUsername,
@@ -330,7 +434,7 @@ function classifyBrowserPageError(
 
 async function resolveAccountFromPage(
   page: Page,
-  input: SourceProviderFetchInput,
+  input: SourceProviderFetchInput | SourceProviderValidateAccountInput,
   xUsername: string,
 ): Promise<BrowserXResolvedAccount> {
   const displayName = await page
@@ -338,7 +442,10 @@ async function resolveAccountFromPage(
     .first()
     .textContent({ timeout: 1_000 })
     .catch(() => undefined);
-  const xUserId = input.xUserId ?? (await findXUserIdInPageScripts(page, xUsername)) ?? `x:${xUsername}`;
+  const xUserId =
+    ('xUserId' in input ? input.xUserId : undefined) ??
+    (await findXUserIdInPageScripts(page, xUsername)) ??
+    `x:${xUsername}`;
 
   return {
     displayName: normalizeOptionalString(displayName?.split('@')[0]),
@@ -434,7 +541,7 @@ async function getBodyText(page: Page): Promise<string> {
 }
 
 function buildDiagnostics(
-  input: SourceProviderFetchInput,
+  input: SourceProviderFetchInput | SourceProviderValidateAccountInput,
   operation: 'fetch-timeline' | 'resolve-account',
   extra: Partial<{
     causeMessage: string;
@@ -448,13 +555,13 @@ function buildDiagnostics(
   return {
     causeMessage: extra.causeMessage,
     endpoint: extra.endpoint,
-    limit: input.limit,
+    limit: 'limit' in input ? input.limit : undefined,
     operation,
     provider: 'x' as const,
     responseBodySnippet: extra.responseBodySnippet,
-    sincePostId: input.sincePostId,
+    sincePostId: 'sincePostId' in input ? input.sincePostId : undefined,
     statusCode: extra.statusCode,
-    xUserId: extra.xUserId ?? input.xUserId,
+    xUserId: extra.xUserId ?? ('xUserId' in input ? input.xUserId : undefined),
     xUsername: extra.xUsername ?? input.xUsername,
   };
 }

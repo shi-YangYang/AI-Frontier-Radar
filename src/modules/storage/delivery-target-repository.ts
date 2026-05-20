@@ -15,6 +15,16 @@ export interface DeleteDeliveryTargetResult {
   deleted: boolean;
 }
 
+export interface DeliveryTargetPaginationInput {
+  page: number;
+  pageSize: number;
+}
+
+export interface DeliveryTargetSummary {
+  enabled: number;
+  total: number;
+}
+
 export class DeliveryTargetRepository {
   public constructor(private readonly prisma: PrismaClient) {}
 
@@ -175,6 +185,39 @@ export class DeliveryTargetRepository {
     return deliveryTargets.map(mapDeliveryTarget);
   }
 
+  public async listPage(input: DeliveryTargetPaginationInput): Promise<DeliveryTarget[]> {
+    const deliveryTargets = await this.prisma.deliveryTarget.findMany({
+      orderBy: [
+        { createdAt: 'asc' },
+        { targetKey: 'asc' },
+      ],
+      skip: (input.page - 1) * input.pageSize,
+      take: input.pageSize,
+      where: visibleDeliveryTargetWhere(),
+    });
+
+    return deliveryTargets.map(mapDeliveryTarget);
+  }
+
+  public async getVisibleSummary(): Promise<DeliveryTargetSummary> {
+    const [total, enabled] = await Promise.all([
+      this.prisma.deliveryTarget.count({
+        where: visibleDeliveryTargetWhere(),
+      }),
+      this.prisma.deliveryTarget.count({
+        where: {
+          ...visibleDeliveryTargetWhere(),
+          enabled: true,
+        },
+      }),
+    ]);
+
+    return {
+      enabled,
+      total,
+    };
+  }
+
   public async update(id: string, input: UpdateDeliveryTargetInput): Promise<DeliveryTarget | null> {
     const data = toDeliveryTargetUpdateData(input);
 
@@ -221,6 +264,14 @@ export class DeliveryTargetRepository {
 
     return mapDeliveryTarget(deliveryTarget);
   }
+}
+
+function visibleDeliveryTargetWhere(): Prisma.DeliveryTargetWhereInput {
+  return {
+    webhookUrl: {
+      not: '',
+    },
+  };
 }
 
 function mapDeliveryTarget(

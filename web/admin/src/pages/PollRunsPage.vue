@@ -18,10 +18,25 @@
     <ToastNotice :message="notice" :danger="noticeDanger" />
 
     <div class="panel">
+      <div class="bulk-actions">
+        <span>{{ t('bulk.selectedCount', { count: selectedCount }) }}</span>
+        <button class="danger" type="button" :disabled="busy || selectedCount === 0" @click="askBatchDelete">
+          {{ t('actions.batchDelete') }}
+        </button>
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
+              <th class="select-cell">
+                <input
+                  type="checkbox"
+                  :aria-label="t('bulk.selectCurrentPage')"
+                  :checked="allCurrentPageSelected"
+                  :disabled="busy || pollRuns.length === 0"
+                  @change="toggleSelectCurrentPage"
+                />
+              </th>
               <th>{{ t('table.startedAt') }}</th>
               <th>{{ t('table.finishedAt') }}</th>
               <th>{{ t('table.status') }}</th>
@@ -33,9 +48,18 @@
           </thead>
           <tbody>
             <tr v-if="pollRuns.length === 0">
-              <td colspan="7" class="empty-cell">{{ t('poll.empty') }}</td>
+              <td colspan="8" class="empty-cell">{{ t('poll.empty') }}</td>
             </tr>
             <tr v-for="run in pollRuns" :key="run.id">
+              <td class="select-cell">
+                <input
+                  type="checkbox"
+                  :aria-label="t('bulk.selectRow')"
+                  :checked="selectedIds.has(run.id)"
+                  :disabled="busy"
+                  @change="toggleSelected(run.id)"
+                />
+              </td>
               <td>{{ formatDateTime(run.startedAt) }}</td>
               <td>{{ formatDateTime(run.finishedAt) }}</td>
               <td><StatusBadge :status="run.status" /></td>
@@ -72,6 +96,14 @@
       @cancel="deleteTarget = null"
       @confirm="confirmDelete"
     />
+    <ConfirmModal
+      :open="batchDeleteOpen"
+      :title="t('poll.batchDeleteTitle')"
+      :body="t('bulk.deleteCountBody', { count: selectedCount })"
+      :detail="t('poll.batchDeleteBody')"
+      @cancel="batchDeleteOpen = false"
+      @confirm="confirmBatchDelete"
+    />
     <ErrorModal
       :open="errorSummary !== null"
       :error-summary="errorSummary"
@@ -81,9 +113,10 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 
 import {
+  batchDeletePollRuns,
   deletePollRun,
   listPollRuns,
   type AdminPagination,
@@ -99,6 +132,7 @@ import ToastNotice from '../components/ToastNotice.vue';
 import { t } from '../i18n';
 import { DEFAULT_PAGE_SIZE, formatDateTime, pollProgress, validateTimeRange } from '../utils';
 
+const batchDeleteOpen = ref(false);
 const busy = ref(false);
 const deleteTarget = ref<PollRun | null>(null);
 const errorSummary = ref<string | null>(null);
@@ -112,12 +146,18 @@ const pagination = ref<AdminPagination>({
   totalPages: 0,
 });
 const pollRuns = ref<PollRun[]>([]);
+const selectedIds = ref<Set<string>>(new Set());
+const selectedCount = computed(() => selectedIds.value.size);
+const allCurrentPageSelected = computed(
+  () => pollRuns.value.length > 0 && pollRuns.value.every((run) => selectedIds.value.has(run.id)),
+);
 
 onMounted(() => {
   void loadPage(1, { silent: true });
 });
 
 async function loadPage(page: number, options: { silent?: boolean } = {}): Promise<void> {
+  clearSelection();
   busy.value = true;
 
   try {
@@ -175,8 +215,64 @@ async function confirmDelete(): Promise<void> {
   }
 }
 
+function askBatchDelete(): void {
+  if (selectedIds.value.size === 0) {
+    return;
+  }
+
+  batchDeleteOpen.value = true;
+}
+
+async function confirmBatchDelete(): Promise<void> {
+  const ids = [...selectedIds.value];
+
+  if (ids.length === 0) {
+    batchDeleteOpen.value = false;
+    return;
+  }
+
+  busy.value = true;
+
+  try {
+    const result = await batchDeletePollRuns(ids);
+    batchDeleteOpen.value = false;
+    clearSelection();
+    await loadPage(pagination.value.page, { silent: true });
+    setNotice(t('notice.pollRunsBatchDeleted', { count: result.deletedCount }));
+  } catch (error) {
+    setNotice(error instanceof Error ? error.message : String(error), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
 function openError(run: PollRun): void {
   errorSummary.value = run.errorSummary;
+}
+
+function toggleSelected(id: string): void {
+  const nextSelectedIds = new Set(selectedIds.value);
+
+  if (nextSelectedIds.has(id)) {
+    nextSelectedIds.delete(id);
+  } else {
+    nextSelectedIds.add(id);
+  }
+
+  selectedIds.value = nextSelectedIds;
+}
+
+function toggleSelectCurrentPage(): void {
+  if (allCurrentPageSelected.value) {
+    clearSelection();
+    return;
+  }
+
+  selectedIds.value = new Set(pollRuns.value.map((run) => run.id));
+}
+
+function clearSelection(): void {
+  selectedIds.value = new Set();
 }
 
 function setNotice(message: string, danger = false): void {

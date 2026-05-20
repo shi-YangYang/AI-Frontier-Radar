@@ -21,6 +21,7 @@ export type {
   SourceProviderFetchInput,
   SourceProviderFetchMeta,
   SourceProviderFetchResult,
+  SourceProviderValidateAccountInput,
   StandardizedPost,
 } from './types/index';
 export { PollingAccountService } from './services/index';

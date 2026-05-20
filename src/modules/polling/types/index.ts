@@ -6,5 +6,6 @@ export type {
   SourceProviderFetchInput,
   SourceProviderFetchMeta,
   SourceProviderFetchResult,
+  SourceProviderValidateAccountInput,
   StandardizedPost,
 } from './source-provider';

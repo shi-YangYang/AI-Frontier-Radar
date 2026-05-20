@@ -18,10 +18,25 @@
     <ToastNotice :message="notice" :danger="noticeDanger" />
 
     <div class="panel">
+      <div class="bulk-actions">
+        <span>{{ t('bulk.selectedCount', { count: selectedCount }) }}</span>
+        <button class="danger" type="button" :disabled="busy || selectedCount === 0" @click="askBatchDelete">
+          {{ t('actions.batchDelete') }}
+        </button>
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
+              <th class="select-cell">
+                <input
+                  type="checkbox"
+                  :aria-label="t('bulk.selectCurrentPage')"
+                  :checked="allCurrentPageSelected"
+                  :disabled="busy || deliveryEvents.length === 0"
+                  @change="toggleSelectCurrentPage"
+                />
+              </th>
               <th>{{ t('table.createdAt') }}</th>
               <th>{{ t('table.postId') }}</th>
               <th>{{ t('table.target') }}</th>
@@ -34,9 +49,18 @@
           </thead>
           <tbody>
             <tr v-if="deliveryEvents.length === 0">
-              <td colspan="8" class="empty-cell">{{ t('delivery.empty') }}</td>
+              <td colspan="9" class="empty-cell">{{ t('delivery.empty') }}</td>
             </tr>
             <tr v-for="event in deliveryEvents" :key="event.id">
+              <td class="select-cell">
+                <input
+                  type="checkbox"
+                  :aria-label="t('bulk.selectRow')"
+                  :checked="selectedIds.has(event.id)"
+                  :disabled="busy"
+                  @change="toggleSelected(event.id)"
+                />
+              </td>
               <td>{{ formatDateTime(event.createdAt) }}</td>
               <td><code>{{ event.xPostId }}</code></td>
               <td><code>{{ event.targetKey }}</code></td>
@@ -69,13 +93,22 @@
       @cancel="deleteTarget = null"
       @confirm="confirmDelete"
     />
+    <ConfirmModal
+      :open="batchDeleteOpen"
+      :title="t('delivery.batchDeleteTitle')"
+      :body="t('bulk.deleteCountBody', { count: selectedCount })"
+      :detail="batchDeleteHasPending ? t('delivery.batchDeletePendingBody') : t('delivery.batchDeleteBody')"
+      @cancel="batchDeleteOpen = false"
+      @confirm="confirmBatchDelete"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 
 import {
+  batchDeleteDeliveryEvents,
   deleteDeliveryEvent,
   listDeliveryEvents,
   type AdminPagination,
@@ -90,6 +123,7 @@ import ToastNotice from '../components/ToastNotice.vue';
 import { t } from '../i18n';
 import { DEFAULT_PAGE_SIZE, formatDateTime, validateTimeRange } from '../utils';
 
+const batchDeleteOpen = ref(false);
 const busy = ref(false);
 const deleteTarget = ref<DeliveryEvent | null>(null);
 const deliveryEvents = ref<DeliveryEvent[]>([]);
@@ -102,12 +136,27 @@ const pagination = ref<AdminPagination>({
   total: 0,
   totalPages: 0,
 });
+const selectedIds = ref<Set<string>>(new Set());
+const selectedCount = computed(() => selectedIds.value.size);
+const allCurrentPageSelected = computed(
+  () =>
+    deliveryEvents.value.length > 0 &&
+    deliveryEvents.value.every((event) => selectedIds.value.has(event.id)),
+);
+const batchDeleteHasPending = computed(() =>
+  deliveryEvents.value.some(
+    (event) =>
+      selectedIds.value.has(event.id) &&
+      ['pending', 'retry_wait', 'sending'].includes(event.status),
+  ),
+);
 
 onMounted(() => {
   void loadPage(1, { silent: true });
 });
 
 async function loadPage(page: number, options: { silent?: boolean } = {}): Promise<void> {
+  clearSelection();
   busy.value = true;
 
   try {
@@ -165,10 +214,66 @@ async function confirmDelete(): Promise<void> {
   }
 }
 
+function askBatchDelete(): void {
+  if (selectedIds.value.size === 0) {
+    return;
+  }
+
+  batchDeleteOpen.value = true;
+}
+
+async function confirmBatchDelete(): Promise<void> {
+  const ids = [...selectedIds.value];
+
+  if (ids.length === 0) {
+    batchDeleteOpen.value = false;
+    return;
+  }
+
+  busy.value = true;
+
+  try {
+    const result = await batchDeleteDeliveryEvents(ids);
+    batchDeleteOpen.value = false;
+    clearSelection();
+    await loadPage(pagination.value.page, { silent: true });
+    setNotice(t('notice.deliveryEventsBatchDeleted', { count: result.deletedCount }));
+  } catch (error) {
+    setNotice(error instanceof Error ? error.message : String(error), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
 function deleteDetail(event: DeliveryEvent): string {
   return ['pending', 'retry_wait', 'sending'].includes(event.status)
     ? t('delivery.deletePendingBody')
     : t('delivery.deleteBody');
+}
+
+function toggleSelected(id: string): void {
+  const nextSelectedIds = new Set(selectedIds.value);
+
+  if (nextSelectedIds.has(id)) {
+    nextSelectedIds.delete(id);
+  } else {
+    nextSelectedIds.add(id);
+  }
+
+  selectedIds.value = nextSelectedIds;
+}
+
+function toggleSelectCurrentPage(): void {
+  if (allCurrentPageSelected.value) {
+    clearSelection();
+    return;
+  }
+
+  selectedIds.value = new Set(deliveryEvents.value.map((event) => event.id));
+}
+
+function clearSelection(): void {
+  selectedIds.value = new Set();
 }
 
 function setNotice(message: string, danger = false): void {

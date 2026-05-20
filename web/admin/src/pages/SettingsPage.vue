@@ -74,7 +74,7 @@
                 <p>{{ t('settings.feishu.listDescription') }}</p>
               </div>
               <span class="muted">
-                {{ t('settings.feishu.enabledSummary', { enabled: enabledTargetCount, total: deliveryTargets.length }) }}
+                {{ t('settings.feishu.enabledSummary', { enabled: deliveryTargetSummary.enabled, total: deliveryTargetSummary.total }) }}
               </span>
             </header>
 
@@ -124,6 +124,12 @@
                 </tbody>
               </table>
             </div>
+            <PaginationBar
+              :busy="busy"
+              :pagination="deliveryTargetPagination"
+              @change-page="loadDeliveryTargetPage"
+              @invalid-page="setNotice(t('notice.invalidPage'), true)"
+            />
           </article>
         </section>
 
@@ -312,7 +318,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { onMounted, reactive, ref } from 'vue';
 
 import {
   createDeliveryTarget,
@@ -323,18 +329,31 @@ import {
   updateDeliveryTarget,
   updateDeliveryTargetEnabled,
   updatePollingSettings,
+  type AdminPagination,
   type DeliveryTarget,
+  type DeliveryTargetSummary,
   type RuntimeSettingSource,
   type RuntimeSettingsSummary,
 } from '../api/admin-api';
 import ConfirmModal from '../components/ConfirmModal.vue';
 import PageHeader from '../components/PageHeader.vue';
+import PaginationBar from '../components/PaginationBar.vue';
 import ToastNotice from '../components/ToastNotice.vue';
 import { t, type MessageKey } from '../i18n';
-import { formatDateTime } from '../utils';
+import { DEFAULT_PAGE_SIZE, formatDateTime } from '../utils';
 
 const busy = ref(false);
 const deleteTarget = ref<DeliveryTarget | null>(null);
+const deliveryTargetPagination = ref<AdminPagination>({
+  page: 1,
+  pageSize: DEFAULT_PAGE_SIZE,
+  total: 0,
+  totalPages: 0,
+});
+const deliveryTargetSummary = ref<DeliveryTargetSummary>({
+  enabled: 0,
+  total: 0,
+});
 const deliveryTargets = ref<DeliveryTarget[]>([]);
 const editingTarget = ref<DeliveryTarget | null>(null);
 const notice = ref('');
@@ -380,8 +399,6 @@ const editTargetForm = reactive({
   webhookUrl: '',
 });
 
-const enabledTargetCount = computed(() => deliveryTargets.value.filter((target) => target.enabled).length);
-
 onMounted(() => {
   void loadSettings({ silent: true });
 });
@@ -392,10 +409,31 @@ async function loadSettings(options: { silent?: boolean } = {}): Promise<void> {
   try {
     const [loadedSettings, loadedTargets] = await Promise.all([
       getSettings(),
-      listDeliveryTargets(),
+      listDeliveryTargets(toDeliveryTargetQuery(deliveryTargetPagination.value.page)),
     ]);
     applySettings(loadedSettings);
-    deliveryTargets.value = loadedTargets.deliveryTargets;
+    applyDeliveryTargets(loadedTargets);
+
+    if (options.silent !== true) {
+      setNotice(t('settings.notice.refreshSuccess'));
+    }
+  } catch (error) {
+    setNotice(t('settings.notice.refreshFailure', { error: toErrorMessage(error) }), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function loadDeliveryTargetPage(page: number): Promise<void> {
+  await loadDeliveryTargets(page);
+}
+
+async function loadDeliveryTargets(page: number, options: { silent?: boolean } = {}): Promise<void> {
+  busy.value = true;
+
+  try {
+    const result = await listDeliveryTargets(toDeliveryTargetQuery(page));
+    applyDeliveryTargets(result);
 
     if (options.silent !== true) {
       setNotice(t('settings.notice.refreshSuccess'));
@@ -453,13 +491,15 @@ async function createTarget(): Promise<void> {
   busy.value = true;
 
   try {
-    const result = await createDeliveryTarget({
+    await createDeliveryTarget({
       displayName: newTargetForm.displayName.trim(),
       enabled: newTargetForm.enabled,
       webhookUrl: newTargetForm.webhookUrl.trim(),
     });
-    deliveryTargets.value = [...deliveryTargets.value, result.deliveryTarget];
     resetNewTargetForm();
+    const nextTotal = deliveryTargetSummary.value.total + 1;
+    const targetPage = Math.max(1, Math.ceil(nextTotal / deliveryTargetPagination.value.pageSize));
+    await loadDeliveryTargets(targetPage, { silent: true });
     setNotice(t('settings.notice.createTargetSuccess'));
   } catch (error) {
     setNotice(t('settings.notice.createTargetFailure', { error: toDeliveryTargetErrorMessage(error) }), true);
@@ -503,6 +543,7 @@ async function saveTargetEdit(): Promise<void> {
       ...(webhookUrl.length === 0 ? {} : { webhookUrl }),
     });
     replaceDeliveryTarget(result.deliveryTarget);
+    await loadDeliveryTargets(deliveryTargetPagination.value.page, { silent: true });
     closeEditTarget();
     setNotice(t('settings.notice.editTargetSuccess'));
   } catch (error) {
@@ -518,6 +559,7 @@ async function toggleTargetEnabled(target: DeliveryTarget): Promise<void> {
 
   try {
     const result = await updateDeliveryTargetEnabled(target.id, nextEnabled);
+    await loadDeliveryTargets(deliveryTargetPagination.value.page, { silent: true });
     replaceDeliveryTarget(result.deliveryTarget);
     setNotice(
       result.deliveryTarget.enabled
@@ -550,8 +592,8 @@ async function confirmDeleteTarget(): Promise<void> {
   try {
     const targetName = deleteTarget.value.displayName;
     const result = await deleteDeliveryTarget(deleteTarget.value.id);
-    deliveryTargets.value = deliveryTargets.value.filter((target) => target.id !== deleteTarget.value?.id);
     deleteTarget.value = null;
+    await loadDeliveryTargets(deliveryTargetPagination.value.page, { silent: true });
     setNotice(t('settings.notice.deleteTargetSuccess', { targetName, deadEventsCount: result.deadEventsCount }));
   } catch (error) {
     setNotice(t('settings.notice.deleteTargetFailure', { error: toErrorMessage(error) }), true);
@@ -585,6 +627,16 @@ function applySettings(loadedSettings: RuntimeSettingsSummary): void {
   pollingForm.intervalSeconds = loadedSettings.polling.intervalSeconds;
 }
 
+function applyDeliveryTargets(result: {
+  deliveryTargets: DeliveryTarget[];
+  pagination: AdminPagination;
+  summary: DeliveryTargetSummary;
+}): void {
+  deliveryTargets.value = result.deliveryTargets;
+  deliveryTargetPagination.value = result.pagination;
+  deliveryTargetSummary.value = result.summary;
+}
+
 function replaceDeliveryTarget(nextTarget: DeliveryTarget): void {
   deliveryTargets.value = deliveryTargets.value.map((target) =>
     target.id === nextTarget.id ? nextTarget : target,
@@ -599,6 +651,13 @@ function resetNewTargetForm(): void {
   newTargetForm.displayName = '';
   newTargetForm.enabled = true;
   newTargetForm.webhookUrl = '';
+}
+
+function toDeliveryTargetQuery(page: number): { page: number; pageSize: number } {
+  return {
+    page,
+    pageSize: deliveryTargetPagination.value.pageSize,
+  };
 }
 
 function validatePollingForm(): string | null {

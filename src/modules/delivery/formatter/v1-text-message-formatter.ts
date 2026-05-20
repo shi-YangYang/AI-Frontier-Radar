@@ -37,7 +37,8 @@ export class V1TextMessageFormatter {
         '🚀【AI前沿消息】发现新帖',
         '',
         `👤 作者：${formatAuthorLabel(input.authorUsername, input.authorDisplayName)}`,
-        `🕒 发布时间：${formatUtcTimestamp(input.postedAt)} / ${formatChinaTimestamp(input.postedAt)}`,
+        `🕘 北京时间：${formatChinaTimestamp(input.postedAt)}`,
+        `🌐 UTC 时间：${formatUtcTimestamp(input.postedAt)}`,
         postId === undefined ? undefined : `🆔 帖子 ID：${postId}`,
         '',
         '📝 内容：',
@@ -71,14 +72,14 @@ function formatAuthorLabel(authorUsername: string, authorDisplayName?: string | 
 }
 
 function formatUtcTimestamp(value: string): string {
-  return formatTimestamp(value, 'UTC', 'UTC');
+  return formatTimestamp(value, 'UTC');
 }
 
 function formatChinaTimestamp(value: string): string {
-  return formatTimestamp(value, 'Asia/Shanghai', '北京时间');
+  return formatTimestamp(value, 'Asia/Shanghai');
 }
 
-function formatTimestamp(value: string, timeZone: string, label: string): string {
+function formatTimestamp(value: string, timeZone: string): string {
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) {
@@ -114,7 +115,7 @@ function formatTimestamp(value: string, timeZone: string, label: string): string
     return value;
   }
 
-  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} ${label}`;
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
 
 function normalizePostBody(textContent: string): string {

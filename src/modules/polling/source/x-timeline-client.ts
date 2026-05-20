@@ -274,7 +274,7 @@ function normalizeUsername(value: string | undefined): string | undefined {
     return undefined;
   }
 
-  return value.replace(/^@/u, '');
+  return value.trim().replace(/^@/u, '');
 }
 
 function normalizeOptionalString(value: string | undefined): string | undefined {

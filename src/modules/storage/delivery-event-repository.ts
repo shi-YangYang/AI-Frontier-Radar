@@ -64,6 +64,18 @@ export class DeliveryEventRepository {
     return result.count > 0;
   }
 
+  public async deleteManyByIds(ids: string[]): Promise<number> {
+    const result = await this.prisma.deliveryEvent.deleteMany({
+      where: {
+        id: {
+          in: ids,
+        },
+      },
+    });
+
+    return result.count;
+  }
+
   public async findById(id: string): Promise<DeliveryEvent | null> {
     const deliveryEvent = await this.prisma.deliveryEvent.findUnique({
       where: { id },

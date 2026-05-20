@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 
 import type { AppConfig } from '../../../shared/config/types';
 import { createFeishuWebhookClient, type FeishuWebhookFailureResult } from '../../delivery';
+import { SourceProviderError, type SourceProviderAccount } from '../../polling';
 import type { RuntimeSchedulerRunNowResult } from '../../scheduler';
 import {
   createRuntimeSettingsService,
@@ -23,6 +24,7 @@ export interface AdminActions {
   runDeliveryWorkerNow?(options?: { recoverStartupState?: boolean; trigger?: string }): Promise<RuntimeSchedulerRunNowResult>;
   runPollingNow?(options?: { trigger?: string }): Promise<RuntimeSchedulerRunNowResult>;
   updatePollingSchedule?(intervalSeconds: number): void | Promise<void>;
+  validateWatchAccount?(input: { xUsername: string }): Promise<SourceProviderAccount>;
 }
 
 export interface AdminControllerOptions {
@@ -122,9 +124,12 @@ export async function createAdminWatchAccount(
   options: AdminControllerOptions,
 ): Promise<{ ok: true; data: { created: boolean; watchAccount: WatchAccount } }> {
   const username = readUsername(body);
+  const account = await validateWatchAccount(username, options);
   const { created, watchAccount } = await options.storage.watchAccounts.createIfAbsentByUsername({
+    displayName: account.displayName ?? null,
     enabled: true,
-    xUsername: username,
+    xUserId: account.xUserId,
+    xUsername: account.xUsername,
   });
 
   return {
@@ -210,6 +215,21 @@ export async function deleteAdminPollRun(
   };
 }
 
+export async function batchDeleteAdminPollRuns(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { deletedCount: number } }> {
+  const ids = readIdsBody(body);
+  const deletedCount = await options.storage.pollRuns.deleteManyByIds(ids);
+
+  return {
+    ok: true,
+    data: {
+      deletedCount,
+    },
+  };
+}
+
 export async function deleteAdminDeliveryEvent(
   params: unknown,
   options: AdminControllerOptions,
@@ -225,6 +245,21 @@ export async function deleteAdminDeliveryEvent(
     ok: true,
     data: {
       deleted: true,
+    },
+  };
+}
+
+export async function batchDeleteAdminDeliveryEvents(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { deletedCount: number } }> {
+  const ids = readIdsBody(body);
+  const deletedCount = await options.storage.deliveryEvents.deleteManyByIds(ids);
+
+  return {
+    ok: true,
+    data: {
+      deletedCount,
     },
   };
 }
@@ -309,14 +344,27 @@ export async function updateAdminFeishuSettings(
 }
 
 export async function listAdminDeliveryTargets(
+  query: unknown,
   options: AdminControllerOptions,
-): Promise<{ ok: true; data: { deliveryTargets: AdminDeliveryTarget[] } }> {
-  const deliveryTargets = await options.storage.deliveryTargets.listAll();
+): Promise<{
+  ok: true;
+  data: {
+    deliveryTargets: AdminDeliveryTarget[];
+    pagination: AdminPagination;
+    summary: AdminDeliveryTargetSummary;
+  };
+}> {
+  const paginationInput = readPaginationQuery(query);
+  const summary = await options.storage.deliveryTargets.getVisibleSummary();
+  const resolvedPaginationInput = clampPaginationInput(paginationInput, summary.total);
+  const deliveryTargets = await options.storage.deliveryTargets.listPage(resolvedPaginationInput);
 
   return {
     ok: true,
     data: {
       deliveryTargets: deliveryTargets.map(toAdminDeliveryTarget),
+      pagination: toPagination(resolvedPaginationInput, summary.total),
+      summary,
     },
   };
 }
@@ -552,6 +600,11 @@ interface AdminDeliveryTarget {
   webhookPreview: string;
 }
 
+interface AdminDeliveryTargetSummary {
+  enabled: number;
+  total: number;
+}
+
 function readPaginationQuery(query: unknown): AdminPaginationInput {
   if (query === undefined || query === null) {
     return {
@@ -706,6 +759,76 @@ function resolveRuntimeSettings(options: AdminControllerOptions): RuntimeSetting
     config: options.config,
     storage: options.storage,
   });
+}
+
+async function validateWatchAccount(
+  xUsername: string,
+  options: AdminControllerOptions,
+): Promise<SourceProviderAccount> {
+  if (options.actions?.validateWatchAccount === undefined) {
+    throw new AdminApiError(
+      503,
+      'SOURCE_VALIDATION_UNAVAILABLE',
+      'X 账号校验服务不可用，无法添加监听账号。',
+    );
+  }
+
+  try {
+    return await options.actions.validateWatchAccount({ xUsername });
+  } catch (error) {
+    throw toAdminSourceValidationError(error);
+  }
+}
+
+function toAdminSourceValidationError(error: unknown): AdminApiError {
+  if (error instanceof AdminApiError) {
+    return error;
+  }
+
+  if (error instanceof SourceProviderError) {
+    const details = toSafeSourceErrorDetails(error);
+
+    if (error.code === 'SOURCE_ACCOUNT_NOT_FOUND') {
+      return new AdminApiError(404, error.code, 'X 账号不存在，未添加监听账号。', details);
+    }
+
+    if (error.code === 'SOURCE_AUTH_FAILED') {
+      return new AdminApiError(
+        502,
+        error.code,
+        'X 数据源未登录或认证失败，无法校验账号。',
+        details,
+      );
+    }
+
+    if (error.code === 'SOURCE_RATE_LIMITED') {
+      return new AdminApiError(429, error.code, 'X 数据源请求过于频繁，请稍后再试。', details);
+    }
+
+    if (error.code === 'SOURCE_INVALID_INPUT') {
+      return new AdminApiError(400, error.code, 'X 账号名无效，未添加监听账号。', details);
+    }
+
+    return new AdminApiError(502, error.code, 'X 账号校验失败，未添加监听账号。', details);
+  }
+
+  return new AdminApiError(502, 'SOURCE_VALIDATION_FAILED', 'X 账号校验失败，未添加监听账号。');
+}
+
+function toSafeSourceErrorDetails(error: SourceProviderError): Record<string, unknown> {
+  const details: Record<string, unknown> = {
+    operation: error.diagnostics.operation,
+    provider: error.diagnostics.provider,
+  };
+
+  if (error.diagnostics.statusCode !== undefined) {
+    details.statusCode = error.diagnostics.statusCode;
+  }
+  if (error.diagnostics.xUsername !== undefined) {
+    details.xUsername = error.diagnostics.xUsername;
+  }
+
+  return details;
 }
 
 function toAdminDeliveryTarget(target: DeliveryTarget): AdminDeliveryTarget {
@@ -1019,6 +1142,24 @@ function readIdParam(params: unknown): string {
   }
 
   return params.id;
+}
+
+function readIdsBody(body: unknown): string[] {
+  if (!isRecord(body)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
+  }
+
+  if (!Array.isArray(body.ids) || body.ids.length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'ids 必须是非空数组。');
+  }
+
+  return body.ids.map((id) => {
+    if (typeof id !== 'string' || id.trim().length === 0) {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'ids 中每一项都必须是非空字符串。');
+    }
+
+    return id;
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

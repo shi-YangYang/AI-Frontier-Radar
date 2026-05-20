@@ -2,8 +2,15 @@
   <section>
     <PageHeader :title="t('accounts.title')" :subtitle="t('accounts.subtitle')">
       <form class="inline-form" @submit.prevent="addAccount">
-        <input v-model="username" autocomplete="off" :placeholder="t('accounts.placeholder')" />
-        <button class="primary" type="submit" :disabled="busy">{{ t('accounts.add') }}</button>
+        <input
+          v-model="username"
+          autocomplete="off"
+          :disabled="addingAccount"
+          :placeholder="t('accounts.placeholder')"
+        />
+        <button class="primary" type="submit" :disabled="busy || addingAccount">
+          {{ addingAccount ? t('accounts.validating') : t('accounts.add') }}
+        </button>
       </form>
     </PageHeader>
 
@@ -74,6 +81,7 @@ import { t } from '../i18n';
 import { dash, formatDateTime } from '../utils';
 
 const accounts = ref<WatchAccount[]>([]);
+const addingAccount = ref(false);
 const busy = ref(false);
 const deleteTarget = ref<WatchAccount | null>(null);
 const notice = ref('');
@@ -101,7 +109,8 @@ async function loadAccounts(options: { silent?: boolean } = {}): Promise<void> {
 }
 
 async function addAccount(): Promise<void> {
-  busy.value = true;
+  addingAccount.value = true;
+  setNotice(t('notice.accountValidating'));
 
   try {
     await createWatchAccount(username.value);
@@ -109,9 +118,14 @@ async function addAccount(): Promise<void> {
     await loadAccounts({ silent: true });
     setNotice(t('notice.accountCreated'));
   } catch (error) {
-    setNotice(error instanceof Error ? error.message : String(error), true);
+    setNotice(
+      t('notice.accountCreateFailed', {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+      true,
+    );
   } finally {
-    busy.value = false;
+    addingAccount.value = false;
   }
 }
 

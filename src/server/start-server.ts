@@ -2,7 +2,7 @@ import { toStartupConfigLogContext } from '../shared/config';
 import type { AppConfig } from '../shared/config/types';
 import { createApp } from '../app/create-app';
 import type { AppLogger } from '../lib/logger';
-import { createRuntimeScheduler } from '../modules/scheduler';
+import { createRuntimeScheduler, createRuntimeSourceProvider } from '../modules/scheduler';
 import { createRuntimeSettingsService, createStorageFromConfig } from '../modules/storage';
 
 export interface StartServerOptions {
@@ -16,10 +16,12 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     config: options.config,
     storage,
   });
+  const sourceProvider = createRuntimeSourceProvider(options.config);
   const scheduler = createRuntimeScheduler({
     config: options.config,
     logger: options.logger,
     runtimeSettings,
+    sourceProvider,
     storage,
   });
   const app = createApp({
@@ -27,6 +29,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
       runDeliveryWorkerNow: (runOptions) => scheduler.runDeliveryWorkerNow(runOptions),
       runPollingNow: (runOptions) => scheduler.runPollingNow(runOptions),
       updatePollingSchedule: (intervalSeconds) => scheduler.updatePollingSchedule(intervalSeconds),
+      validateWatchAccount: (input) => sourceProvider.validateAccount(input),
     },
     config: options.config,
     logger: options.logger,
