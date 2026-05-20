@@ -8,19 +8,25 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AppConfig } from '../../../shared/config/types';
 import type { AdminActions } from '../controllers/admin-controller';
 import {
+  createAdminDeliveryTarget,
   createAdminWatchAccount,
+  deleteAdminDeliveryTarget,
   deleteAdminDeliveryEvent,
   deleteAdminPollRun,
   deleteAdminWatchAccount,
   getAdminSettings,
   getAdminSummary,
   listAdminDeliveryEvents,
+  listAdminDeliveryTargets,
   listAdminPollRuns,
   listAdminWatchAccounts,
   runAdminDeliveryNow,
   runAdminPollingNow,
+  testAdminDeliveryTarget,
   testAdminFeishuSettings,
   toAdminApiErrorPayload,
+  updateAdminDeliveryTarget,
+  updateAdminDeliveryTargetEnabled,
   updateAdminFeishuSettings,
   updateAdminPollingSettings,
 } from '../controllers/admin-controller';
@@ -111,6 +117,75 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
       },
     },
     async (_, reply) => sendAdminResponse(reply, () => testAdminFeishuSettings(options)),
+  );
+
+  app.get(
+    '/admin/api/settings/delivery-targets',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => listAdminDeliveryTargets(options)),
+  );
+
+  app.post(
+    '/admin/api/settings/delivery-targets',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => createAdminDeliveryTarget(request.body, options)),
+  );
+
+  app.put(
+    '/admin/api/settings/delivery-targets/:id',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () =>
+        updateAdminDeliveryTarget(request.params, request.body, options),
+      ),
+  );
+
+  app.patch(
+    '/admin/api/settings/delivery-targets/:id/enabled',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () =>
+        updateAdminDeliveryTargetEnabled(request.params, request.body, options),
+      ),
+  );
+
+  app.delete(
+    '/admin/api/settings/delivery-targets/:id',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => deleteAdminDeliveryTarget(request.params, options)),
+  );
+
+  app.post(
+    '/admin/api/settings/delivery-targets/:id/test',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => testAdminDeliveryTarget(request.params, options)),
   );
 
   app.get(

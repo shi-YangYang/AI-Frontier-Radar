@@ -1,168 +1,366 @@
 <template>
   <section>
-    <PageHeader title="配置" subtitle="通过本地页面管理运行配置，敏感内容只显示脱敏预览。">
+    <PageHeader :title="t('settings.title')" :subtitle="t('settings.subtitle')">
       <div class="toolbar">
-        <button type="button" :disabled="busy" @click="() => loadSettings()">
-          刷新
-        </button>
+        <button type="button" :disabled="busy" @click="() => loadSettings()">{{ t('actions.refresh') }}</button>
       </div>
     </PageHeader>
 
     <ToastNotice :message="notice" :danger="noticeDanger" />
 
     <div v-if="settings === null" class="panel">
-      <div class="empty-panel">正在读取配置...</div>
+      <div class="empty-panel">{{ t('settings.loading') }}</div>
     </div>
 
-    <div v-else class="settings-layout">
-      <article class="panel">
-        <header class="panel-header">
-          <h2>轮询配置</h2>
-        </header>
-        <form class="settings-form" @submit.prevent="savePolling">
-          <label>
-            <span>轮询间隔秒数</span>
-            <input
-              v-model.number="pollingForm.intervalSeconds"
-              inputmode="numeric"
-              max="3600"
-              min="10"
-              type="number"
-            />
-            <small>允许范围：10-3600 秒。当前来源：{{ sourceLabel(settings.polling.sources.intervalSeconds) }}</small>
-          </label>
+    <div v-else class="settings-shell">
+      <nav class="settings-tabs" :aria-label="t('settings.tabsAria')">
+        <button
+          v-for="tab in settingsTabs"
+          :key="tab.key"
+          type="button"
+          class="settings-tab"
+          :class="{ active: activeSettingsTab === tab.key }"
+          :aria-current="activeSettingsTab === tab.key ? 'page' : undefined"
+          @click="activeSettingsTab = tab.key"
+        >
+          <span>{{ t(tab.labelKey) }}</span>
+          <small>{{ t(tab.descriptionKey) }}</small>
+        </button>
+      </nav>
 
-          <label>
-            <span>每账号抓取数量</span>
-            <input
-              v-model.number="pollingForm.fetchLimitPerAccount"
-              inputmode="numeric"
-              max="100"
-              min="1"
-              type="number"
-            />
-            <small>允许范围：1-100 条。当前来源：{{ sourceLabel(settings.polling.sources.fetchLimitPerAccount) }}</small>
-          </label>
+      <div class="settings-tab-panel">
+        <section v-if="activeSettingsTab === 'feishu'" class="settings-layout single-column">
+          <article class="panel">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.feishu.addTitle') }}</h2>
+                <p>{{ t('settings.feishu.addDescription') }}</p>
+              </div>
+            </header>
 
-          <label class="checkbox-row">
-            <input v-model="pollingForm.excludeReplies" type="checkbox" />
-            <span>排除回复</span>
-            <small>当前来源：{{ sourceLabel(settings.polling.sources.excludeReplies) }}</small>
-          </label>
+            <form class="settings-form delivery-target-form" @submit.prevent="createTarget">
+              <label>
+                <span>{{ t('settings.feishu.displayNameLabel') }}</span>
+                <input
+                  v-model="newTargetForm.displayName"
+                  autocomplete="off"
+                  maxlength="100"
+                  :placeholder="t('settings.feishu.displayNamePlaceholder')"
+                />
+              </label>
+              <label>
+                <span>{{ t('settings.feishu.urlLabel') }}</span>
+                <input
+                  v-model="newTargetForm.webhookUrl"
+                  autocomplete="off"
+                  placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."
+                  type="url"
+                />
+              </label>
+              <label class="checkbox-row compact-checkbox">
+                <input v-model="newTargetForm.enabled" type="checkbox" />
+                <span>{{ t('settings.feishu.enableOnCreate') }}</span>
+              </label>
+              <div class="form-actions">
+                <button class="primary" type="submit" :disabled="busy">{{ t('settings.feishu.submitAdd') }}</button>
+              </div>
+            </form>
+          </article>
 
-          <label class="checkbox-row">
-            <input v-model="pollingForm.excludeReposts" type="checkbox" />
-            <span>排除转发</span>
-            <small>当前来源：{{ sourceLabel(settings.polling.sources.excludeReposts) }}</small>
-          </label>
+          <article class="panel">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.feishu.listTitle') }}</h2>
+                <p>{{ t('settings.feishu.listDescription') }}</p>
+              </div>
+              <span class="muted">
+                {{ t('settings.feishu.enabledSummary', { enabled: enabledTargetCount, total: deliveryTargets.length }) }}
+              </span>
+            </header>
 
-          <div class="form-actions">
-            <button class="primary" type="submit" :disabled="busy">保存轮询配置</button>
-          </div>
-        </form>
-      </article>
+            <div class="table-wrap">
+              <table class="delivery-target-table">
+                <thead>
+                  <tr>
+                    <th>{{ t('settings.feishu.displayNameLabel') }}</th>
+                    <th>targetKey</th>
+                    <th>{{ t('settings.feishu.table.enabled') }}</th>
+                    <th>{{ t('settings.feishu.table.preview') }}</th>
+                    <th>{{ t('table.createdAt') }}</th>
+                    <th>{{ t('table.updatedAt') }}</th>
+                    <th>{{ t('table.actions') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-if="deliveryTargets.length === 0">
+                    <td colspan="7" class="empty-cell">{{ t('settings.feishu.empty') }}</td>
+                  </tr>
+                  <tr v-for="target in deliveryTargets" :key="target.id">
+                    <td>
+                      <strong>{{ target.displayName }}</strong>
+                    </td>
+                    <td><code>{{ target.targetKey }}</code></td>
+                    <td>
+                      <span class="status-badge" :class="target.enabled ? 'good' : 'neutral'">
+                        {{ target.enabled ? t('settings.status.enabled') : t('settings.status.disabled') }}
+                      </span>
+                    </td>
+                    <td><code class="wrap">{{ target.webhookPreview }}</code></td>
+                    <td>{{ formatDateTime(target.createdAt) }}</td>
+                    <td>{{ formatDateTime(target.updatedAt) }}</td>
+                    <td>
+                      <div class="target-actions">
+                        <button type="button" :disabled="busy" @click="openEditTarget(target)">{{ t('actions.edit') }}</button>
+                        <button type="button" :disabled="busy" @click="toggleTargetEnabled(target)">
+                          {{ target.enabled ? t('actions.disable') : t('actions.enable') }}
+                        </button>
+                        <button type="button" :disabled="busy" @click="testTarget(target)">{{ t('actions.testSend') }}</button>
+                        <button class="danger" type="button" :disabled="busy" @click="askDeleteTarget(target)">
+                          {{ t('actions.delete') }}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </section>
 
-      <article class="panel">
-        <header class="panel-header">
-          <h2>飞书 Webhook</h2>
-        </header>
-        <div class="settings-form">
-          <dl class="compact-detail-list">
+        <section v-else-if="activeSettingsTab === 'polling'" class="settings-layout single-column">
+          <article class="panel settings-form-panel">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.polling.title') }}</h2>
+                <p>{{ t('settings.polling.description') }}</p>
+              </div>
+            </header>
+            <form class="settings-form polling-form" @submit.prevent="savePolling">
+              <label>
+                <span>{{ t('settings.polling.intervalSeconds') }}</span>
+                <input
+                  v-model.number="pollingForm.intervalSeconds"
+                  inputmode="numeric"
+                  max="3600"
+                  min="10"
+                  type="number"
+                />
+                <small>
+                  {{ t('settings.polling.rangeSeconds', { source: sourceLabel(settings.polling.sources.intervalSeconds) }) }}
+                </small>
+              </label>
+
+              <label>
+                <span>{{ t('settings.polling.fetchLimitPerAccount') }}</span>
+                <input
+                  v-model.number="pollingForm.fetchLimitPerAccount"
+                  inputmode="numeric"
+                  max="100"
+                  min="1"
+                  type="number"
+                />
+                <small>
+                  {{ t('settings.polling.rangeItems', { source: sourceLabel(settings.polling.sources.fetchLimitPerAccount) }) }}
+                </small>
+              </label>
+
+              <label class="checkbox-row">
+                <input v-model="pollingForm.excludeReplies" type="checkbox" />
+                <span>{{ t('settings.polling.excludeReplies') }}</span>
+                <small>
+                  {{ t('settings.polling.currentSource', { source: sourceLabel(settings.polling.sources.excludeReplies) }) }}
+                </small>
+              </label>
+
+              <label class="checkbox-row">
+                <input v-model="pollingForm.excludeReposts" type="checkbox" />
+                <span>{{ t('settings.polling.excludeReposts') }}</span>
+                <small>
+                  {{ t('settings.polling.currentSource', { source: sourceLabel(settings.polling.sources.excludeReposts) }) }}
+                </small>
+              </label>
+
+              <div class="form-actions">
+                <button class="primary" type="submit" :disabled="busy">{{ t('settings.polling.save') }}</button>
+              </div>
+            </form>
+          </article>
+        </section>
+
+        <section v-else class="settings-layout single-column">
+          <article class="panel settings-form-panel">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.runtime.title') }}</h2>
+                <p>{{ t('settings.runtime.description') }}</p>
+              </div>
+            </header>
+            <dl class="detail-list">
+              <div>
+                <dt>{{ t('settings.runtime.sourceMode') }}</dt>
+                <dd><code>{{ settings.readonly.sourceMode }}</code></dd>
+              </div>
+              <div>
+                <dt>{{ t('settings.runtime.sqlitePath') }}</dt>
+                <dd><code class="wrap">{{ settings.readonly.sqlitePath }}</code></dd>
+              </div>
+              <div>
+                <dt>{{ t('settings.runtime.redisUrl') }}</dt>
+                <dd>
+                  <code class="wrap">{{ settings.readonly.redisUrlPreview ?? t('settings.runtime.notConfigured') }}</code>
+                  <span class="muted">
+                    ({{ settings.readonly.redisConfigured ? t('settings.runtime.configured') : t('settings.runtime.notConfigured') }})
+                  </span>
+                </dd>
+              </div>
+              <div>
+                <dt>{{ t('settings.runtime.service') }}</dt>
+                <dd>
+                  <code>{{ settings.readonly.serviceHost }}:{{ settings.readonly.servicePort }}</code>
+                  <span class="muted"> / {{ settings.readonly.serviceEnv }}</span>
+                </dd>
+              </div>
+              <div>
+                <dt>{{ t('settings.runtime.xConfigSummary') }}</dt>
+                <dd v-if="settings.readonly.sourceMode === 'browser'">
+                  <code class="wrap">
+                    {{
+                      t('settings.runtime.xBrowserSummary', {
+                        baseUrl: settings.readonly.xBrowserBaseUrl,
+                        headless: settings.readonly.xBrowserHeadless ? 'true' : 'false',
+                        userDataDir: settings.readonly.xBrowserUserDataDir,
+                      })
+                    }}
+                  </code>
+                </dd>
+                <dd v-else>
+                  <code class="wrap">{{ t('settings.runtime.xApiSummary') }}</code>
+                </dd>
+              </div>
+            </dl>
+          </article>
+        </section>
+      </div>
+    </div>
+
+    <Teleport to="body">
+      <div v-if="editingTarget !== null" class="modal-backdrop" @click.self="closeEditTarget">
+        <section class="modal wide target-edit-modal" role="dialog" aria-modal="true" aria-labelledby="edit-target-title">
+          <header class="modal-header">
             <div>
-              <dt>配置状态</dt>
-              <dd>
-                <StatusBadge :status="settings.feishu.configured ? 'success' : 'failed'" />
-              </dd>
+              <h2 id="edit-target-title">{{ t('settings.edit.title') }}</h2>
+              <p>{{ t('settings.edit.description') }}</p>
             </div>
-            <div>
-              <dt>脱敏预览</dt>
-              <dd><code class="wrap">{{ settings.feishu.webhookPreview ?? '未配置' }}</code></dd>
-            </div>
-          </dl>
+            <button class="icon-button" type="button" :aria-label="t('actions.close')" @click="closeEditTarget">×</button>
+          </header>
+          <form class="target-edit-form" @submit.prevent="saveTargetEdit">
+            <div class="modal-body target-edit-body">
+              <div class="settings-form modal-body-form">
+                <label>
+                  <span>{{ t('settings.feishu.displayNameLabel') }}</span>
+                  <input
+                    v-model="editTargetForm.displayName"
+                    autocomplete="off"
+                    maxlength="100"
+                    :placeholder="t('settings.feishu.displayNamePlaceholder')"
+                  />
+                </label>
+                <label>
+                  <span>{{ t('settings.edit.newWebhookUrlLabel') }}</span>
+                  <input
+                    v-model="editTargetForm.webhookUrl"
+                    autocomplete="off"
+                    :placeholder="t('settings.edit.newWebhookUrlPlaceholder')"
+                    type="url"
+                  />
+                  <small>{{ t('settings.edit.saveHelp') }}</small>
+                </label>
+              </div>
 
-          <form class="settings-form inner-form" @submit.prevent="saveFeishu">
-            <label>
-              <span>新的飞书 webhook</span>
-              <input
-                v-model="feishuWebhookUrl"
-                autocomplete="off"
-                placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."
-                type="url"
-              />
-              <small>保存后输入框会清空，页面只保留脱敏预览。</small>
-            </label>
-            <div class="form-actions">
-              <button class="primary" type="submit" :disabled="busy">保存飞书 webhook</button>
-              <button type="button" :disabled="busy" @click="testFeishu">测试发送</button>
+              <section class="target-preview-panel" :aria-label="t('settings.edit.currentInfoAria')">
+                <h3>{{ t('settings.edit.currentInfo') }}</h3>
+                <dl class="compact-detail-list">
+                  <div>
+                    <dt>{{ t('settings.edit.currentPreview') }}</dt>
+                    <dd><code class="wrap">{{ editingTarget.webhookPreview }}</code></dd>
+                  </div>
+                  <div>
+                    <dt>targetKey</dt>
+                    <dd><code class="wrap">{{ editingTarget.targetKey }}</code></dd>
+                  </div>
+                </dl>
+              </section>
             </div>
+            <footer class="modal-footer">
+              <button type="button" :disabled="busy" @click="closeEditTarget">{{ t('actions.cancel') }}</button>
+              <button class="primary" type="submit" :disabled="busy">{{ t('actions.saveEdit') }}</button>
+            </footer>
           </form>
-        </div>
-      </article>
+        </section>
+      </div>
+    </Teleport>
 
-      <article class="panel settings-wide">
-        <header class="panel-header">
-          <h2>只读运行信息</h2>
-        </header>
-        <dl class="detail-list">
-          <div>
-            <dt>Source mode</dt>
-            <dd><code>{{ settings.readonly.sourceMode }}</code></dd>
-          </div>
-          <div>
-            <dt>SQLite 路径</dt>
-            <dd><code class="wrap">{{ settings.readonly.sqlitePath }}</code></dd>
-          </div>
-          <div>
-            <dt>Redis URL</dt>
-            <dd>
-              <code class="wrap">{{ settings.readonly.redisUrlPreview ?? '未配置' }}</code>
-              <span class="muted">（{{ settings.readonly.redisConfigured ? '已配置' : '未配置' }}）</span>
-            </dd>
-          </div>
-          <div>
-            <dt>服务</dt>
-            <dd>
-              <code>{{ settings.readonly.serviceHost }}:{{ settings.readonly.servicePort }}</code>
-              <span class="muted"> / {{ settings.readonly.serviceEnv }}</span>
-            </dd>
-          </div>
-          <div>
-            <dt>X 配置摘要</dt>
-            <dd v-if="settings.readonly.sourceMode === 'browser'">
-              <code class="wrap">
-                browser，baseUrl={{ settings.readonly.xBrowserBaseUrl }}，headless={{ settings.readonly.xBrowserHeadless ? 'true' : 'false' }}，userDataDir={{ settings.readonly.xBrowserUserDataDir }}
-              </code>
-            </dd>
-            <dd v-else>
-              <code class="wrap">api，Bearer Token 不在管理页展示。</code>
-            </dd>
-          </div>
-        </dl>
-      </article>
-    </div>
+    <ConfirmModal
+      :open="deleteTarget !== null"
+      :title="t('settings.delete.title')"
+      :body="deleteTarget === null ? '' : deleteTarget.displayName"
+      :detail="t('settings.delete.detail')"
+      @cancel="deleteTarget = null"
+      @confirm="confirmDeleteTarget"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 
 import {
+  createDeliveryTarget,
+  deleteDeliveryTarget,
   getSettings,
-  testFeishuSettings,
-  updateFeishuSettings,
+  listDeliveryTargets,
+  testDeliveryTarget,
+  updateDeliveryTarget,
+  updateDeliveryTargetEnabled,
   updatePollingSettings,
+  type DeliveryTarget,
   type RuntimeSettingSource,
   type RuntimeSettingsSummary,
 } from '../api/admin-api';
+import ConfirmModal from '../components/ConfirmModal.vue';
 import PageHeader from '../components/PageHeader.vue';
-import StatusBadge from '../components/StatusBadge.vue';
 import ToastNotice from '../components/ToastNotice.vue';
+import { t, type MessageKey } from '../i18n';
+import { formatDateTime } from '../utils';
 
 const busy = ref(false);
-const feishuWebhookUrl = ref('');
+const deleteTarget = ref<DeliveryTarget | null>(null);
+const deliveryTargets = ref<DeliveryTarget[]>([]);
+const editingTarget = ref<DeliveryTarget | null>(null);
 const notice = ref('');
 const noticeDanger = ref(false);
 const settings = ref<RuntimeSettingsSummary | null>(null);
+
+type SettingsTabKey = 'feishu' | 'polling' | 'runtime';
+
+const activeSettingsTab = ref<SettingsTabKey>('feishu');
+const settingsTabs: Array<{ descriptionKey: MessageKey; key: SettingsTabKey; labelKey: MessageKey }> = [
+  {
+    descriptionKey: 'settings.tabs.feishu.description',
+    key: 'feishu',
+    labelKey: 'settings.tabs.feishu.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.polling.description',
+    key: 'polling',
+    labelKey: 'settings.tabs.polling.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.runtime.description',
+    key: 'runtime',
+    labelKey: 'settings.tabs.runtime.label',
+  },
+];
 
 const pollingForm = reactive({
   excludeReplies: true,
@@ -170,6 +368,19 @@ const pollingForm = reactive({
   fetchLimitPerAccount: 5,
   intervalSeconds: 300,
 });
+
+const newTargetForm = reactive({
+  displayName: '',
+  enabled: true,
+  webhookUrl: '',
+});
+
+const editTargetForm = reactive({
+  displayName: '',
+  webhookUrl: '',
+});
+
+const enabledTargetCount = computed(() => deliveryTargets.value.filter((target) => target.enabled).length);
 
 onMounted(() => {
   void loadSettings({ silent: true });
@@ -179,14 +390,18 @@ async function loadSettings(options: { silent?: boolean } = {}): Promise<void> {
   busy.value = true;
 
   try {
-    const loadedSettings = await getSettings();
+    const [loadedSettings, loadedTargets] = await Promise.all([
+      getSettings(),
+      listDeliveryTargets(),
+    ]);
     applySettings(loadedSettings);
+    deliveryTargets.value = loadedTargets.deliveryTargets;
 
     if (options.silent !== true) {
-      setNotice('已刷新配置。');
+      setNotice(t('settings.notice.refreshSuccess'));
     }
   } catch (error) {
-    setNotice(toErrorMessage(error), true);
+    setNotice(t('settings.notice.refreshFailure', { error: toErrorMessage(error) }), true);
   } finally {
     busy.value = false;
   }
@@ -196,7 +411,7 @@ async function savePolling(): Promise<void> {
   const validationError = validatePollingForm();
 
   if (validationError !== null) {
-    setNotice(validationError, true);
+    setNotice(t('settings.notice.savePollingFailure', { error: validationError }), true);
     return;
   }
 
@@ -217,51 +432,146 @@ async function savePolling(): Promise<void> {
       };
     }
 
-    setNotice('轮询配置已保存。');
+    setNotice(t('settings.notice.savePollingSuccess'));
   } catch (error) {
-    setNotice(toErrorMessage(error), true);
+    setNotice(t('settings.notice.savePollingFailure', { error: toErrorMessage(error) }), true);
   } finally {
     busy.value = false;
   }
 }
 
-async function saveFeishu(): Promise<void> {
-  const validationError = validateWebhookUrl(feishuWebhookUrl.value);
+async function createTarget(): Promise<void> {
+  const validationError = validateDeliveryTargetForm(newTargetForm.displayName, newTargetForm.webhookUrl, {
+    requireWebhookUrl: true,
+  });
 
   if (validationError !== null) {
-    setNotice(validationError, true);
+    setNotice(t('settings.notice.createTargetFailure', { error: validationError }), true);
     return;
   }
 
   busy.value = true;
 
   try {
-    const feishu = await updateFeishuSettings(feishuWebhookUrl.value);
-    feishuWebhookUrl.value = '';
-
-    if (settings.value !== null) {
-      settings.value = {
-        ...settings.value,
-        feishu,
-      };
-    }
-
-    setNotice('飞书 webhook 已保存，页面仅显示脱敏预览。');
+    const result = await createDeliveryTarget({
+      displayName: newTargetForm.displayName.trim(),
+      enabled: newTargetForm.enabled,
+      webhookUrl: newTargetForm.webhookUrl.trim(),
+    });
+    deliveryTargets.value = [...deliveryTargets.value, result.deliveryTarget];
+    resetNewTargetForm();
+    setNotice(t('settings.notice.createTargetSuccess'));
   } catch (error) {
-    setNotice(toErrorMessage(error), true);
+    setNotice(t('settings.notice.createTargetFailure', { error: toDeliveryTargetErrorMessage(error) }), true);
   } finally {
     busy.value = false;
   }
 }
 
-async function testFeishu(): Promise<void> {
+function openEditTarget(target: DeliveryTarget): void {
+  editingTarget.value = target;
+  editTargetForm.displayName = target.displayName;
+  editTargetForm.webhookUrl = '';
+}
+
+function closeEditTarget(): void {
+  editingTarget.value = null;
+  editTargetForm.displayName = '';
+  editTargetForm.webhookUrl = '';
+}
+
+async function saveTargetEdit(): Promise<void> {
+  if (editingTarget.value === null) {
+    return;
+  }
+
+  const validationError = validateDeliveryTargetForm(editTargetForm.displayName, editTargetForm.webhookUrl, {
+    requireWebhookUrl: false,
+  });
+
+  if (validationError !== null) {
+    setNotice(t('settings.notice.editTargetFailure', { error: validationError }), true);
+    return;
+  }
+
   busy.value = true;
 
   try {
-    const result = await testFeishuSettings();
-    setNotice(`飞书测试发送成功。providerCode=${result.providerCode}`);
+    const webhookUrl = editTargetForm.webhookUrl.trim();
+    const result = await updateDeliveryTarget(editingTarget.value.id, {
+      displayName: editTargetForm.displayName.trim(),
+      ...(webhookUrl.length === 0 ? {} : { webhookUrl }),
+    });
+    replaceDeliveryTarget(result.deliveryTarget);
+    closeEditTarget();
+    setNotice(t('settings.notice.editTargetSuccess'));
   } catch (error) {
-    setNotice(toErrorMessage(error), true);
+    setNotice(t('settings.notice.editTargetFailure', { error: toDeliveryTargetErrorMessage(error) }), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function toggleTargetEnabled(target: DeliveryTarget): Promise<void> {
+  busy.value = true;
+  const nextEnabled = !target.enabled;
+
+  try {
+    const result = await updateDeliveryTargetEnabled(target.id, nextEnabled);
+    replaceDeliveryTarget(result.deliveryTarget);
+    setNotice(
+      result.deliveryTarget.enabled
+        ? t('settings.notice.enableTargetSuccess')
+        : t('settings.notice.disableTargetSuccess'),
+    );
+  } catch (error) {
+    setNotice(
+      t(nextEnabled ? 'settings.notice.enableTargetFailure' : 'settings.notice.disableTargetFailure', {
+        error: toErrorMessage(error),
+      }),
+      true,
+    );
+  } finally {
+    busy.value = false;
+  }
+}
+
+function askDeleteTarget(target: DeliveryTarget): void {
+  deleteTarget.value = target;
+}
+
+async function confirmDeleteTarget(): Promise<void> {
+  if (deleteTarget.value === null) {
+    return;
+  }
+
+  busy.value = true;
+
+  try {
+    const targetName = deleteTarget.value.displayName;
+    const result = await deleteDeliveryTarget(deleteTarget.value.id);
+    deliveryTargets.value = deliveryTargets.value.filter((target) => target.id !== deleteTarget.value?.id);
+    deleteTarget.value = null;
+    setNotice(t('settings.notice.deleteTargetSuccess', { targetName, deadEventsCount: result.deadEventsCount }));
+  } catch (error) {
+    setNotice(t('settings.notice.deleteTargetFailure', { error: toErrorMessage(error) }), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function testTarget(target: DeliveryTarget): Promise<void> {
+  busy.value = true;
+
+  try {
+    const result = await testDeliveryTarget(target.id);
+    replaceDeliveryTarget({
+      ...target,
+      webhookPreview: result.webhookPreview,
+    });
+    setNotice(t('settings.notice.testTargetSuccess', { targetKey: result.targetKey, providerCode: result.providerCode }));
+  } catch (error) {
+    setNotice(t('settings.notice.testTargetFailure', { error: toErrorMessage(error) }), true);
   } finally {
     busy.value = false;
   }
@@ -275,48 +585,81 @@ function applySettings(loadedSettings: RuntimeSettingsSummary): void {
   pollingForm.intervalSeconds = loadedSettings.polling.intervalSeconds;
 }
 
+function replaceDeliveryTarget(nextTarget: DeliveryTarget): void {
+  deliveryTargets.value = deliveryTargets.value.map((target) =>
+    target.id === nextTarget.id ? nextTarget : target,
+  );
+
+  if (editingTarget.value?.id === nextTarget.id) {
+    editingTarget.value = nextTarget;
+  }
+}
+
+function resetNewTargetForm(): void {
+  newTargetForm.displayName = '';
+  newTargetForm.enabled = true;
+  newTargetForm.webhookUrl = '';
+}
+
 function validatePollingForm(): string | null {
   if (!Number.isInteger(pollingForm.intervalSeconds)) {
-    return '轮询间隔秒数必须是整数。';
+    return t('settings.validation.intervalInteger');
   }
 
   if (pollingForm.intervalSeconds < 10 || pollingForm.intervalSeconds > 3600) {
-    return '轮询间隔秒数必须在 10-3600 之间。';
+    return t('settings.validation.intervalRange');
   }
 
   if (!Number.isInteger(pollingForm.fetchLimitPerAccount)) {
-    return '每账号抓取数量必须是整数。';
+    return t('settings.validation.fetchLimitInteger');
   }
 
   if (pollingForm.fetchLimitPerAccount < 1 || pollingForm.fetchLimitPerAccount > 100) {
-    return '每账号抓取数量必须在 1-100 之间。';
+    return t('settings.validation.fetchLimitRange');
   }
 
   return null;
 }
 
-function validateWebhookUrl(value: string): string | null {
-  const webhookUrl = value.trim();
+function validateDeliveryTargetForm(
+  displayName: string,
+  webhookUrl: string,
+  options: { requireWebhookUrl: boolean },
+): string | null {
+  const normalizedDisplayName = displayName.trim();
+  const normalizedWebhookUrl = webhookUrl.trim();
 
-  if (webhookUrl.length === 0) {
-    return '飞书 webhook 不能为空。';
+  if (normalizedDisplayName.length === 0) {
+    return t('settings.validation.displayNameRequired');
   }
 
+  if (normalizedDisplayName.length > 100) {
+    return t('settings.validation.displayNameMax');
+  }
+
+  if (normalizedWebhookUrl.length === 0) {
+    return options.requireWebhookUrl ? t('settings.validation.webhookRequired') : null;
+  }
+
+  return validateWebhookUrl(normalizedWebhookUrl);
+}
+
+function validateWebhookUrl(value: string): string | null {
   try {
-    const parsedUrl = new URL(webhookUrl);
+    const parsedUrl = new URL(value);
 
     if (parsedUrl.protocol !== 'https:') {
-      return '飞书 webhook 必须是 https URL。';
+      return t('settings.validation.webhookHttps');
     }
   } catch {
-    return '飞书 webhook 必须是有效 URL。';
+    return t('settings.validation.webhookInvalid');
   }
 
   return null;
 }
 
 function sourceLabel(source: RuntimeSettingSource): string {
-  return source === 'database_override' ? 'SQLite 覆盖' : '.env 默认';
+  return source === 'database_override' ? t('settings.source.databaseOverride') : t('settings.source.envDefault');
 }
 
 function setNotice(message: string, danger = false): void {
@@ -324,7 +667,18 @@ function setNotice(message: string, danger = false): void {
   noticeDanger.value = danger;
 }
 
+function toDeliveryTargetErrorMessage(error: unknown): string {
+  const message = toErrorMessage(error);
+  return message.includes('\u5df2\u5b58\u5728') ? t('settings.notice.duplicateWebhook') : sanitizeWebhookMessage(message);
+}
+
 function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return sanitizeWebhookMessage(error instanceof Error ? error.message : String(error));
+}
+
+function sanitizeWebhookMessage(message: string): string {
+  return message
+    .replace(/https:\/\/open\.feishu\.cn\/open-apis\/bot\/v2\/hook\/[^\s"'，。)）]+/gi, t('settings.webhookHidden'))
+    .replace(/https:\/\/[^\s"'，。)）]*(?:feishu|larksuite)[^\s"'，。)）]*/gi, t('settings.webhookHidden'));
 }
 </script>

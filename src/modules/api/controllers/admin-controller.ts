@@ -1,9 +1,12 @@
+import { randomBytes } from 'node:crypto';
+
 import type { AppConfig } from '../../../shared/config/types';
 import { createFeishuWebhookClient, type FeishuWebhookFailureResult } from '../../delivery';
 import type { RuntimeSchedulerRunNowResult } from '../../scheduler';
 import {
   createRuntimeSettingsService,
   previewSecretUrl,
+  type DeliveryTarget,
   type DeliveryEvent,
   type PollRun,
   type RuntimeFeishuSettings,
@@ -51,6 +54,7 @@ interface AdminPaginationInput {
 
 const DEFAULT_ADMIN_PAGE_SIZE = 10;
 const MAX_ADMIN_PAGE_SIZE = 100;
+const DELIVERY_TARGET_KEY_PREFIX = 'feishu';
 
 export class AdminApiError extends Error {
   public readonly code: string;
@@ -304,6 +308,151 @@ export async function updateAdminFeishuSettings(
   };
 }
 
+export async function listAdminDeliveryTargets(
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { deliveryTargets: AdminDeliveryTarget[] } }> {
+  const deliveryTargets = await options.storage.deliveryTargets.listAll();
+
+  return {
+    ok: true,
+    data: {
+      deliveryTargets: deliveryTargets.map(toAdminDeliveryTarget),
+    },
+  };
+}
+
+export async function createAdminDeliveryTarget(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { deliveryTarget: AdminDeliveryTarget } }> {
+  const input = readCreateDeliveryTargetBody(body);
+  await assertWebhookUrlNotDuplicated(input.webhookUrl, options);
+  const deliveryTarget = await options.storage.deliveryTargets.create({
+    channelType: 'feishu_webhook',
+    displayName: input.displayName,
+    enabled: input.enabled,
+    targetKey: await createUniqueDeliveryTargetKey(options),
+    webhookUrl: input.webhookUrl,
+  });
+
+  return {
+    ok: true,
+    data: {
+      deliveryTarget: toAdminDeliveryTarget(deliveryTarget),
+    },
+  };
+}
+
+export async function updateAdminDeliveryTarget(
+  params: unknown,
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { deliveryTarget: AdminDeliveryTarget } }> {
+  const id = readIdParam(params);
+  const existingTarget = await findVisibleDeliveryTarget(id, options);
+  const input = readUpdateDeliveryTargetBody(body);
+
+  if (input.webhookUrl !== undefined) {
+    await assertWebhookUrlNotDuplicated(input.webhookUrl, options, existingTarget.id);
+  }
+
+  const updatedTarget = await options.storage.deliveryTargets.update(existingTarget.id, input);
+
+  if (updatedTarget === null || updatedTarget.webhookUrl.trim().length === 0) {
+    throw new AdminApiError(404, 'NOT_FOUND', '未找到飞书 webhook。');
+  }
+
+  return {
+    ok: true,
+    data: {
+      deliveryTarget: toAdminDeliveryTarget(updatedTarget),
+    },
+  };
+}
+
+export async function updateAdminDeliveryTargetEnabled(
+  params: unknown,
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { deliveryTarget: AdminDeliveryTarget } }> {
+  const id = readIdParam(params);
+  const existingTarget = await findVisibleDeliveryTarget(id, options);
+  const enabled = readDeliveryTargetEnabledBody(body);
+  const updatedTarget = await options.storage.deliveryTargets.update(existingTarget.id, {
+    enabled,
+  });
+
+  if (updatedTarget === null || updatedTarget.webhookUrl.trim().length === 0) {
+    throw new AdminApiError(404, 'NOT_FOUND', '未找到飞书 webhook。');
+  }
+
+  return {
+    ok: true,
+    data: {
+      deliveryTarget: toAdminDeliveryTarget(updatedTarget),
+    },
+  };
+}
+
+export async function deleteAdminDeliveryTarget(
+  params: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { deadEventsCount: number; deleted: true } }> {
+  const id = readIdParam(params);
+  await findVisibleDeliveryTarget(id, options);
+  const deleteResult = await options.storage.deliveryTargets.delete(id);
+
+  if (!deleteResult.deleted) {
+    throw new AdminApiError(404, 'NOT_FOUND', '未找到飞书 webhook。');
+  }
+
+  return {
+    ok: true,
+    data: {
+      deadEventsCount: deleteResult.deadEventsCount,
+      deleted: true,
+    },
+  };
+}
+
+export async function testAdminDeliveryTarget(
+  params: unknown,
+  options: AdminControllerOptions,
+): Promise<{
+  ok: true;
+  data: {
+    ok: true;
+    providerCode: number;
+    providerMessage?: string;
+    targetKey: string;
+    webhookPreview: string;
+  };
+}> {
+  const id = readIdParam(params);
+  const target = await findVisibleDeliveryTarget(id, options);
+
+  const result = await createFeishuWebhookClient().sendTextMessage({
+    targetKey: target.targetKey,
+    text: `AI 前沿消息本地配置测试：${target.displayName} webhook 可用。`,
+    webhookUrl: target.webhookUrl,
+  });
+
+  if (!result.ok) {
+    throw toFeishuTestSendError(result, target.webhookUrl);
+  }
+
+  return {
+    ok: true,
+    data: {
+      ok: true,
+      providerCode: result.providerCode,
+      ...(result.providerMessage === undefined ? {} : { providerMessage: result.providerMessage }),
+      targetKey: result.targetKey,
+      webhookPreview: previewSecretUrl(target.webhookUrl),
+    },
+  };
+}
+
 export async function testAdminFeishuSettings(
   options: AdminControllerOptions,
 ): Promise<{
@@ -390,6 +539,17 @@ interface AdminSummary {
   sourceMode: string;
   watchAccountsCount: number;
   watchAccountsSource: string;
+}
+
+interface AdminDeliveryTarget {
+  channelType: DeliveryTarget['channelType'];
+  createdAt: string;
+  displayName: string;
+  enabled: boolean;
+  id: string;
+  targetKey: string;
+  updatedAt: string;
+  webhookPreview: string;
 }
 
 function readPaginationQuery(query: unknown): AdminPaginationInput {
@@ -548,6 +708,137 @@ function resolveRuntimeSettings(options: AdminControllerOptions): RuntimeSetting
   });
 }
 
+function toAdminDeliveryTarget(target: DeliveryTarget): AdminDeliveryTarget {
+  return {
+    channelType: target.channelType,
+    createdAt: target.createdAt,
+    displayName: target.displayName,
+    enabled: target.enabled,
+    id: target.id,
+    targetKey: target.targetKey,
+    updatedAt: target.updatedAt,
+    webhookPreview: previewSecretUrl(target.webhookUrl),
+  };
+}
+
+async function findVisibleDeliveryTarget(
+  id: string,
+  options: AdminControllerOptions,
+): Promise<DeliveryTarget> {
+  const target = await options.storage.deliveryTargets.findById(id);
+
+  if (target === null || target.webhookUrl.trim().length === 0) {
+    throw new AdminApiError(404, 'NOT_FOUND', '未找到飞书 webhook。');
+  }
+
+  return target;
+}
+
+async function createUniqueDeliveryTargetKey(options: AdminControllerOptions): Promise<string> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const targetKey = `${DELIVERY_TARGET_KEY_PREFIX}-${randomBytes(4).toString('hex')}`;
+    const existingTarget = await options.storage.deliveryTargets.findByTargetKey(targetKey);
+
+    if (existingTarget === null) {
+      return targetKey;
+    }
+  }
+
+  throw new AdminApiError(500, 'TARGET_KEY_GENERATION_FAILED', '无法生成飞书 webhook 标识。');
+}
+
+async function assertWebhookUrlNotDuplicated(
+  webhookUrl: string,
+  options: AdminControllerOptions,
+  allowedTargetId?: string,
+): Promise<void> {
+  const normalizedWebhookUrl = normalizeWebhookUrlForComparison(webhookUrl);
+  const targets = await options.storage.deliveryTargets.listAll();
+  const duplicatedTarget = targets.find(
+    (target) =>
+      target.id !== allowedTargetId &&
+      normalizeWebhookUrlForComparison(target.webhookUrl) === normalizedWebhookUrl,
+  );
+
+  if (duplicatedTarget !== undefined) {
+    throw new AdminApiError(409, 'DUPLICATE_WEBHOOK_URL', '飞书 webhook URL 已存在。');
+  }
+}
+
+function readCreateDeliveryTargetBody(body: unknown): {
+  displayName: string;
+  enabled: boolean;
+  webhookUrl: string;
+} {
+  if (!isRecord(body)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
+  }
+
+  return {
+    displayName: readDeliveryTargetDisplayName(body.displayName),
+    enabled: readOptionalBooleanBodyValue(body.enabled, 'enabled') ?? true,
+    webhookUrl: readFeishuWebhookUrl(body),
+  };
+}
+
+function readUpdateDeliveryTargetBody(body: unknown): {
+  displayName?: string;
+  webhookUrl?: string;
+} {
+  if (!isRecord(body)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
+  }
+
+  const input: {
+    displayName?: string;
+    webhookUrl?: string;
+  } = {};
+
+  if (body.displayName !== undefined) {
+    input.displayName = readDeliveryTargetDisplayName(body.displayName);
+  }
+
+  if (body.webhookUrl !== undefined) {
+    input.webhookUrl = readFeishuWebhookUrl(body);
+  }
+
+  if (Object.keys(input).length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '至少需要提供 displayName 或 webhookUrl。');
+  }
+
+  return input;
+}
+
+function readDeliveryTargetEnabledBody(body: unknown): boolean {
+  if (!isRecord(body)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
+  }
+
+  return readRequiredBooleanBodyValue(body.enabled, 'enabled');
+}
+
+function readDeliveryTargetDisplayName(value: unknown): string {
+  if (value === undefined) {
+    return 'Feishu Webhook';
+  }
+
+  if (typeof value !== 'string') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'displayName 必须是字符串。');
+  }
+
+  const displayName = value.trim();
+
+  if (displayName.length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'displayName 不能为空。');
+  }
+
+  if (displayName.length > 100) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'displayName 不能超过 100 个字符。');
+  }
+
+  return displayName;
+}
+
 function readPollingSettingsBody(body: unknown): SavePollingSettingsInput {
   if (!isRecord(body)) {
     throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
@@ -572,6 +863,14 @@ function readRequiredBooleanBodyValue(value: unknown, fieldName: string): boolea
   }
 
   return value;
+}
+
+function readOptionalBooleanBodyValue(value: unknown, fieldName: string): boolean | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return readRequiredBooleanBodyValue(value, fieldName);
 }
 
 function readRequiredIntegerBodyValue(
@@ -621,6 +920,10 @@ function readFeishuWebhookUrl(body: unknown): string {
 
     throw new AdminApiError(400, 'INVALID_REQUEST', 'webhookUrl 必须是有效 URL。');
   }
+}
+
+function normalizeWebhookUrlForComparison(webhookUrl: string): string {
+  return new URL(webhookUrl.trim()).toString().replace(/\/+$/u, '');
 }
 
 function toFeishuTestSendError(

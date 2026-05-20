@@ -169,6 +169,26 @@ export class DeliveryEventRepository {
     return deliveryEvents.map(mapDeliveryEvent);
   }
 
+  public async markIncompleteAsDeadByTargetKey(targetKey: string): Promise<number> {
+    const result = await this.prisma.deliveryEvent.updateMany({
+      data: {
+        lastError: 'target deleted',
+        lockedAt: null,
+        nextRetryAt: null,
+        status: 'dead',
+        updatedAt: createTimestamp(),
+      },
+      where: {
+        status: {
+          in: ['pending', 'retry_wait', 'sending'],
+        },
+        targetKey,
+      },
+    });
+
+    return result.count;
+  }
+
   public async listPage(input: {
     from?: string;
     page: number;

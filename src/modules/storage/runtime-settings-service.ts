@@ -119,11 +119,11 @@ export class RuntimeSettingsService {
   }
 
   public async getFeishuSettings(): Promise<RuntimeFeishuSettings> {
-    const target = await this.options.storage.deliveryTargets.findByTargetKey(this.getDefaultTargetKey());
-    const webhookUrl = target?.webhookUrl.trim() ?? '';
+    const targets = await this.options.storage.deliveryTargets.listEnabled();
+    const webhookUrl = targets[0]?.webhookUrl.trim() ?? '';
 
     return {
-      configured: webhookUrl.length > 0,
+      configured: targets.some((target) => target.webhookUrl.trim().length > 0),
       webhookPreview: webhookUrl.length === 0 ? null : previewSecretUrl(webhookUrl),
     };
   }

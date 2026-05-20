@@ -10,6 +10,11 @@ import type {
 
 const DEFAULT_CHANNEL_TYPE = 'feishu_webhook';
 
+export interface DeleteDeliveryTargetResult {
+  deadEventsCount: number;
+  deleted: boolean;
+}
+
 export class DeliveryTargetRepository {
   public constructor(private readonly prisma: PrismaClient) {}
 
@@ -31,12 +36,65 @@ export class DeliveryTargetRepository {
     return mapDeliveryTarget(deliveryTarget);
   }
 
-  public async delete(id: string): Promise<boolean> {
-    const result = await this.prisma.deliveryTarget.deleteMany({
+  public async delete(id: string): Promise<DeleteDeliveryTargetResult> {
+    const deliveryTarget = await this.prisma.deliveryTarget.findUnique({
       where: { id },
     });
 
-    return result.count > 0;
+    if (deliveryTarget === null) {
+      return {
+        deadEventsCount: 0,
+        deleted: false,
+      };
+    }
+
+    const deadEventsResult = await this.prisma.deliveryEvent.updateMany({
+      data: {
+        lastError: 'target deleted',
+        lockedAt: null,
+        nextRetryAt: null,
+        status: 'dead',
+        updatedAt: createTimestamp(),
+      },
+      where: {
+        status: {
+          in: ['pending', 'retry_wait', 'sending'],
+        },
+        targetKey: deliveryTarget.targetKey,
+      },
+    });
+
+    const deliveryEventCount = await this.prisma.deliveryEvent.count({
+      where: {
+        targetKey: deliveryTarget.targetKey,
+      },
+    });
+
+    if (deliveryEventCount === 0) {
+      const result = await this.prisma.deliveryTarget.deleteMany({
+        where: { id },
+      });
+
+      return {
+        deadEventsCount: deadEventsResult.count,
+        deleted: result.count > 0,
+      };
+    }
+
+    const result = await this.prisma.deliveryTarget.updateMany({
+      data: {
+        displayName: `[deleted] ${deliveryTarget.displayName}`,
+        enabled: false,
+        updatedAt: createTimestamp(),
+        webhookUrl: '',
+      },
+      where: { id },
+    });
+
+    return {
+      deadEventsCount: deadEventsResult.count,
+      deleted: result.count > 0,
+    };
   }
 
   public async ensureDefaultTarget(input: DefaultDeliveryTargetInput): Promise<DeliveryTarget> {
@@ -90,7 +148,28 @@ export class DeliveryTargetRepository {
   public async listEnabled(): Promise<DeliveryTarget[]> {
     const deliveryTargets = await this.prisma.deliveryTarget.findMany({
       orderBy: { targetKey: 'asc' },
-      where: { enabled: true },
+      where: {
+        enabled: true,
+        webhookUrl: {
+          not: '',
+        },
+      },
+    });
+
+    return deliveryTargets.map(mapDeliveryTarget);
+  }
+
+  public async listAll(): Promise<DeliveryTarget[]> {
+    const deliveryTargets = await this.prisma.deliveryTarget.findMany({
+      orderBy: [
+        { createdAt: 'asc' },
+        { targetKey: 'asc' },
+      ],
+      where: {
+        webhookUrl: {
+          not: '',
+        },
+      },
     });
 
     return deliveryTargets.map(mapDeliveryTarget);

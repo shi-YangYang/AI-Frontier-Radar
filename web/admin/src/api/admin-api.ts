@@ -146,6 +146,41 @@ export interface FeishuTestResult {
   targetKey: string;
 }
 
+export interface DeliveryTarget {
+  channelType: 'feishu_webhook';
+  createdAt: string;
+  displayName: string;
+  enabled: boolean;
+  id: string;
+  targetKey: string;
+  updatedAt: string;
+  webhookPreview: string;
+}
+
+export interface CreateDeliveryTargetInput {
+  displayName: string;
+  enabled: boolean;
+  webhookUrl: string;
+}
+
+export interface UpdateDeliveryTargetInput {
+  displayName: string;
+  webhookUrl?: string;
+}
+
+export interface DeliveryTargetTestResult {
+  ok: true;
+  providerCode: number;
+  providerMessage?: string;
+  targetKey: string;
+  webhookPreview: string;
+}
+
+export interface DeleteDeliveryTargetResult {
+  deadEventsCount: number;
+  deleted: true;
+}
+
 export async function getSummary(): Promise<AdminSummary> {
   return requestJson<AdminSummary>('/admin/api/summary');
 }
@@ -172,6 +207,61 @@ export async function updateFeishuSettings(webhookUrl: string): Promise<RuntimeF
 
 export async function testFeishuSettings(): Promise<FeishuTestResult> {
   return requestJson<FeishuTestResult>('/admin/api/settings/feishu/test', { method: 'POST' });
+}
+
+export async function listDeliveryTargets(): Promise<{ deliveryTargets: DeliveryTarget[] }> {
+  return requestJson<{ deliveryTargets: DeliveryTarget[] }>(
+    '/admin/api/settings/delivery-targets',
+  );
+}
+
+export async function createDeliveryTarget(
+  input: CreateDeliveryTargetInput,
+): Promise<{ deliveryTarget: DeliveryTarget }> {
+  return requestJson<{ deliveryTarget: DeliveryTarget }>('/admin/api/settings/delivery-targets', {
+    body: JSON.stringify(input),
+    method: 'POST',
+  });
+}
+
+export async function updateDeliveryTarget(
+  id: string,
+  input: UpdateDeliveryTargetInput,
+): Promise<{ deliveryTarget: DeliveryTarget }> {
+  return requestJson<{ deliveryTarget: DeliveryTarget }>(
+    '/admin/api/settings/delivery-targets/' + encodeURIComponent(id),
+    {
+      body: JSON.stringify(input),
+      method: 'PUT',
+    },
+  );
+}
+
+export async function updateDeliveryTargetEnabled(
+  id: string,
+  enabled: boolean,
+): Promise<{ deliveryTarget: DeliveryTarget }> {
+  return requestJson<{ deliveryTarget: DeliveryTarget }>(
+    '/admin/api/settings/delivery-targets/' + encodeURIComponent(id) + '/enabled',
+    {
+      body: JSON.stringify({ enabled }),
+      method: 'PATCH',
+    },
+  );
+}
+
+export async function deleteDeliveryTarget(id: string): Promise<DeleteDeliveryTargetResult> {
+  return requestJson<DeleteDeliveryTargetResult>(
+    '/admin/api/settings/delivery-targets/' + encodeURIComponent(id),
+    { method: 'DELETE' },
+  );
+}
+
+export async function testDeliveryTarget(id: string): Promise<DeliveryTargetTestResult> {
+  return requestJson<DeliveryTargetTestResult>(
+    '/admin/api/settings/delivery-targets/' + encodeURIComponent(id) + '/test',
+    { method: 'POST' },
+  );
 }
 
 export async function listWatchAccounts(): Promise<{ watchAccounts: WatchAccount[] }> {
