@@ -12,20 +12,22 @@
           <div v-if="parsedErrors.length === 1 && parsedErrors[0].account === null" class="raw-error">
             {{ parsedErrors[0].error }}
           </div>
-          <table v-else class="compact-table">
-            <thead>
-              <tr>
-                <th>{{ t('modal.accountColumn') }}</th>
-                <th>{{ t('modal.errorColumn') }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(item, index) in parsedErrors" :key="index">
-                <td>{{ item.account ?? '-' }}</td>
-                <td class="wrap">{{ item.error }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div v-else class="table-wrap">
+            <table class="compact-table">
+              <thead>
+                <tr>
+                  <th>{{ t('modal.accountColumn') }}</th>
+                  <th>{{ t('modal.errorColumn') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(item, index) in parsedErrors" :key="index">
+                  <td>{{ item.account ?? '-' }}</td>
+                  <td class="wrap">{{ item.error }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
         <footer class="modal-footer">
           <button type="button" @click="emit('close')">{{ t('actions.close') }}</button>
