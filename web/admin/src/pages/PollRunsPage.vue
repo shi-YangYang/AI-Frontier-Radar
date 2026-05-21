@@ -20,9 +20,14 @@
     <div class="panel">
       <div class="bulk-actions">
         <span>{{ t('bulk.selectedCount', { count: selectedCount }) }}</span>
-        <button class="danger" type="button" :disabled="busy || selectedCount === 0" @click="askBatchDelete">
-          {{ t('actions.batchDelete') }}
-        </button>
+        <div class="action-row">
+          <button class="danger" type="button" :disabled="busy || selectedCount === 0" @click="askBatchDelete">
+            {{ t('actions.batchDelete') }}
+          </button>
+          <button class="danger" type="button" :disabled="busy" @click="askClearHistory">
+            {{ t('actions.clearHistory') }}
+          </button>
+        </div>
       </div>
       <div class="table-wrap">
         <table>
@@ -104,6 +109,14 @@
       @cancel="batchDeleteOpen = false"
       @confirm="confirmBatchDelete"
     />
+    <ConfirmModal
+      :open="clearHistoryOpen"
+      :title="t('poll.clearHistoryTitle')"
+      :body="t('poll.clearHistoryBody')"
+      :detail="t('poll.clearHistoryDetail')"
+      @cancel="clearHistoryOpen = false"
+      @confirm="confirmClearHistory"
+    />
     <ErrorModal
       :open="errorSummary !== null"
       :error-summary="errorSummary"
@@ -117,6 +130,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 
 import {
   batchDeletePollRuns,
+  clearPollRunsHistory,
   deletePollRun,
   listPollRuns,
   type AdminPagination,
@@ -134,6 +148,7 @@ import { DEFAULT_PAGE_SIZE, formatDateTime, pollProgress, validateTimeRange } fr
 
 const batchDeleteOpen = ref(false);
 const busy = ref(false);
+const clearHistoryOpen = ref(false);
 const deleteTarget = ref<PollRun | null>(null);
 const errorSummary = ref<string | null>(null);
 const filters = reactive({ from: '', to: '' });
@@ -223,6 +238,10 @@ function askBatchDelete(): void {
   batchDeleteOpen.value = true;
 }
 
+function askClearHistory(): void {
+  clearHistoryOpen.value = true;
+}
+
 async function confirmBatchDelete(): Promise<void> {
   const ids = [...selectedIds.value];
 
@@ -239,6 +258,22 @@ async function confirmBatchDelete(): Promise<void> {
     clearSelection();
     await loadPage(pagination.value.page, { silent: true });
     setNotice(t('notice.pollRunsBatchDeleted', { count: result.deletedCount }));
+  } catch (error) {
+    setNotice(error instanceof Error ? error.message : String(error), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function confirmClearHistory(): Promise<void> {
+  busy.value = true;
+
+  try {
+    const result = await clearPollRunsHistory();
+    clearHistoryOpen.value = false;
+    clearSelection();
+    await loadPage(1, { silent: true });
+    setNotice(formatClearHistoryNotice(result.deletedCount, result.retainedRunningCount));
   } catch (error) {
     setNotice(error instanceof Error ? error.message : String(error), true);
   } finally {
@@ -278,6 +313,16 @@ function clearSelection(): void {
 function setNotice(message: string, danger = false): void {
   notice.value = message;
   noticeDanger.value = danger;
+}
+
+function formatClearHistoryNotice(deletedCount: number, retainedRunningCount: number): string {
+  const base = t('poll.clearHistorySuccess', { count: deletedCount });
+
+  if (retainedRunningCount <= 0) {
+    return base;
+  }
+
+  return base + ' ' + t('poll.clearHistoryRetainedDetail', { count: retainedRunningCount });
 }
 
 function toQuery(page: number): PageQuery {

@@ -10,6 +10,8 @@ import type { AdminActions } from '../controllers/admin-controller';
 import {
   batchDeleteAdminDeliveryEvents,
   batchDeleteAdminPollRuns,
+  clearAdminDeliveryEventsHistory,
+  clearAdminPollRunsHistory,
   createAdminDeliveryTarget,
   createAdminWatchAccount,
   deleteAdminDeliveryTarget,
@@ -208,7 +210,8 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
         response: adminJsonResponseSchema,
       },
     },
-    async (_, reply) => sendAdminResponse(reply, () => listAdminWatchAccounts(options)),
+    async (request, reply) =>
+      sendAdminResponse(reply, () => listAdminWatchAccounts(request.query, options)),
   );
 
   app.post(
@@ -253,6 +256,16 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
       sendAdminResponse(reply, () => batchDeleteAdminPollRuns(request.body, options)),
   );
 
+  app.post(
+    '/admin/api/poll-runs/clear-history',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => clearAdminPollRunsHistory(options)),
+  );
+
   app.delete(
     '/admin/api/poll-runs/:id',
     {
@@ -282,6 +295,17 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     },
     async (request, reply) =>
       sendAdminResponse(reply, () => batchDeleteAdminDeliveryEvents(request.body, options)),
+  );
+
+  app.post(
+    '/admin/api/delivery-events/clear-history',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) =>
+      sendAdminResponse(reply, () => clearAdminDeliveryEventsHistory(options)),
   );
 
   app.delete(

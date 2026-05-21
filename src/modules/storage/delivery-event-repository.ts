@@ -76,6 +76,30 @@ export class DeliveryEventRepository {
     return result.count;
   }
 
+  public async deleteHistory(): Promise<{ deletedCount: number; retainedActiveCount: number }> {
+    const [retainedActiveCount, deleteResult] = await this.prisma.$transaction([
+      this.prisma.deliveryEvent.count({
+        where: {
+          status: {
+            in: ['pending', 'retry_wait', 'sending'],
+          },
+        },
+      }),
+      this.prisma.deliveryEvent.deleteMany({
+        where: {
+          status: {
+            in: ['sent', 'dead', 'failed'],
+          },
+        },
+      }),
+    ]);
+
+    return {
+      deletedCount: deleteResult.count,
+      retainedActiveCount,
+    };
+  }
+
   public async findById(id: string): Promise<DeliveryEvent | null> {
     const deliveryEvent = await this.prisma.deliveryEvent.findUnique({
       where: { id },

@@ -266,6 +266,7 @@ tr:last-child td {
 .toolbar,
 .inline-form,
 .filter-form,
+.query-form,
 .action-row,
 .modal-footer {
   display: flex;
@@ -279,6 +280,27 @@ tr:last-child td {
   gap: 5px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.account-add-form input {
+  min-width: 400px;
+}
+
+.query-form {
+  align-items: end;
+  border-bottom: 1px solid var(--border);
+  padding: 12px 14px;
+}
+
+.query-form label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.query-form label input {
+  min-width: 300px;
 }
 
 .notice {
@@ -942,6 +964,11 @@ tr:last-child td {
     grid-template-columns: repeat(2, minmax(0, 1fr)) auto auto;
     align-items: end;
   }
+
+  .query-form {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) auto auto;
+  }
 }
 
 @media (max-width: 680px) {
@@ -975,6 +1002,7 @@ tr:last-child td {
   .toolbar,
   .inline-form,
   .filter-form,
+  .query-form,
   .action-row,
   .form-actions,
   .modal-footer,
@@ -1010,14 +1038,19 @@ tr:last-child td {
   }
 
   .inline-form,
-  .filter-form {
+  .filter-form,
+  .query-form {
     display: grid;
     grid-template-columns: 1fr;
   }
 
   .inline-form > *,
   .filter-form > *,
-  .filter-form label {
+  .query-form > *,
+  .account-add-form input,
+  .query-form label input,
+  .filter-form label,
+  .query-form label {
     min-width: 0;
   }
 

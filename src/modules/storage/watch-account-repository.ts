@@ -90,6 +90,27 @@ export class WatchAccountRepository {
     return watchAccounts.map(mapWatchAccount);
   }
 
+  public async listPage(input: {
+    page: number;
+    pageSize: number;
+    query?: string;
+  }): Promise<WatchAccount[]> {
+    const watchAccounts = await this.prisma.watchAccount.findMany({
+      orderBy: { xUsername: 'asc' },
+      skip: (input.page - 1) * input.pageSize,
+      take: input.pageSize,
+      where: toWatchAccountWhereInput(input),
+    });
+
+    return watchAccounts.map(mapWatchAccount);
+  }
+
+  public async countAll(input: { query?: string } = {}): Promise<number> {
+    return this.prisma.watchAccount.count({
+      where: toWatchAccountWhereInput(input),
+    });
+  }
+
   public async listEnabled(): Promise<WatchAccount[]> {
     const watchAccounts = await this.prisma.watchAccount.findMany({
       orderBy: { xUsername: 'asc' },
@@ -213,6 +234,38 @@ function mapWatchAccount(
 
 export function normalizeXUsername(xUsername: string): string {
   return xUsername.trim().replace(/^@+/, '').toLowerCase();
+}
+
+function toWatchAccountWhereInput(input: { query?: string }): Prisma.WatchAccountWhereInput {
+  const query = normalizeWatchAccountQuery(input.query);
+
+  if (query === undefined) {
+    return {};
+  }
+
+  return {
+    OR: [
+      {
+        xUsername: {
+          contains: query,
+        },
+      },
+      {
+        displayName: {
+          contains: query,
+        },
+      },
+    ],
+  };
+}
+
+function normalizeWatchAccountQuery(query: string | undefined): string | undefined {
+  if (query === undefined) {
+    return undefined;
+  }
+
+  const normalizedQuery = query.trim().replace(/^@+/, '').toLowerCase();
+  return normalizedQuery.length === 0 ? undefined : normalizedQuery;
 }
 
 function toWatchAccountUpdateData(input: UpdateWatchAccountInput | CreateWatchAccountInput): Prisma.WatchAccountUpdateInput {

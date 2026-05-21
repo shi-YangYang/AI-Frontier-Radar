@@ -88,6 +88,12 @@ export interface PageQuery {
   to: string;
 }
 
+export interface WatchAccountPageQuery {
+  page: number;
+  pageSize: number;
+  query?: string;
+}
+
 export interface DeliveryTargetPageQuery {
   page: number;
   pageSize: number;
@@ -195,6 +201,16 @@ export interface BatchDeleteResult {
   deletedCount: number;
 }
 
+export interface ClearPollRunsHistoryResult {
+  deletedCount: number;
+  retainedRunningCount: number;
+}
+
+export interface ClearDeliveryEventsHistoryResult {
+  deletedCount: number;
+  retainedActiveCount: number;
+}
+
 export async function getSummary(): Promise<AdminSummary> {
   return requestJson<AdminSummary>('/admin/api/summary');
 }
@@ -286,8 +302,14 @@ export async function testDeliveryTarget(id: string): Promise<DeliveryTargetTest
   );
 }
 
-export async function listWatchAccounts(): Promise<{ watchAccounts: WatchAccount[] }> {
-  return requestJson<{ watchAccounts: WatchAccount[] }>('/admin/api/watch-accounts');
+export async function listWatchAccounts(query?: WatchAccountPageQuery): Promise<{
+  pagination: AdminPagination;
+  watchAccounts: WatchAccount[];
+}> {
+  const queryString = query === undefined ? '' : '?' + toWatchAccountPageQuery(query);
+  return requestJson<{ pagination: AdminPagination; watchAccounts: WatchAccount[] }>(
+    '/admin/api/watch-accounts' + queryString,
+  );
 }
 
 export async function createWatchAccount(username: string): Promise<{ created: boolean; watchAccount: WatchAccount }> {
@@ -325,6 +347,12 @@ export async function batchDeletePollRuns(ids: string[]): Promise<BatchDeleteRes
   });
 }
 
+export async function clearPollRunsHistory(): Promise<ClearPollRunsHistoryResult> {
+  return requestJson<ClearPollRunsHistoryResult>('/admin/api/poll-runs/clear-history', {
+    method: 'POST',
+  });
+}
+
 export async function listDeliveryEvents(query: PageQuery): Promise<{
   deliveryEvents: DeliveryEvent[];
   pagination: AdminPagination;
@@ -345,6 +373,13 @@ export async function batchDeleteDeliveryEvents(ids: string[]): Promise<BatchDel
     body: JSON.stringify({ ids }),
     method: 'POST',
   });
+}
+
+export async function clearDeliveryEventsHistory(): Promise<ClearDeliveryEventsHistoryResult> {
+  return requestJson<ClearDeliveryEventsHistoryResult>(
+    '/admin/api/delivery-events/clear-history',
+    { method: 'POST' },
+  );
 }
 
 export async function runPollingNow(): Promise<RunNowResult> {
@@ -398,6 +433,18 @@ function toDeliveryTargetPageQuery(query: DeliveryTargetPageQuery): string {
   const params = new URLSearchParams();
   params.set('page', String(query.page));
   params.set('pageSize', String(query.pageSize));
+  return params.toString();
+}
+
+function toWatchAccountPageQuery(query: WatchAccountPageQuery): string {
+  const params = new URLSearchParams();
+  params.set('page', String(query.page));
+  params.set('pageSize', String(query.pageSize));
+
+  if (query.query !== undefined && query.query.trim().length > 0) {
+    params.set('query', query.query.trim());
+  }
+
   return params.toString();
 }
 

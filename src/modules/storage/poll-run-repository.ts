@@ -47,6 +47,26 @@ export class PollRunRepository {
     return result.count;
   }
 
+  public async deleteHistory(): Promise<{ deletedCount: number; retainedRunningCount: number }> {
+    const [retainedRunningCount, deleteResult] = await this.prisma.$transaction([
+      this.prisma.pollRun.count({
+        where: { status: 'running' },
+      }),
+      this.prisma.pollRun.deleteMany({
+        where: {
+          status: {
+            in: ['success', 'failed', 'partial_failed'],
+          },
+        },
+      }),
+    ]);
+
+    return {
+      deletedCount: deleteResult.count,
+      retainedRunningCount,
+    };
+  }
+
   public async findById(id: string): Promise<PollRun | null> {
     const pollRun = await this.prisma.pollRun.findUnique({
       where: { id },

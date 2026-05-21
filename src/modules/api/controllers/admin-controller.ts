@@ -54,6 +54,12 @@ interface AdminPaginationInput {
   to?: string;
 }
 
+interface AdminWatchAccountsPaginationInput {
+  page: number;
+  pageSize: number;
+  query?: string;
+}
+
 const DEFAULT_ADMIN_PAGE_SIZE = 10;
 const MAX_ADMIN_PAGE_SIZE = 100;
 const DELIVERY_TARGET_KEY_PREFIX = 'feishu';
@@ -107,13 +113,18 @@ export async function getAdminSummary(
 }
 
 export async function listAdminWatchAccounts(
+  query: unknown,
   options: AdminControllerOptions,
-): Promise<{ ok: true; data: { watchAccounts: WatchAccount[] } }> {
-  const watchAccounts = await options.storage.watchAccounts.listAll();
+): Promise<{ ok: true; data: { pagination: AdminPagination; watchAccounts: WatchAccount[] } }> {
+  const paginationInput = readWatchAccountsPaginationQuery(query);
+  const total = await options.storage.watchAccounts.countAll(paginationInput);
+  const resolvedPaginationInput = clampPaginationInput(paginationInput, total);
+  const watchAccounts = await options.storage.watchAccounts.listPage(resolvedPaginationInput);
 
   return {
     ok: true,
     data: {
+      pagination: toPagination(resolvedPaginationInput, total),
       watchAccounts,
     },
   };
@@ -230,6 +241,17 @@ export async function batchDeleteAdminPollRuns(
   };
 }
 
+export async function clearAdminPollRunsHistory(
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { deletedCount: number; retainedRunningCount: number } }> {
+  const result = await options.storage.pollRuns.deleteHistory();
+
+  return {
+    ok: true,
+    data: result,
+  };
+}
+
 export async function deleteAdminDeliveryEvent(
   params: unknown,
   options: AdminControllerOptions,
@@ -261,6 +283,17 @@ export async function batchDeleteAdminDeliveryEvents(
     data: {
       deletedCount,
     },
+  };
+}
+
+export async function clearAdminDeliveryEventsHistory(
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { deletedCount: number; retainedActiveCount: number } }> {
+  const result = await options.storage.deliveryEvents.deleteHistory();
+
+  return {
+    ok: true,
+    data: result,
   };
 }
 
@@ -632,6 +665,46 @@ function readPaginationQuery(query: unknown): AdminPaginationInput {
   };
 }
 
+function readWatchAccountsPaginationQuery(query: unknown): AdminWatchAccountsPaginationInput {
+  if (query === undefined || query === null) {
+    return {
+      page: 1,
+      pageSize: DEFAULT_ADMIN_PAGE_SIZE,
+    };
+  }
+
+  if (!isRecord(query)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '分页参数必须是查询对象。');
+  }
+
+  return {
+    page: readPageQueryValue(query.page),
+    pageSize: readPageSizeQueryValue(query.pageSize),
+    ...readWatchAccountSearchQuery(query.query),
+  };
+}
+
+function readWatchAccountSearchQuery(value: unknown): { query?: string } {
+  if (value === undefined) {
+    return {};
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length !== 1) {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'query 必须是单个字符串。');
+    }
+
+    return readWatchAccountSearchQuery(value[0]);
+  }
+
+  if (typeof value !== 'string') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'query 必须是字符串。');
+  }
+
+  const normalizedQuery = value.trim().replace(/^@+/, '').toLowerCase();
+  return normalizedQuery.length === 0 ? {} : { query: normalizedQuery };
+}
+
 function readPageSizeQueryValue(value: unknown): number {
   const pageSize = readPositiveIntegerQueryValue(value, 'pageSize') ?? DEFAULT_ADMIN_PAGE_SIZE;
 
@@ -735,7 +808,7 @@ function isIsoDateTimeString(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(value);
 }
 
-function clampPaginationInput(input: AdminPaginationInput, total: number): AdminPaginationInput {
+function clampPaginationInput<T extends { page: number; pageSize: number }>(input: T, total: number): T {
   const totalPages = total === 0 ? 0 : Math.ceil(total / input.pageSize);
   const page = totalPages === 0 ? 1 : Math.min(input.page, totalPages);
 

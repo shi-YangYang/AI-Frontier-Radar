@@ -1,7 +1,7 @@
 <template>
   <section>
     <PageHeader :title="t('accounts.title')" :subtitle="t('accounts.subtitle')">
-      <form class="inline-form" @submit.prevent="addAccount">
+      <form class="inline-form account-add-form" @submit.prevent="addAccount">
         <input
           v-model="username"
           autocomplete="off"
@@ -17,6 +17,19 @@
     <ToastNotice :message="notice" :danger="noticeDanger" />
 
     <div class="panel">
+      <form class="query-form" @submit.prevent="applyQuery">
+        <label>
+          <span>{{ t('accounts.queryLabel') }}</span>
+          <input
+            v-model="queryInput"
+            autocomplete="off"
+            :disabled="busy"
+            :placeholder="t('accounts.queryPlaceholder')"
+          />
+        </label>
+        <button class="primary" type="submit" :disabled="busy">{{ t('actions.query') }}</button>
+        <button type="button" :disabled="busy" @click="clearQuery">{{ t('accounts.clearQuery') }}</button>
+      </form>
       <div class="table-wrap">
         <table>
           <thead>
@@ -51,6 +64,12 @@
           </tbody>
         </table>
       </div>
+      <PaginationBar
+        :busy="busy"
+        :pagination="pagination"
+        @change-page="loadAccounts"
+        @invalid-page="setNotice(t('notice.invalidPage'), true)"
+      />
     </div>
 
     <ConfirmModal
@@ -71,32 +90,48 @@ import {
   createWatchAccount,
   deleteWatchAccount,
   listWatchAccounts,
+  type AdminPagination,
   type WatchAccount,
 } from '../api/admin-api';
 import ConfirmModal from '../components/ConfirmModal.vue';
 import PageHeader from '../components/PageHeader.vue';
+import PaginationBar from '../components/PaginationBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import ToastNotice from '../components/ToastNotice.vue';
 import { t } from '../i18n';
-import { dash, formatDateTime } from '../utils';
+import { DEFAULT_PAGE_SIZE, dash, formatDateTime } from '../utils';
 
 const accounts = ref<WatchAccount[]>([]);
+const activeQuery = ref('');
 const addingAccount = ref(false);
 const busy = ref(false);
 const deleteTarget = ref<WatchAccount | null>(null);
 const notice = ref('');
 const noticeDanger = ref(false);
+const pagination = ref<AdminPagination>({
+  page: 1,
+  pageSize: DEFAULT_PAGE_SIZE,
+  total: 0,
+  totalPages: 0,
+});
+const queryInput = ref('');
 const username = ref('');
 
 onMounted(() => {
-  void loadAccounts({ silent: true });
+  void loadAccounts(1, { silent: true });
 });
 
-async function loadAccounts(options: { silent?: boolean } = {}): Promise<void> {
+async function loadAccounts(page: number, options: { silent?: boolean } = {}): Promise<void> {
   busy.value = true;
 
   try {
-    accounts.value = (await listWatchAccounts()).watchAccounts;
+    const result = await listWatchAccounts({
+      page,
+      pageSize: DEFAULT_PAGE_SIZE,
+      query: activeQuery.value,
+    });
+    accounts.value = result.watchAccounts;
+    pagination.value = result.pagination;
 
     if (options.silent !== true) {
       setNotice(t('notice.refreshed', { time: new Date().toLocaleString() }));
@@ -108,6 +143,18 @@ async function loadAccounts(options: { silent?: boolean } = {}): Promise<void> {
   }
 }
 
+async function applyQuery(): Promise<void> {
+  activeQuery.value = normalizeQuery(queryInput.value);
+  queryInput.value = activeQuery.value;
+  await loadAccounts(1);
+}
+
+async function clearQuery(): Promise<void> {
+  queryInput.value = '';
+  activeQuery.value = '';
+  await loadAccounts(1);
+}
+
 async function addAccount(): Promise<void> {
   addingAccount.value = true;
   setNotice(t('notice.accountValidating'));
@@ -115,7 +162,7 @@ async function addAccount(): Promise<void> {
   try {
     await createWatchAccount(username.value);
     username.value = '';
-    await loadAccounts({ silent: true });
+    await loadAccounts(1, { silent: true });
     setNotice(t('notice.accountCreated'));
   } catch (error) {
     setNotice(
@@ -143,7 +190,7 @@ async function confirmDelete(): Promise<void> {
   try {
     await deleteWatchAccount(deleteTarget.value.id);
     deleteTarget.value = null;
-    await loadAccounts({ silent: true });
+    await loadAccountsAfterDelete();
     setNotice(t('notice.accountDeleted'));
   } catch (error) {
     setNotice(error instanceof Error ? error.message : String(error), true);
@@ -155,5 +202,18 @@ async function confirmDelete(): Promise<void> {
 function setNotice(message: string, danger = false): void {
   notice.value = message;
   noticeDanger.value = danger;
+}
+
+async function loadAccountsAfterDelete(): Promise<void> {
+  await loadAccounts(pagination.value.page, { silent: true });
+
+  if (accounts.value.length === 0 && pagination.value.page > 1) {
+    const fallbackPage = pagination.value.totalPages > 0 ? pagination.value.totalPages : pagination.value.page - 1;
+    await loadAccounts(fallbackPage, { silent: true });
+  }
+}
+
+function normalizeQuery(value: string): string {
+  return value.trim().replace(/^@+/, '');
 }
 </script>
