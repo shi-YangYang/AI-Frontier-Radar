@@ -1,7 +1,14 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 
 import { createDatabaseId, createTimestamp } from './database';
-import type { CreateXPostRawInput, XPostRaw } from './types';
+import type {
+  CreateXPostRawInput,
+  DeliveryEvent,
+  XPostPageQuery,
+  XPostRaw,
+  XPostRawWithDeliveryEvents,
+  XPostSummary,
+} from './types';
 
 export class XPostRepository {
   public constructor(private readonly prisma: PrismaClient) {}
@@ -66,6 +73,58 @@ export class XPostRepository {
     return xPosts.map(mapXPostRaw);
   }
 
+  public async listPage(input: XPostPageQuery): Promise<XPostRawWithDeliveryEvents[]> {
+    const xPosts = await this.prisma.xPostRaw.findMany({
+      include: {
+        deliveryEvents: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+      orderBy: {
+        detectedAt: 'desc',
+      },
+      skip: (input.page - 1) * input.pageSize,
+      take: input.pageSize,
+      where: toXPostWhereInput(input),
+    });
+
+    return xPosts.map(mapXPostRawWithDeliveryEvents);
+  }
+
+  public async countAll(input: Partial<XPostPageQuery> = {}): Promise<number> {
+    return this.prisma.xPostRaw.count({
+      where: toXPostWhereInput(input),
+    });
+  }
+
+  public async getSummary(): Promise<XPostSummary> {
+    const todayStart = getLocalDayStartIsoString(new Date());
+    const [totalPosts, todayPosts, latestPost] = await this.prisma.$transaction([
+      this.prisma.xPostRaw.count(),
+      this.prisma.xPostRaw.count({
+        where: {
+          detectedAt: {
+            gte: todayStart,
+          },
+        },
+      }),
+      this.prisma.xPostRaw.findFirst({
+        orderBy: {
+          detectedAt: 'desc',
+        },
+        select: {
+          detectedAt: true,
+        },
+      }),
+    ]);
+
+    return {
+      latestDetectedAt: latestPost?.detectedAt ?? null,
+      todayPosts,
+      totalPosts,
+    };
+  }
+
   public async upsertByXPostId(input: CreateXPostRawInput): Promise<XPostRaw> {
     const createdAt = createTimestamp();
     const xPost = await this.prisma.xPostRaw.upsert({
@@ -108,4 +167,74 @@ function mapXPostRaw(xPost: Prisma.XPostRawGetPayload<Record<string, never>>): X
     textContent: xPost.textContent,
     xPostId: xPost.xPostId,
   };
+}
+
+function mapXPostRawWithDeliveryEvents(
+  xPost: Prisma.XPostRawGetPayload<{ include: { deliveryEvents: true } }>,
+): XPostRawWithDeliveryEvents {
+  return {
+    ...mapXPostRaw(xPost),
+    deliveryEvents: xPost.deliveryEvents.map(mapDeliveryEvent),
+  };
+}
+
+function mapDeliveryEvent(
+  deliveryEvent: Prisma.DeliveryEventGetPayload<Record<string, never>>,
+): DeliveryEvent {
+  return {
+    attemptCount: deliveryEvent.attemptCount,
+    createdAt: deliveryEvent.createdAt,
+    id: deliveryEvent.id,
+    lastError: deliveryEvent.lastError,
+    lockedAt: deliveryEvent.lockedAt,
+    nextRetryAt: deliveryEvent.nextRetryAt,
+    sentAt: deliveryEvent.sentAt,
+    status: deliveryEvent.status as DeliveryEvent['status'],
+    targetKey: deliveryEvent.targetKey,
+    updatedAt: deliveryEvent.updatedAt,
+    xPostId: deliveryEvent.xPostId,
+  };
+}
+
+function toXPostWhereInput(input: Partial<XPostPageQuery>): Prisma.XPostRawWhereInput {
+  return {
+    ...(input.authorUsername === undefined
+      ? {}
+      : {
+          authorUsername: {
+            contains: input.authorUsername,
+          },
+        }),
+    ...(input.query === undefined
+      ? {}
+      : {
+          textContent: {
+            contains: input.query,
+          },
+        }),
+    ...(input.postedFrom === undefined && input.postedTo === undefined
+      ? {}
+      : {
+          postedAt: {
+            ...(input.postedFrom === undefined ? {} : { gte: input.postedFrom }),
+            ...(input.postedTo === undefined ? {} : { lte: input.postedTo }),
+          },
+        }),
+    ...(input.detectedFrom === undefined && input.detectedTo === undefined
+      ? {}
+      : {
+          detectedAt: {
+            ...(input.detectedFrom === undefined ? {} : { gte: input.detectedFrom }),
+            ...(input.detectedTo === undefined ? {} : { lte: input.detectedTo }),
+          },
+        }),
+    ...(input.isReply === undefined ? {} : { isReply: input.isReply }),
+    ...(input.isRepost === undefined ? {} : { isRepost: input.isRepost }),
+  };
+}
+
+function getLocalDayStartIsoString(date: Date): string {
+  const localDayStart = new Date(date);
+  localDayStart.setHours(0, 0, 0, 0);
+  return localDayStart.toISOString();
 }

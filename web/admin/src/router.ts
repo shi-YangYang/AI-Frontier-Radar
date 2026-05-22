@@ -4,6 +4,7 @@ import AccountsPage from './pages/AccountsPage.vue';
 import DeliveryEventsPage from './pages/DeliveryEventsPage.vue';
 import OverviewPage from './pages/OverviewPage.vue';
 import PollRunsPage from './pages/PollRunsPage.vue';
+import PostsPage from './pages/PostsPage.vue';
 import SettingsPage from './pages/SettingsPage.vue';
 
 export const router = createRouter({
@@ -20,6 +21,10 @@ export const router = createRouter({
     {
       component: PollRunsPage,
       path: '/poll-runs',
+    },
+    {
+      component: PostsPage,
+      path: '/posts',
     },
     {
       component: DeliveryEventsPage,

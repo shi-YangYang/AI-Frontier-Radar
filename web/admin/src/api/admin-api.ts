@@ -14,6 +14,7 @@ export interface AdminErrorResponse {
 export type WatchAccountPollStatus = 'failed' | 'pending' | 'success';
 export type PollRunStatus = 'failed' | 'partial_failed' | 'running' | 'success';
 export type DeliveryEventStatus = 'dead' | 'failed' | 'pending' | 'retry_wait' | 'sending' | 'sent';
+export type PostBooleanFilter = 'all' | 'false' | 'true';
 
 export interface WatchAccount {
   id: string;
@@ -58,6 +59,50 @@ export interface DeliveryEvent {
   updatedAt: string;
 }
 
+export interface PostDeliveryEvent {
+  id: string;
+  targetKey: string;
+  status: DeliveryEventStatus;
+  attemptCount: number;
+  nextRetryAt: string | null;
+  lastError: string | null;
+  sentAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PostDeliverySummary {
+  total: number;
+  sent: number;
+  active: number;
+  failed: number;
+  dead: number;
+}
+
+export interface XPostContent {
+  id: string;
+  xPostId: string;
+  authorUsername: string;
+  authorUserId: string | null;
+  authorDisplayName: string | null;
+  postedAt: string;
+  detectedAt: string;
+  createdAt: string;
+  textContent: string;
+  permalinkUrl: string;
+  isReply: boolean;
+  isRepost: boolean;
+  rawPayloadJson: string;
+  deliverySummary: PostDeliverySummary;
+  deliveryEvents: PostDeliveryEvent[];
+}
+
+export interface PostsSummary {
+  totalPosts: number;
+  todayPosts: number;
+  latestDetectedAt: string | null;
+}
+
 export interface AdminPagination {
   page: number;
   pageSize: number;
@@ -86,6 +131,19 @@ export interface PageQuery {
   page: number;
   pageSize: number;
   to: string;
+}
+
+export interface PostPageQuery {
+  authorUsername?: string;
+  detectedFrom?: string;
+  detectedTo?: string;
+  isReply?: PostBooleanFilter;
+  isRepost?: PostBooleanFilter;
+  page: number;
+  pageSize: number;
+  postedFrom?: string;
+  postedTo?: string;
+  query?: string;
 }
 
 export interface WatchAccountPageQuery {
@@ -362,6 +420,20 @@ export async function listDeliveryEvents(query: PageQuery): Promise<{
   );
 }
 
+export async function listPosts(query: PostPageQuery): Promise<{
+  pagination: AdminPagination;
+  posts: XPostContent[];
+  summary: PostsSummary;
+}> {
+  return requestJson<{
+    pagination: AdminPagination;
+    posts: XPostContent[];
+    summary: PostsSummary;
+  }>(
+    '/admin/api/posts?' + toPostPageQuery(query),
+  );
+}
+
 export async function deleteDeliveryEvent(id: string): Promise<{ deleted: true }> {
   return requestJson<{ deleted: true }>('/admin/api/delivery-events/' + encodeURIComponent(id), {
     method: 'DELETE',
@@ -446,6 +518,47 @@ function toWatchAccountPageQuery(query: WatchAccountPageQuery): string {
   }
 
   return params.toString();
+}
+
+function toPostPageQuery(query: PostPageQuery): string {
+  const params = new URLSearchParams();
+  params.set('page', String(query.page));
+  params.set('pageSize', String(query.pageSize));
+
+  setOptionalStringQuery(params, 'authorUsername', query.authorUsername);
+  setOptionalStringQuery(params, 'query', query.query);
+  setOptionalDateTimeQuery(params, 'postedFrom', query.postedFrom);
+  setOptionalDateTimeQuery(params, 'postedTo', query.postedTo);
+  setOptionalDateTimeQuery(params, 'detectedFrom', query.detectedFrom);
+  setOptionalDateTimeQuery(params, 'detectedTo', query.detectedTo);
+
+  if (query.isReply !== undefined) {
+    params.set('isReply', query.isReply);
+  }
+
+  if (query.isRepost !== undefined) {
+    params.set('isRepost', query.isRepost);
+  }
+
+  return params.toString();
+}
+
+function setOptionalStringQuery(params: URLSearchParams, key: string, value: string | undefined): void {
+  if (value !== undefined && value.trim().length > 0) {
+    params.set(key, value.trim());
+  }
+}
+
+function setOptionalDateTimeQuery(params: URLSearchParams, key: string, value: string | undefined): void {
+  if (value === undefined) {
+    return;
+  }
+
+  const isoValue = toIsoDateTime(value);
+
+  if (isoValue !== null) {
+    params.set(key, isoValue);
+  }
 }
 
 function toIsoDateTime(value: string): string | null {

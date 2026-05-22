@@ -18,6 +18,7 @@ import {
   type StorageContext,
   type WatchAccount,
 } from '../../storage';
+import type { XPostPageQuery, XPostRawWithDeliveryEvents, XPostSummary } from '../../storage/types';
 import { normalizeXUsername } from '../../storage/watch-account-repository';
 
 export interface AdminActions {
@@ -59,6 +60,8 @@ interface AdminWatchAccountsPaginationInput {
   pageSize: number;
   query?: string;
 }
+
+type AdminPostTriStateFilter = 'all' | 'false' | 'true';
 
 const DEFAULT_ADMIN_PAGE_SIZE = 10;
 const MAX_ADMIN_PAGE_SIZE = 100;
@@ -203,6 +206,47 @@ export async function listAdminDeliveryEvents(
     data: {
       deliveryEvents,
       pagination: toPagination(resolvedPaginationInput, total),
+    },
+  };
+}
+
+export async function listAdminPosts(
+  query: unknown,
+  options: AdminControllerOptions,
+): Promise<{
+  ok: true;
+  data: {
+    pagination: AdminPagination;
+    posts: AdminXPostContent[];
+    summary: XPostSummary;
+  };
+}> {
+  const pageQuery = readPostsPageQuery(query);
+  const [total, summary] = await Promise.all([
+    options.storage.xPosts.countAll(pageQuery),
+    options.storage.xPosts.getSummary(),
+  ]);
+  const resolvedPageQuery = clampPaginationInput(pageQuery, total);
+  const [posts, watchAccounts, deliveryTargets] = await Promise.all([
+    options.storage.xPosts.listPage(resolvedPageQuery),
+    options.storage.watchAccounts.listAll(),
+    options.storage.deliveryTargets.listAll(),
+  ]);
+  const displayNameByUsername = new Map(
+    watchAccounts.map((account) => [account.xUsername, account.displayName]),
+  );
+  const webhookUrlByTargetKey = new Map(
+    deliveryTargets.map((target) => [target.targetKey, target.webhookUrl]),
+  );
+
+  return {
+    ok: true,
+    data: {
+      pagination: toPagination(resolvedPageQuery, total),
+      posts: posts.map((post) =>
+        toAdminXPostContent(post, displayNameByUsername, webhookUrlByTargetKey),
+      ),
+      summary,
     },
   };
 }
@@ -638,6 +682,44 @@ interface AdminDeliveryTargetSummary {
   total: number;
 }
 
+interface AdminPostDeliverySummary {
+  active: number;
+  dead: number;
+  failed: number;
+  sent: number;
+  total: number;
+}
+
+interface AdminXPostContent {
+  authorDisplayName: string | null;
+  authorUserId: string | null;
+  authorUsername: string;
+  createdAt: string;
+  deliveryEvents: AdminXPostDeliveryEvent[];
+  deliverySummary: AdminPostDeliverySummary;
+  detectedAt: string;
+  id: string;
+  isReply: boolean;
+  isRepost: boolean;
+  permalinkUrl: string;
+  postedAt: string;
+  rawPayloadJson: string;
+  textContent: string;
+  xPostId: string;
+}
+
+interface AdminXPostDeliveryEvent {
+  attemptCount: number;
+  createdAt: string;
+  id: string;
+  lastError: string | null;
+  nextRetryAt: string | null;
+  sentAt: string | null;
+  status: DeliveryEvent['status'];
+  targetKey: string;
+  updatedAt: string;
+}
+
 function readPaginationQuery(query: unknown): AdminPaginationInput {
   if (query === undefined || query === null) {
     return {
@@ -682,6 +764,128 @@ function readWatchAccountsPaginationQuery(query: unknown): AdminWatchAccountsPag
     pageSize: readPageSizeQueryValue(query.pageSize),
     ...readWatchAccountSearchQuery(query.query),
   };
+}
+
+function readPostsPageQuery(query: unknown): XPostPageQuery {
+  if (query === undefined || query === null) {
+    return {
+      page: 1,
+      pageSize: DEFAULT_ADMIN_PAGE_SIZE,
+    };
+  }
+
+  if (!isRecord(query)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '分页参数必须是查询对象。');
+  }
+
+  const postedFrom = readOptionalIsoQueryValue(query.postedFrom, 'postedFrom');
+  const postedTo = readOptionalIsoQueryValue(query.postedTo, 'postedTo');
+  const detectedFrom = readOptionalIsoQueryValue(query.detectedFrom, 'detectedFrom');
+  const detectedTo = readOptionalIsoQueryValue(query.detectedTo, 'detectedTo');
+
+  assertValidTimeRange(postedFrom, postedTo, '发布时间开始不能晚于结束时间。');
+  assertValidTimeRange(detectedFrom, detectedTo, '检测时间开始不能晚于结束时间。');
+
+  return {
+    ...readOptionalAuthorUsernameQuery(query.authorUsername),
+    ...readOptionalTextSearchQuery(query.query),
+    ...(detectedFrom === undefined ? {} : { detectedFrom }),
+    ...(detectedTo === undefined ? {} : { detectedTo }),
+    ...readPostBooleanQuery(query.isReply, 'isReply'),
+    ...readPostBooleanQuery(query.isRepost, 'isRepost'),
+    page: readPageQueryValue(query.page),
+    pageSize: readPageSizeQueryValue(query.pageSize),
+    ...(postedFrom === undefined ? {} : { postedFrom }),
+    ...(postedTo === undefined ? {} : { postedTo }),
+  };
+}
+
+function readOptionalAuthorUsernameQuery(value: unknown): { authorUsername?: string } {
+  if (value === undefined) {
+    return {};
+  }
+
+  const authorUsername = readSingleOptionalStringQueryValue(value, 'authorUsername')
+    ?.replace(/^@+/, '')
+    .toLowerCase();
+
+  return authorUsername === undefined || authorUsername.length === 0 ? {} : { authorUsername };
+}
+
+function readOptionalTextSearchQuery(value: unknown): { query?: string } {
+  if (value === undefined) {
+    return {};
+  }
+
+  const normalizedQuery = readSingleOptionalStringQueryValue(value, 'query');
+  return normalizedQuery === undefined || normalizedQuery.length === 0 ? {} : { query: normalizedQuery };
+}
+
+function readPostBooleanQuery(
+  value: unknown,
+  fieldName: 'isReply' | 'isRepost',
+): { isReply?: boolean; isRepost?: boolean } {
+  const filter = readPostTriStateQueryValue(value, fieldName);
+
+  if (filter === 'all') {
+    return {};
+  }
+
+  return {
+    [fieldName]: filter === 'true',
+  };
+}
+
+function readPostTriStateQueryValue(
+  value: unknown,
+  fieldName: string,
+): AdminPostTriStateFilter {
+  if (value === undefined) {
+    return 'all';
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length !== 1) {
+      throw new AdminApiError(400, 'INVALID_REQUEST', fieldName + ' 必须是单个筛选值。');
+    }
+
+    return readPostTriStateQueryValue(value[0], fieldName);
+  }
+
+  if (typeof value !== 'string') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', fieldName + ' 必须是 all、true 或 false。');
+  }
+
+  const normalizedValue = value.trim().toLowerCase();
+
+  if (normalizedValue === 'all' || normalizedValue === 'true' || normalizedValue === 'false') {
+    return normalizedValue;
+  }
+
+  throw new AdminApiError(400, 'INVALID_REQUEST', fieldName + ' 必须是 all、true 或 false。');
+}
+
+function readSingleOptionalStringQueryValue(value: unknown, fieldName: string): string | undefined {
+  if (Array.isArray(value)) {
+    if (value.length !== 1) {
+      throw new AdminApiError(400, 'INVALID_REQUEST', fieldName + ' 必须是单个字符串。');
+    }
+
+    return readSingleOptionalStringQueryValue(value[0], fieldName);
+  }
+
+  if (typeof value !== 'string') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', fieldName + ' 必须是字符串。');
+  }
+
+  const normalizedValue = value.trim();
+  return normalizedValue.length === 0 ? undefined : normalizedValue;
+}
+
+function assertValidTimeRange(from: string | undefined, to: string | undefined, message: string): void {
+  if (from !== undefined && to !== undefined && Date.parse(from) > Date.parse(to)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', message);
+  }
 }
 
 function readWatchAccountSearchQuery(value: unknown): { query?: string } {
@@ -915,6 +1119,96 @@ function toAdminDeliveryTarget(target: DeliveryTarget): AdminDeliveryTarget {
     updatedAt: target.updatedAt,
     webhookPreview: previewSecretUrl(target.webhookUrl),
   };
+}
+
+function toAdminXPostContent(
+  post: XPostRawWithDeliveryEvents,
+  displayNameByUsername: ReadonlyMap<string, string | null>,
+  webhookUrlByTargetKey: ReadonlyMap<string, string>,
+): AdminXPostContent {
+  return {
+    authorDisplayName: displayNameByUsername.get(post.authorUsername.toLowerCase()) ?? null,
+    authorUserId: post.authorUserId,
+    authorUsername: post.authorUsername,
+    createdAt: post.createdAt,
+    deliveryEvents: post.deliveryEvents.map((event) =>
+      toAdminXPostDeliveryEvent(event, webhookUrlByTargetKey),
+    ),
+    deliverySummary: summarizePostDeliveryEvents(post.deliveryEvents),
+    detectedAt: post.detectedAt,
+    id: post.id,
+    isReply: post.isReply,
+    isRepost: post.isRepost,
+    permalinkUrl: post.permalinkUrl,
+    postedAt: post.postedAt,
+    rawPayloadJson: post.rawPayloadJson,
+    textContent: post.textContent,
+    xPostId: post.xPostId,
+  };
+}
+
+function toAdminXPostDeliveryEvent(
+  event: DeliveryEvent,
+  webhookUrlByTargetKey: ReadonlyMap<string, string>,
+): AdminXPostDeliveryEvent {
+  return {
+    attemptCount: event.attemptCount,
+    createdAt: event.createdAt,
+    id: event.id,
+    lastError: redactDeliveryEventLastError(event.lastError, event.targetKey, webhookUrlByTargetKey),
+    nextRetryAt: event.nextRetryAt,
+    sentAt: event.sentAt,
+    status: event.status,
+    targetKey: event.targetKey,
+    updatedAt: event.updatedAt,
+  };
+}
+
+function redactDeliveryEventLastError(
+  lastError: string | null,
+  targetKey: string,
+  webhookUrlByTargetKey: ReadonlyMap<string, string>,
+): string | null {
+  if (lastError === null) {
+    return null;
+  }
+
+  const webhookUrl = webhookUrlByTargetKey.get(targetKey);
+  const redactedKnownWebhook =
+    webhookUrl === undefined ? lastError : redactWebhookFromText(lastError, webhookUrl);
+
+  return redactFeishuWebhookUrlsFromText(redactedKnownWebhook);
+}
+
+function summarizePostDeliveryEvents(events: DeliveryEvent[]): AdminPostDeliverySummary {
+  return events.reduce<AdminPostDeliverySummary>(
+    (summary, event) => {
+      summary.total += 1;
+
+      if (event.status === 'sent') {
+        summary.sent += 1;
+      } else if (
+        event.status === 'pending' ||
+        event.status === 'retry_wait' ||
+        event.status === 'sending'
+      ) {
+        summary.active += 1;
+      } else if (event.status === 'failed') {
+        summary.failed += 1;
+      } else if (event.status === 'dead') {
+        summary.dead += 1;
+      }
+
+      return summary;
+    },
+    {
+      active: 0,
+      dead: 0,
+      failed: 0,
+      sent: 0,
+      total: 0,
+    },
+  );
 }
 
 async function findVisibleDeliveryTarget(
@@ -1183,6 +1477,13 @@ function redactWebhookFromText(value: string, webhookUrl: string): string {
   }
 
   return redactedValue;
+}
+
+function redactFeishuWebhookUrlsFromText(value: string): string {
+  return value.replace(
+    /https:\/\/open\.feishu\.cn\/open-apis\/bot\/v2\/hook\/[^\s"',\\<>)}\]]+/gu,
+    (webhookUrl) => previewSecretUrl(webhookUrl),
+  );
 }
 
 function readUsername(body: unknown): string {

@@ -60,6 +60,29 @@ export interface XPostRaw {
   createdAt: string;
 }
 
+export interface XPostRawWithDeliveryEvents extends XPostRaw {
+  deliveryEvents: DeliveryEvent[];
+}
+
+export interface XPostPageQuery {
+  authorUsername?: string;
+  detectedFrom?: string;
+  detectedTo?: string;
+  isReply?: boolean;
+  isRepost?: boolean;
+  page: number;
+  pageSize: number;
+  postedFrom?: string;
+  postedTo?: string;
+  query?: string;
+}
+
+export interface XPostSummary {
+  latestDetectedAt: string | null;
+  todayPosts: number;
+  totalPosts: number;
+}
+
 export interface CreateXPostRawInput {
   id?: string;
   xPostId: string;

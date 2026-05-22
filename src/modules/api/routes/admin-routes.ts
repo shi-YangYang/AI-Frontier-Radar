@@ -23,6 +23,7 @@ import {
   listAdminDeliveryEvents,
   listAdminDeliveryTargets,
   listAdminPollRuns,
+  listAdminPosts,
   listAdminWatchAccounts,
   runAdminDeliveryNow,
   runAdminPollingNow,
@@ -77,7 +78,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     });
   }
 
-  for (const pageRoute of ['/', '/accounts', '/poll-runs', '/delivery-events', '/settings']) {
+  for (const pageRoute of ['/', '/accounts', '/poll-runs', '/posts', '/delivery-events', '/settings']) {
     app.get(pageRoute, async (_, reply) => sendAdminIndexHtml(reply, adminIndexHtmlPath));
   }
 
@@ -286,6 +287,16 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     async (request, reply) => sendAdminResponse(reply, () => listAdminDeliveryEvents(request.query, options)),
   );
 
+  app.get(
+    '/admin/api/posts',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) => sendAdminResponse(reply, () => listAdminPosts(request.query, options)),
+  );
+
   app.post(
     '/admin/api/delivery-events/batch-delete',
     {
@@ -370,6 +381,8 @@ function isProtectedAdminPath(url: string): boolean {
     url.startsWith('/accounts?') ||
     url === '/poll-runs' ||
     url.startsWith('/poll-runs?') ||
+    url === '/posts' ||
+    url.startsWith('/posts?') ||
     url === '/delivery-events' ||
     url.startsWith('/delivery-events?') ||
     url === '/settings' ||

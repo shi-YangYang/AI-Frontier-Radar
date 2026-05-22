@@ -91,6 +91,7 @@ const navItems = [
   { icon: '⌂', label: 'nav.overview', to: '/' },
   { icon: '@', label: 'nav.accounts', to: '/accounts' },
   { icon: '↻', label: 'nav.pollRuns', to: '/poll-runs' },
+  { icon: '✉', label: 'nav.posts', to: '/posts' },
   { icon: '→', label: 'nav.deliveryEvents', to: '/delivery-events' },
   { icon: '⚙', label: 'nav.settings', to: '/settings' },
 ] as const;
