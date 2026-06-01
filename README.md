@@ -88,8 +88,8 @@ flowchart LR
 ## 快速开始
 
 ```bash
-git clone <your-repo-url>
-cd <repo>
+git clone git@github.com:shi-YangYang/AI-Frontier-Radar.git
+cd AI-Frontier-Radar
 npm run setup
 npm run local
 ```
@@ -379,4 +379,4 @@ web/admin               Vue 本地管理前端
 
 ## 许可证
 
-MIT
+本项目使用 [MIT License](./LICENSE) 开源。
