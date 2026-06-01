@@ -1,4 +1,4 @@
-import type { AppConfig } from '../../shared/config/types';
+import type { AppConfig, XBrowserSourceConfig, XSourceMode } from '../../shared/config/types';
 import type { StorageContext } from './storage';
 
 export type RuntimeSettingSource = 'database_override' | 'env_default';
@@ -31,7 +31,24 @@ export interface RuntimeReadonlySettings {
   sqlitePath: string;
   xBrowserBaseUrl: string;
   xBrowserHeadless: boolean;
+  xBrowserProxyConfigured: boolean;
+  xBrowserProxyPreview: string | null;
+  xBrowserProxySource: RuntimeSettingSource;
   xBrowserUserDataDir: string;
+}
+
+export interface RuntimeXSourceSettings {
+  browser: {
+    baseUrl: string;
+    headless: boolean;
+    navigationTimeoutMs: number;
+    postLoadTimeoutMs: number;
+    proxyConfigured: boolean;
+    proxyPreview: string | null;
+    proxySource: RuntimeSettingSource;
+    userDataDir: string;
+  };
+  mode: XSourceMode;
 }
 
 export interface RuntimeSettingsSummary {
@@ -40,11 +57,19 @@ export interface RuntimeSettingsSummary {
   readonly: RuntimeReadonlySettings;
 }
 
+export interface SaveXBrowserSettingsInput {
+  proxyUrl: string;
+}
+
 export interface SavePollingSettingsInput {
   excludeReplies: boolean;
   excludeReposts: boolean;
   fetchLimitPerAccount: number;
   intervalSeconds: number;
+}
+
+interface RuntimeXBrowserEffectiveSettings extends XBrowserSourceConfig {
+  proxySource: RuntimeSettingSource;
 }
 
 export interface RuntimeSettingsServiceOptions {
@@ -56,18 +81,24 @@ const POLLING_INTERVAL_SECONDS_KEY = 'polling.intervalSeconds';
 const POLLING_FETCH_LIMIT_PER_ACCOUNT_KEY = 'polling.fetchLimitPerAccount';
 const POLLING_EXCLUDE_REPLIES_KEY = 'polling.excludeReplies';
 const POLLING_EXCLUDE_REPOSTS_KEY = 'polling.excludeReposts';
+const X_BROWSER_PROXY_URL_KEY = 'source.x.browser.proxyUrl';
 const POLLING_SETTING_KEYS = [
   POLLING_INTERVAL_SECONDS_KEY,
   POLLING_FETCH_LIMIT_PER_ACCOUNT_KEY,
   POLLING_EXCLUDE_REPLIES_KEY,
   POLLING_EXCLUDE_REPOSTS_KEY,
 ];
+const X_BROWSER_SETTING_KEYS = [X_BROWSER_PROXY_URL_KEY];
+const X_BROWSER_PROXY_PROTOCOLS = ['http:', 'https:', 'socks5:'] as const;
 
 export class RuntimeSettingsService {
   public constructor(private readonly options: RuntimeSettingsServiceOptions) {}
 
   public async getEffectiveAppConfig(): Promise<AppConfig> {
-    const polling = await this.getEffectivePollingSettings();
+    const [polling, browser] = await Promise.all([
+      this.getEffectivePollingSettings(),
+      this.getEffectiveXBrowserSettings(),
+    ]);
 
     return {
       ...this.options.config,
@@ -77,6 +108,25 @@ export class RuntimeSettingsService {
         fetchLimitPerAccount: polling.fetchLimitPerAccount,
         intervalSeconds: polling.intervalSeconds,
       },
+      source: {
+        ...this.options.config.source,
+        x: {
+          ...this.options.config.source.x,
+          browser: toEffectiveBrowserConfig(browser),
+        },
+      },
+    };
+  }
+
+  public async getEffectiveXBrowserSettings(): Promise<RuntimeXBrowserEffectiveSettings> {
+    const values = await this.options.storage.appSettings.getManyJson(X_BROWSER_SETTING_KEYS);
+    const baseBrowser = this.options.config.source.x.browser;
+    const resolvedProxy = resolveProxyUrlSetting(values, X_BROWSER_PROXY_URL_KEY, baseBrowser.proxyUrl);
+
+    return {
+      ...baseBrowser,
+      ...(resolvedProxy.proxyUrl === undefined ? {} : { proxyUrl: resolvedProxy.proxyUrl }),
+      proxySource: resolvedProxy.source,
     };
   }
 
@@ -129,15 +179,34 @@ export class RuntimeSettingsService {
   }
 
   public async getSettingsSummary(): Promise<RuntimeSettingsSummary> {
-    const [polling, feishu] = await Promise.all([
+    const [polling, feishu, browser] = await Promise.all([
       this.getEffectivePollingSettings(),
       this.getFeishuSettings(),
+      this.getEffectiveXBrowserSettings(),
     ]);
 
     return {
       feishu,
       polling,
-      readonly: this.getReadonlySettings(),
+      readonly: this.getReadonlySettings(browser),
+    };
+  }
+
+  public async getXSourceSettingsSummary(): Promise<RuntimeXSourceSettings> {
+    const browser = await this.getEffectiveXBrowserSettings();
+
+    return {
+      browser: {
+        baseUrl: browser.baseUrl,
+        headless: browser.headless,
+        navigationTimeoutMs: browser.navigationTimeoutMs,
+        postLoadTimeoutMs: browser.postLoadTimeoutMs,
+        proxyConfigured: browser.proxyUrl !== undefined,
+        proxyPreview: previewProxyUrl(browser.proxyUrl),
+        proxySource: browser.proxySource,
+        userDataDir: browser.userDataDir,
+      },
+      mode: this.options.config.source.mode,
     };
   }
 
@@ -167,11 +236,30 @@ export class RuntimeSettingsService {
     return this.getEffectivePollingSettings();
   }
 
+  public async saveXBrowserSettings(
+    input: SaveXBrowserSettingsInput,
+  ): Promise<RuntimeXSourceSettings> {
+    const proxyUrl = normalizeOptionalProxyUrl(input.proxyUrl);
+
+    if (proxyUrl === undefined) {
+      await this.options.storage.appSettings.deleteByKey(X_BROWSER_PROXY_URL_KEY);
+    } else {
+      await this.options.storage.appSettings.setJson(X_BROWSER_PROXY_URL_KEY, proxyUrl);
+    }
+
+    return this.getXSourceSettingsSummary();
+  }
+
   public getDefaultTargetKey(): string {
     return this.options.config.delivery.feishu.targetKey;
   }
 
-  public getReadonlySettings(): RuntimeReadonlySettings {
+  public getReadonlySettings(
+    effectiveBrowser: RuntimeXBrowserEffectiveSettings = {
+      ...this.options.config.source.x.browser,
+      proxySource: 'env_default',
+    },
+  ): RuntimeReadonlySettings {
     const config = this.options.config;
     const redisUrlPreview = previewRedisUrl(config.queue.redis.url);
 
@@ -185,6 +273,9 @@ export class RuntimeSettingsService {
       sqlitePath: config.storage.sqlite.path,
       xBrowserBaseUrl: config.source.x.browser.baseUrl,
       xBrowserHeadless: config.source.x.browser.headless,
+      xBrowserProxyConfigured: effectiveBrowser.proxyUrl !== undefined,
+      xBrowserProxyPreview: previewProxyUrl(effectiveBrowser.proxyUrl),
+      xBrowserProxySource: effectiveBrowser.proxySource,
       xBrowserUserDataDir: config.source.x.browser.userDataDir,
     };
   }
@@ -216,6 +307,89 @@ export function previewSecretUrl(rawUrl: string): string {
   } catch {
     return '[INVALID_URL]';
   }
+}
+
+export function previewProxyUrl(rawUrl: string | undefined): string | null {
+  if (rawUrl === undefined || rawUrl.trim().length === 0) {
+    return null;
+  }
+
+  try {
+    const url = new URL(rawUrl);
+    const authPrefix = url.username.length > 0 || url.password.length > 0 ? '[REDACTED]@' : '';
+
+    return `${url.protocol}//${authPrefix}${url.host}${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return '[INVALID_PROXY_URL]';
+  }
+}
+
+function toEffectiveBrowserConfig(
+  browser: RuntimeXBrowserEffectiveSettings,
+): XBrowserSourceConfig {
+  const { proxySource: _proxySource, ...browserConfig } = browser;
+
+  if (browserConfig.proxyUrl === undefined) {
+    const { proxyUrl: _proxyUrl, ...withoutProxyUrl } = browserConfig;
+    return withoutProxyUrl;
+  }
+
+  return browserConfig;
+}
+
+function resolveProxyUrlSetting(
+  values: Record<string, unknown>,
+  key: string,
+  defaultValue: string | undefined,
+): { proxyUrl?: string; source: RuntimeSettingSource } {
+  if (!hasSetting(values, key) || values[key] === null) {
+    return defaultValue === undefined
+      ? { source: 'env_default' }
+      : { proxyUrl: defaultValue, source: 'env_default' };
+  }
+
+  const value = values[key];
+
+  if (typeof value !== 'string') {
+    throw new Error(`App setting "${key}" must be a string or null.`);
+  }
+
+  const proxyUrl = normalizeOptionalProxyUrl(value);
+
+  if (proxyUrl === undefined) {
+    return defaultValue === undefined
+      ? { source: 'env_default' }
+      : { proxyUrl: defaultValue, source: 'env_default' };
+  }
+
+  return {
+    proxyUrl,
+    source: 'database_override',
+  };
+}
+
+function normalizeOptionalProxyUrl(rawValue: string): string | undefined {
+  const value = rawValue.trim();
+
+  if (value.length === 0) {
+    return undefined;
+  }
+
+  let url: URL;
+
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('Proxy URL must be a valid URL.');
+  }
+
+  if (!X_BROWSER_PROXY_PROTOCOLS.includes(url.protocol as typeof X_BROWSER_PROXY_PROTOCOLS[number])) {
+    throw new Error(
+      `Proxy URL must use one of these protocols: ${X_BROWSER_PROXY_PROTOCOLS.join(', ')}.`,
+    );
+  }
+
+  return url.toString();
 }
 
 function resolveBooleanSetting(

@@ -15,7 +15,14 @@ export interface BrowserXSourceProviderOptions {
   headless?: boolean;
   navigationTimeoutMs?: number;
   postLoadTimeoutMs?: number;
+  proxyUrl?: string;
   userDataDir?: string;
+}
+
+export interface BrowserXProxySettings {
+  password?: string;
+  server: string;
+  username?: string;
 }
 
 interface BrowserXParsedPost {
@@ -49,6 +56,7 @@ export class BrowserXSourceProvider implements SourceProvider {
   private readonly headless: boolean;
   private readonly navigationTimeoutMs: number;
   private readonly postLoadTimeoutMs: number;
+  private readonly proxyUrl?: string;
   private readonly userDataDir: string;
   private browserOperationQueue: Promise<void> = Promise.resolve();
 
@@ -57,6 +65,7 @@ export class BrowserXSourceProvider implements SourceProvider {
     this.headless = options.headless ?? false;
     this.navigationTimeoutMs = options.navigationTimeoutMs ?? DEFAULT_NAVIGATION_TIMEOUT_MS;
     this.postLoadTimeoutMs = options.postLoadTimeoutMs ?? DEFAULT_POST_LOAD_TIMEOUT_MS;
+    this.proxyUrl = options.proxyUrl;
     this.userDataDir = options.userDataDir ?? DEFAULT_USER_DATA_DIR;
   }
 
@@ -89,6 +98,7 @@ export class BrowserXSourceProvider implements SourceProvider {
     try {
       context = await chromium.launchPersistentContext(this.userDataDir, {
         headless: this.headless,
+        ...toLaunchProxyOption(this.proxyUrl),
       });
       const page = context.pages()[0] ?? (await context.newPage());
       const profileUrl = `${this.baseUrl.replace(/\/$/u, '')}/${encodeURIComponent(xUsername)}`;
@@ -156,6 +166,7 @@ export class BrowserXSourceProvider implements SourceProvider {
     try {
       context = await chromium.launchPersistentContext(this.userDataDir, {
         headless: this.headless,
+        ...toLaunchProxyOption(this.proxyUrl),
       });
       const page = context.pages()[0] ?? (await context.newPage());
       const profileUrl = `${this.baseUrl.replace(/\/$/u, '')}/${encodeURIComponent(xUsername)}`;
@@ -214,6 +225,33 @@ export function createBrowserXSourceProvider(
   options: BrowserXSourceProviderOptions = {},
 ): SourceProvider {
   return new BrowserXSourceProvider(options);
+}
+
+export function toBrowserXProxySettings(
+  proxyUrl: string | undefined,
+): BrowserXProxySettings | undefined {
+  if (proxyUrl === undefined || proxyUrl.trim().length === 0) {
+    return undefined;
+  }
+
+  const url = new URL(proxyUrl);
+  const username = url.username.length === 0 ? undefined : decodeURIComponent(url.username);
+  const password = url.password.length === 0 ? undefined : decodeURIComponent(url.password);
+  url.username = '';
+  url.password = '';
+
+  return {
+    ...(password === undefined ? {} : { password }),
+    server: url.toString(),
+    ...(username === undefined ? {} : { username }),
+  };
+}
+
+function toLaunchProxyOption(
+  proxyUrl: string | undefined,
+): { proxy?: BrowserXProxySettings } {
+  const proxy = toBrowserXProxySettings(proxyUrl);
+  return proxy === undefined ? {} : { proxy };
 }
 
 export async function parseXTimelineFromPage(

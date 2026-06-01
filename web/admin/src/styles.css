@@ -585,6 +585,73 @@ tr:last-child td {
   min-height: 260px;
 }
 
+.x-source-layout {
+  align-items: start;
+}
+
+.x-source-detail-list dt {
+  min-width: 0;
+}
+
+.x-source-form {
+  min-width: 0;
+}
+
+.x-source-actions {
+  align-items: stretch;
+}
+
+.x-source-current-url {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #e6edf5;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 10px 12px;
+  min-width: 0;
+}
+
+.x-source-current-url code {
+  color: var(--text);
+}
+
+.inline-alert {
+  border: 1px solid #bfd4ff;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #174ea6;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 10px 12px;
+  overflow-wrap: anywhere;
+}
+
+.inline-alert.warn {
+  border-color: #f5dc92;
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.x-source-result {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding: 14px 16px 16px;
+  min-width: 0;
+}
+
+.x-source-result p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.x-source-result small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .delivery-target-table {
   min-width: 980px;
 }

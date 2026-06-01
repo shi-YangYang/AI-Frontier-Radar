@@ -3,6 +3,13 @@ import { randomBytes } from 'node:crypto';
 import type { AppConfig } from '../../../shared/config/types';
 import { createFeishuWebhookClient, type FeishuWebhookFailureResult } from '../../delivery';
 import { SourceProviderError, type SourceProviderAccount } from '../../polling';
+import {
+  XSourceDiagnosticError,
+  createXSourceDiagnostics,
+  type XSourceAnonymousCheckResult,
+  type XSourceLoginCheckResult,
+  type XSourceOpenLoginResult,
+} from '../../polling/source/x-source-diagnostics';
 import type { RuntimeSchedulerRunNowResult } from '../../scheduler';
 import {
   createRuntimeSettingsService,
@@ -18,6 +25,10 @@ import {
   type StorageContext,
   type WatchAccount,
 } from '../../storage';
+import type {
+  RuntimeXSourceSettings,
+  SaveXBrowserSettingsInput,
+} from '../../storage/runtime-settings-service';
 import type { XPostPageQuery, XPostRawWithDeliveryEvents, XPostSummary } from '../../storage/types';
 import { normalizeXUsername } from '../../storage/watch-account-repository';
 
@@ -66,6 +77,8 @@ type AdminPostTriStateFilter = 'all' | 'false' | 'true';
 const DEFAULT_ADMIN_PAGE_SIZE = 10;
 const MAX_ADMIN_PAGE_SIZE = 100;
 const DELIVERY_TARGET_KEY_PREFIX = 'feishu';
+const DEFAULT_X_SOURCE_TEST_USERNAME = 'openai';
+const X_BROWSER_PROXY_PROTOCOLS = ['http:', 'https:', 'socks5:'] as const;
 
 export class AdminApiError extends Error {
   public readonly code: string;
@@ -385,6 +398,81 @@ export async function getAdminSettings(
   return {
     ok: true,
     data: settings,
+  };
+}
+
+export async function getAdminXSourceSettings(
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: RuntimeXSourceSettings }> {
+  const runtimeSettings = resolveRuntimeSettings(options);
+  const settings = await runtimeSettings.getXSourceSettingsSummary();
+
+  return {
+    ok: true,
+    data: settings,
+  };
+}
+
+export async function updateAdminXBrowserSettings(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: RuntimeXSourceSettings }> {
+  const input = readXBrowserSettingsBody(body);
+  const runtimeSettings = resolveRuntimeSettings(options);
+  const settings = await runtimeSettings.saveXBrowserSettings(input);
+
+  return {
+    ok: true,
+    data: settings,
+  };
+}
+
+export async function testAdminXSourceAnonymous(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: XSourceAnonymousCheckResult }> {
+  const xUsername = readXSourceUsernameBody(body);
+  const runtimeSettings = resolveRuntimeSettings(options);
+  const diagnostics = createXSourceDiagnostics({
+    getEffectiveAppConfig: () => runtimeSettings.getEffectiveAppConfig(),
+  });
+  const result = await runXSourceDiagnostic(() => diagnostics.testAnonymous(xUsername));
+
+  return {
+    ok: true,
+    data: result,
+  };
+}
+
+export async function checkAdminXSourceLogin(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: XSourceLoginCheckResult }> {
+  const xUsername = readXSourceUsernameBody(body);
+  const runtimeSettings = resolveRuntimeSettings(options);
+  const diagnostics = createXSourceDiagnostics({
+    getEffectiveAppConfig: () => runtimeSettings.getEffectiveAppConfig(),
+  });
+  const result = await runXSourceDiagnostic(() => diagnostics.checkLogin(xUsername));
+
+  return {
+    ok: true,
+    data: result,
+  };
+}
+
+export async function openAdminXLoginWindow(
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: XSourceOpenLoginResult }> {
+  const runtimeSettings = resolveRuntimeSettings(options);
+  const diagnostics = createXSourceDiagnostics({
+    getEffectiveAppConfig: () => runtimeSettings.getEffectiveAppConfig(),
+  });
+  const result = await runXSourceDiagnostic(() => diagnostics.openLoginWindow());
+
+  return {
+    ok: true,
+    data: result,
   };
 }
 
@@ -1038,6 +1126,26 @@ function resolveRuntimeSettings(options: AdminControllerOptions): RuntimeSetting
   });
 }
 
+async function runXSourceDiagnostic<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    throw toAdminXSourceDiagnosticError(error);
+  }
+}
+
+function toAdminXSourceDiagnosticError(error: unknown): AdminApiError {
+  if (error instanceof AdminApiError) {
+    return error;
+  }
+
+  if (error instanceof XSourceDiagnosticError) {
+    return new AdminApiError(error.statusCode, error.code, error.message, error.details);
+  }
+
+  return new AdminApiError(502, 'X_SOURCE_DIAGNOSTIC_FAILED', 'X 数据源诊断失败。');
+}
+
 async function validateWatchAccount(
   xUsername: string,
   options: AdminControllerOptions,
@@ -1084,6 +1192,24 @@ function toAdminSourceValidationError(error: unknown): AdminApiError {
 
     if (error.code === 'SOURCE_INVALID_INPUT') {
       return new AdminApiError(400, error.code, 'X 账号名无效，未添加监听账号。', details);
+    }
+
+    if (error.code === 'SOURCE_REQUEST_FAILED') {
+      return new AdminApiError(
+        502,
+        error.code,
+        'X 数据源网络请求失败，请检查网络或 X browser proxy 配置。',
+        details,
+      );
+    }
+
+    if (error.code === 'SOURCE_RESPONSE_INVALID') {
+      return new AdminApiError(
+        502,
+        error.code,
+        'X 页面结构不可解析，无法校验账号。',
+        details,
+      );
     }
 
     return new AdminApiError(502, error.code, 'X 账号校验失败，未添加监听账号。', details);
@@ -1345,6 +1471,74 @@ function readPollingSettingsBody(body: unknown): SavePollingSettingsInput {
     ),
     intervalSeconds: readRequiredIntegerBodyValue(body.intervalSeconds, 'intervalSeconds', 10, 3600),
   };
+}
+
+function readXBrowserSettingsBody(body: unknown): SaveXBrowserSettingsInput {
+  if (!isRecord(body)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
+  }
+
+  if (typeof body.proxyUrl !== 'string') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'proxyUrl 必须是字符串。');
+  }
+
+  return {
+    proxyUrl: normalizeOptionalProxyUrlBody(body.proxyUrl),
+  };
+}
+
+function readXSourceUsernameBody(body: unknown): string {
+  if (body === undefined || body === null) {
+    return DEFAULT_X_SOURCE_TEST_USERNAME;
+  }
+
+  if (!isRecord(body)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
+  }
+
+  const rawUsername = body.xUsername ?? body.username ?? DEFAULT_X_SOURCE_TEST_USERNAME;
+
+  if (typeof rawUsername !== 'string') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'xUsername 必须是字符串。');
+  }
+
+  const username = normalizeXUsername(rawUsername);
+
+  if (!/^[a-z0-9_]{1,15}$/.test(username)) {
+    throw new AdminApiError(
+      400,
+      'INVALID_REQUEST',
+      'xUsername 必须是合法 X 用户名，长度 1-15，只能包含字母、数字或下划线。',
+    );
+  }
+
+  return username;
+}
+
+function normalizeOptionalProxyUrlBody(rawValue: string): string {
+  const value = rawValue.trim();
+
+  if (value.length === 0) {
+    return '';
+  }
+
+  let url: URL;
+
+  try {
+    url = new URL(value);
+  } catch {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'proxyUrl 必须是有效 URL。');
+  }
+
+  if (!X_BROWSER_PROXY_PROTOCOLS.includes(url.protocol as typeof X_BROWSER_PROXY_PROTOCOLS[number])) {
+    throw new AdminApiError(
+      400,
+      'INVALID_REQUEST',
+      `proxyUrl 必须使用以下协议之一：${X_BROWSER_PROXY_PROTOCOLS.join(', ')}。`,
+    );
+  }
+
+  return url.toString();
 }
 
 function readRequiredBooleanBodyValue(value: unknown, fieldName: string): boolean {

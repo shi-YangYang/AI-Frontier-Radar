@@ -7,6 +7,7 @@ export interface AdminErrorResponse {
   ok: false;
   error: {
     code: string;
+    details?: Record<string, unknown>;
     message: string;
   };
 }
@@ -192,6 +193,9 @@ export interface RuntimeReadonlySettings {
   sqlitePath: string;
   xBrowserBaseUrl: string;
   xBrowserHeadless: boolean;
+  xBrowserProxyConfigured: boolean;
+  xBrowserProxyPreview: string | null;
+  xBrowserProxySource: RuntimeSettingSource;
   xBrowserUserDataDir: string;
 }
 
@@ -201,11 +205,84 @@ export interface RuntimeSettingsSummary {
   readonly: RuntimeReadonlySettings;
 }
 
+export interface RuntimeXSourceSettings {
+  browser: {
+    baseUrl: string;
+    headless: boolean;
+    navigationTimeoutMs: number;
+    postLoadTimeoutMs: number;
+    proxyConfigured: boolean;
+    proxyPreview: string | null;
+    proxySource: RuntimeSettingSource;
+    userDataDir: string;
+  };
+  mode: 'api' | 'browser';
+}
+
 export interface UpdatePollingSettingsInput {
   excludeReplies: boolean;
   excludeReposts: boolean;
   fetchLimitPerAccount: number;
   intervalSeconds: number;
+}
+
+export interface UpdateXBrowserSettingsInput {
+  proxyUrl: string;
+}
+
+export type XSourceAnonymousCheckStatus =
+  | 'available'
+  | 'account_not_found'
+  | 'login_required'
+  | 'network_error'
+  | 'page_unreadable'
+  | 'rate_limited';
+
+export type XSourceLoginCheckStatus =
+  | 'logged_in_or_public_available'
+  | 'login_required'
+  | 'network_error'
+  | 'page_unreadable'
+  | 'rate_limited';
+
+export interface XSourceAnonymousCheckResult {
+  message: string;
+  sourceCode?: string;
+  status: XSourceAnonymousCheckStatus;
+  xUsername: string;
+}
+
+export interface XSourceLoginCheckResult {
+  message: string;
+  sourceCode?: string;
+  status: XSourceLoginCheckStatus;
+  xUsername: string;
+}
+
+export interface XSourceOpenLoginResult {
+  loginUrl: string;
+  message: string;
+  status: 'opened';
+  userDataDir: string;
+}
+
+export class AdminApiRequestError extends Error {
+  public readonly code: string;
+  public readonly details?: Record<string, unknown>;
+  public readonly statusCode: number;
+
+  public constructor(input: {
+    code: string;
+    details?: Record<string, unknown>;
+    message: string;
+    statusCode: number;
+  }) {
+    super(input.message);
+    this.name = 'AdminApiRequestError';
+    this.code = input.code;
+    this.details = input.details;
+    this.statusCode = input.statusCode;
+  }
 }
 
 export interface FeishuTestResult {
@@ -283,6 +360,44 @@ export async function updatePollingSettings(
   return requestJson<RuntimePollingSettings>('/admin/api/settings/polling', {
     body: JSON.stringify(input),
     method: 'PUT',
+  });
+}
+
+export async function getXSourceSettings(): Promise<RuntimeXSourceSettings> {
+  return requestJson<RuntimeXSourceSettings>('/admin/api/settings/x-source');
+}
+
+export async function updateXBrowserSettings(
+  input: UpdateXBrowserSettingsInput,
+): Promise<RuntimeXSourceSettings> {
+  return requestJson<RuntimeXSourceSettings>('/admin/api/settings/x-source/browser', {
+    body: JSON.stringify(input),
+    method: 'PUT',
+  });
+}
+
+export async function testXSourceAnonymous(
+  xUsername: string,
+): Promise<XSourceAnonymousCheckResult> {
+  return requestJson<XSourceAnonymousCheckResult>(
+    '/admin/api/settings/x-source/test-anonymous',
+    {
+      body: JSON.stringify({ xUsername }),
+      method: 'POST',
+    },
+  );
+}
+
+export async function checkXSourceLogin(xUsername: string): Promise<XSourceLoginCheckResult> {
+  return requestJson<XSourceLoginCheckResult>('/admin/api/settings/x-source/check-login', {
+    body: JSON.stringify({ xUsername }),
+    method: 'POST',
+  });
+}
+
+export async function openXLoginWindow(): Promise<XSourceOpenLoginResult> {
+  return requestJson<XSourceOpenLoginResult>('/admin/api/settings/x-source/open-login', {
+    method: 'POST',
   });
 }
 
@@ -475,8 +590,20 @@ async function requestJson<T>(url: string, options: RequestInit = {}): Promise<T
   const payload = (await response.json()) as AdminResponse<T> | AdminErrorResponse;
 
   if (!response.ok || payload.ok === false) {
-    const message = payload.ok === false ? payload.error.message : '请求失败';
-    throw new Error(message);
+    if (payload.ok === false) {
+      throw new AdminApiRequestError({
+        code: payload.error.code,
+        details: payload.error.details,
+        message: payload.error.message,
+        statusCode: response.status,
+      });
+    }
+
+    throw new AdminApiRequestError({
+      code: 'REQUEST_FAILED',
+      message: '请求失败',
+      statusCode: response.status,
+    });
   }
 
   return payload.data;

@@ -24,6 +24,7 @@ const DEFAULT_X_BROWSER_BASE_URL = 'https://x.com';
 const DEFAULT_X_BROWSER_NAVIGATION_TIMEOUT_MS = 30_000;
 const DEFAULT_X_BROWSER_POST_LOAD_TIMEOUT_MS = 15_000;
 const DEFAULT_X_BROWSER_USER_DATA_DIR = '.x-browser-public-profile';
+const X_BROWSER_PROXY_PROTOCOLS = ['http:', 'https:', 'socks5:'] as const;
 
 interface LoadAppConfigOption {
   cwd?: string;
@@ -74,6 +75,11 @@ export async function loadAppConfig(options: LoadAppConfigOption = {}): Promise<
     defaultValue: DEFAULT_X_BROWSER_BASE_URL,
     protocols: ['http:', 'https:'],
   });
+  const xBrowserProxyUrl = readOptionalUrl(
+    reader,
+    'X_BROWSER_PROXY_URL',
+    X_BROWSER_PROXY_PROTOCOLS,
+  );
   const xBrowserNavigationTimeoutMs = reader.readInteger('X_BROWSER_NAVIGATION_TIMEOUT_MS', {
     defaultValue: DEFAULT_X_BROWSER_NAVIGATION_TIMEOUT_MS,
     max: 120_000,
@@ -152,6 +158,7 @@ export async function loadAppConfig(options: LoadAppConfigOption = {}): Promise<
           headless: xBrowserHeadless,
           navigationTimeoutMs: xBrowserNavigationTimeoutMs,
           postLoadTimeoutMs: xBrowserPostLoadTimeoutMs,
+          ...(xBrowserProxyUrl.length === 0 ? {} : { proxyUrl: xBrowserProxyUrl }),
           userDataDir: xBrowserUserDataDir,
         },
       },

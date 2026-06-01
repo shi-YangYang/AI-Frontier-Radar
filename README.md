@@ -22,6 +22,7 @@ V1 是一个本地/单机优先的准实时监测服务：轮询指定 X 账号�
 - `X_BROWSER_USER_DATA_DIR`：默认 `.x-browser-public-profile`
 - `X_BROWSER_HEADLESS`：默认 `true`
 - `X_BROWSER_BASE_URL`：默认 `https://x.com`
+- `X_BROWSER_PROXY_URL`：浏览器模式代理 URL，可为空；支持 `http://`、`https://`、`socks5://`，Web 配置页保存值优先于 `.env` 默认值，页面只显示脱敏预览
 - `X_BROWSER_NAVIGATION_TIMEOUT_MS`：默认 `30000`
 - `X_BROWSER_POST_LOAD_TIMEOUT_MS`：默认 `15000`
 - `X_API_BASE_URL` / `X_API_BEARER_TOKEN`：仅 `X_SOURCE_MODE=api` 时需要
@@ -80,7 +81,21 @@ npm run dev
 4. 登录态会保存在 `X_BROWSER_USER_DATA_DIR`
 5. 后续运行可把 `X_BROWSER_HEADLESS=true`
 
-浏览器模式不会处理验证码，不做隐身或反检测，也不会把 Cookie、Token、浏览器配置目录内容写入仓库。
+V2.0.1 起，`/settings` 页面新增 `X 数据源` 页签，可查看 browser source mode、base URL、profile 目录、headless、proxy 状态和当前生效 proxy URL，并可保存或清空 X browser 代理。代理配置优先级为：SQLite Web 配置 > `.env` 默认值 > 空值。保存后后续轮询会使用最新有效配置，页面只展示脱敏后的 proxy 预览。
+
+Linux 服务器如果不能直接访问 X，先在服务器上准备可用代理，再选择其中一种方式配置：
+
+- 在本地管理页 `/settings` 的 `X 数据源` 页签填写 `X_BROWSER_PROXY_URL` 并保存。
+- 或在 `.env` 中设置 `X_BROWSER_PROXY_URL` 作为默认值。
+- 代理 URL 可使用 `http://`、`https://` 或 `socks5://` 协议；如果包含认证信息，不要把真实值写入文档、仓库、截图或日志。
+
+`X 数据源` 页签提供三个诊断/辅助动作：
+
+- 匿名抓取测试：输入测试账号，默认 `openai`，使用当前有效 browser 配置和 headless 浏览器打开公开 X 页面，不使用账号密码，不要求登录态，用于判断匿名公开页面是否可读。结果会区分可用、网络或代理错误、需要登录、限流、账号不存在和页面不可解析。
+- 登录态检查：使用当前 `X_BROWSER_USER_DATA_DIR` 检查 profile 是否可用于访问 X 页面，不读取、不上传、不展示 cookie。由于公开页面可能匿名可读，结果表示“当前 profile 或匿名访问可用”，不等同于证明真实账号已登录。
+- 打开 X 登录窗口：仅作为本地 Windows / macOS / 有图形环境 Linux 的人工登录辅助，会用当前 profile 打开可见浏览器并进入 `https://x.com/home`，用户自行完成登录后再回到页面检查登录态。纯终端 Linux 无图形环境会返回明确错误，不承诺一键登录；可改用代理匿名抓取测试、VNC/远程桌面登录，或迁移已登录 profile。
+
+浏览器模式不支持 cookie 上传、不支持自动登录、不支持验证码处理，不保存 X 账号密码，不做隐身或反检测，不规避平台风控，也不会把 Cookie、Token、浏览器配置目录内容写入仓库。
 
 如果已有付费 X API，可改用 API 模式：
 

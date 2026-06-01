@@ -87,6 +87,7 @@
 import { onMounted, ref } from 'vue';
 
 import {
+  AdminApiRequestError,
   createWatchAccount,
   deleteWatchAccount,
   listWatchAccounts,
@@ -167,7 +168,7 @@ async function addAccount(): Promise<void> {
   } catch (error) {
     setNotice(
       t('notice.accountCreateFailed', {
-        error: error instanceof Error ? error.message : String(error),
+        error: toAccountCreateErrorMessage(error),
       }),
       true,
     );
@@ -202,6 +203,40 @@ async function confirmDelete(): Promise<void> {
 function setNotice(message: string, danger = false): void {
   notice.value = message;
   noticeDanger.value = danger;
+}
+
+function toAccountCreateErrorMessage(error: unknown): string {
+  if (error instanceof AdminApiRequestError) {
+    if (error.code === 'SOURCE_REQUEST_FAILED') {
+      return t('accounts.error.network');
+    }
+
+    if (error.code === 'SOURCE_AUTH_FAILED') {
+      return t('accounts.error.loginRequired');
+    }
+
+    if (error.code === 'SOURCE_RATE_LIMITED') {
+      return t('accounts.error.rateLimited');
+    }
+
+    if (error.code === 'SOURCE_RESPONSE_INVALID') {
+      return t('accounts.error.pageUnreadable');
+    }
+
+    if (error.code === 'SOURCE_ACCOUNT_NOT_FOUND') {
+      return t('accounts.error.accountNotFound');
+    }
+
+    if (error.code === 'SOURCE_INVALID_INPUT') {
+      return t('accounts.error.invalidInput');
+    }
+
+    if (error.code === 'SOURCE_VALIDATION_UNAVAILABLE') {
+      return t('accounts.error.validationUnavailable');
+    }
+  }
+
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function loadAccountsAfterDelete(): Promise<void> {

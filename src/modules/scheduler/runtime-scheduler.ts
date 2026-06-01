@@ -54,6 +54,7 @@ export function createRuntimeSourceProvider(config: AppConfig): SourceProvider {
       headless: config.source.x.browser.headless,
       navigationTimeoutMs: config.source.x.browser.navigationTimeoutMs,
       postLoadTimeoutMs: config.source.x.browser.postLoadTimeoutMs,
+      proxyUrl: config.source.x.browser.proxyUrl,
       userDataDir: config.source.x.browser.userDataDir,
     });
   }
@@ -71,7 +72,7 @@ export function createRuntimeSourceProvider(config: AppConfig): SourceProvider {
 class IntervalRuntimeScheduler implements RuntimeScheduler {
   private readonly deliveryIntervalMs: number;
   private readonly logger: AppLogger;
-  private readonly sourceProvider: SourceProvider;
+  private readonly sourceProvider?: SourceProvider;
   private deliveryInterval: TimerHandle | null = null;
   private deliveryRunPromise: Promise<RuntimeSchedulerRunNowResult> | null = null;
   private pollingInterval: TimerHandle | null = null;
@@ -84,7 +85,7 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
     this.pollingIntervalMs =
       options.pollingIntervalMs ?? options.config.polling.intervalSeconds * 1_000;
     this.deliveryIntervalMs = options.deliveryIntervalMs ?? DEFAULT_DELIVERY_INTERVAL_MS;
-    this.sourceProvider = options.sourceProvider ?? createRuntimeSourceProvider(options.config);
+    this.sourceProvider = options.sourceProvider;
   }
 
   public start(): void {
@@ -248,10 +249,11 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
         this.options.runtimeSettings === undefined
           ? this.options.config
           : await this.options.runtimeSettings.getEffectiveAppConfig();
+      const sourceProvider = this.sourceProvider ?? createRuntimeSourceProvider(config);
       const result = await runPollingJob({
         config,
         logger: this.options.logger,
-        sourceProvider: this.sourceProvider,
+        sourceProvider,
         storage: this.options.storage,
       });
 

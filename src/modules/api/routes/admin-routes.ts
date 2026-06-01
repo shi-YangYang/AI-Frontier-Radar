@@ -18,21 +18,26 @@ import {
   deleteAdminDeliveryEvent,
   deleteAdminPollRun,
   deleteAdminWatchAccount,
+  checkAdminXSourceLogin,
   getAdminSettings,
   getAdminSummary,
+  getAdminXSourceSettings,
   listAdminDeliveryEvents,
   listAdminDeliveryTargets,
   listAdminPollRuns,
   listAdminPosts,
   listAdminWatchAccounts,
+  openAdminXLoginWindow,
   runAdminDeliveryNow,
   runAdminPollingNow,
   testAdminDeliveryTarget,
   testAdminFeishuSettings,
+  testAdminXSourceAnonymous,
   toAdminApiErrorPayload,
   updateAdminDeliveryTarget,
   updateAdminDeliveryTargetEnabled,
   updateAdminFeishuSettings,
+  updateAdminXBrowserSettings,
   updateAdminPollingSettings,
 } from '../controllers/admin-controller';
 import { adminJsonResponseSchema } from '../schemas/admin';
@@ -101,6 +106,59 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     },
     async (request, reply) =>
       sendAdminResponse(reply, () => updateAdminPollingSettings(request.body, options)),
+  );
+
+  app.get(
+    '/admin/api/settings/x-source',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => getAdminXSourceSettings(options)),
+  );
+
+  app.put(
+    '/admin/api/settings/x-source/browser',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => updateAdminXBrowserSettings(request.body, options)),
+  );
+
+  app.post(
+    '/admin/api/settings/x-source/test-anonymous',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => testAdminXSourceAnonymous(request.body, options)),
+  );
+
+  app.post(
+    '/admin/api/settings/x-source/check-login',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => checkAdminXSourceLogin(request.body, options)),
+  );
+
+  app.post(
+    '/admin/api/settings/x-source/open-login',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => openAdminXLoginWindow(options)),
   );
 
   app.put(

@@ -29,6 +29,14 @@ export class AppSettingRepository {
     return appSetting === null ? null : mapAppSetting(appSetting);
   }
 
+  public async deleteByKey(settingKey: string): Promise<boolean> {
+    const result = await this.prisma.appSetting.deleteMany({
+      where: { settingKey },
+    });
+
+    return result.count > 0;
+  }
+
   public async getJson<T>(settingKey: string): Promise<T | null> {
     const appSetting = await this.findByKey(settingKey);
 

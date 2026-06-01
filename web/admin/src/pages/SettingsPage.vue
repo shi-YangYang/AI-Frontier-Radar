@@ -193,6 +193,199 @@
           </article>
         </section>
 
+        <section v-else-if="activeSettingsTab === 'xSource'" class="settings-layout x-source-layout">
+          <article class="panel settings-wide">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.xSource.summaryTitle') }}</h2>
+                <p>{{ t('settings.xSource.summaryDescription') }}</p>
+              </div>
+              <span
+                v-if="xSourceSettings !== null"
+                class="status-badge"
+                :class="xSourceSettings.mode === 'browser' ? 'good' : 'neutral'"
+              >
+                {{ xSourceSettings.mode }}
+              </span>
+            </header>
+
+            <div v-if="xSourceSettings === null" class="empty-panel">{{ t('settings.loading') }}</div>
+            <dl v-else class="detail-list x-source-detail-list">
+              <div>
+                <dt>{{ t('settings.xSource.mode') }}</dt>
+                <dd><code>{{ xSourceSettings.mode }}</code></dd>
+              </div>
+              <div>
+                <dt>{{ t('settings.xSource.baseUrl') }}</dt>
+                <dd><code class="wrap">{{ xSourceSettings.browser.baseUrl }}</code></dd>
+              </div>
+              <div>
+                <dt>{{ t('settings.xSource.profileDir') }}</dt>
+                <dd><code class="wrap">{{ xSourceSettings.browser.userDataDir }}</code></dd>
+              </div>
+              <div>
+                <dt>{{ t('settings.xSource.headless') }}</dt>
+                <dd>
+                  <span class="status-badge" :class="xSourceSettings.browser.headless ? 'neutral' : 'good'">
+                    {{
+                      xSourceSettings.browser.headless
+                        ? t('settings.xSource.headlessEnabled')
+                        : t('settings.xSource.headlessDisabled')
+                    }}
+                  </span>
+                </dd>
+              </div>
+              <div>
+                <dt>{{ t('settings.xSource.proxyPreview') }}</dt>
+                <dd>
+                  <code class="wrap">
+                    {{
+                      xSourceSettings.browser.proxyPreview
+                        ?? t('settings.xSource.proxyNotConfigured')
+                    }}
+                  </code>
+                  <span class="muted">
+                    ({{ sourceLabel(xSourceSettings.browser.proxySource) }})
+                  </span>
+                </dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="panel settings-form-panel">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.xSource.proxyTitle') }}</h2>
+                <p>{{ t('settings.xSource.proxyDescription') }}</p>
+              </div>
+            </header>
+
+            <form class="settings-form x-source-form" @submit.prevent="saveXProxy">
+              <label>
+                <span>{{ t('settings.xSource.proxyUrlLabel') }}</span>
+                <input
+                  v-model="xProxyForm.proxyUrl"
+                  autocomplete="off"
+                  inputmode="url"
+                  :placeholder="t('settings.xSource.proxyUrlPlaceholder')"
+                />
+                <small>{{ t('settings.xSource.proxyHelp') }}</small>
+                <div class="x-source-current-url">
+                  <span>{{ t('settings.xSource.currentProxyUrl') }}</span>
+                  <code class="wrap">
+                    {{
+                      xSourceSettings?.browser.proxyPreview
+                        ?? t('settings.xSource.proxyNotConfigured')
+                    }}
+                  </code>
+                </div>
+              </label>
+              <div class="inline-alert">
+                {{ t('settings.xSource.proxySecurityHint') }}
+              </div>
+              <div class="form-actions x-source-actions">
+                <button class="primary" type="submit" :disabled="busy || !isBrowserSourceMode()">
+                  {{ t('settings.xSource.saveProxy') }}
+                </button>
+                <button type="button" :disabled="busy || !isBrowserSourceMode()" @click="clearXProxy">
+                  {{ t('settings.xSource.clearProxy') }}
+                </button>
+              </div>
+            </form>
+          </article>
+
+          <article class="panel settings-form-panel">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.xSource.anonymousTitle') }}</h2>
+                <p>{{ t('settings.xSource.anonymousDescription') }}</p>
+              </div>
+            </header>
+
+            <form class="settings-form x-source-form" @submit.prevent="runAnonymousTest">
+              <label>
+                <span>{{ t('settings.xSource.testUsernameLabel') }}</span>
+                <input
+                  v-model="xDiagnosticUsername"
+                  autocomplete="off"
+                  :placeholder="t('settings.xSource.testUsernamePlaceholder')"
+                />
+              </label>
+              <div class="form-actions x-source-actions">
+                <button class="primary" type="submit" :disabled="busy || !isBrowserSourceMode()">
+                  {{ t('settings.xSource.runAnonymousTest') }}
+                </button>
+              </div>
+            </form>
+
+            <section
+              v-if="anonymousCheckResult !== null"
+              class="x-source-result"
+              :aria-label="t('settings.xSource.anonymousResultAria')"
+            >
+              <span class="status-badge" :class="anonymousStatusClass(anonymousCheckResult.status)">
+                {{ t(anonymousStatusLabelKey(anonymousCheckResult.status)) }}
+              </span>
+              <p>
+                {{
+                  t(anonymousStatusDetailKey(anonymousCheckResult.status), {
+                    xUsername: '@' + anonymousCheckResult.xUsername,
+                  })
+                }}
+              </p>
+              <small v-if="anonymousCheckResult.sourceCode !== undefined">
+                sourceCode=<code>{{ anonymousCheckResult.sourceCode }}</code>
+              </small>
+            </section>
+          </article>
+
+          <article class="panel settings-form-panel settings-wide">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.xSource.loginTitle') }}</h2>
+                <p>{{ t('settings.xSource.loginDescription') }}</p>
+              </div>
+            </header>
+
+            <div class="settings-form x-source-form">
+              <div v-if="!isBrowserSourceMode()" class="inline-alert warn">
+                {{ t('settings.xSource.browserModeRequired') }}
+              </div>
+              <div class="inline-alert warn">
+                {{ t('settings.xSource.noGuiHint') }}
+              </div>
+              <div class="form-actions x-source-actions">
+                <button type="button" :disabled="busy || !isBrowserSourceMode()" @click="runLoginCheck">
+                  {{ t('settings.xSource.checkLogin') }}
+                </button>
+                <button class="primary" type="button" :disabled="busy || !isBrowserSourceMode()" @click="openLoginWindow">
+                  {{ t('settings.xSource.openLoginWindow') }}
+                </button>
+              </div>
+            </div>
+
+            <section
+              v-if="loginCheckResult !== null"
+              class="x-source-result"
+              :aria-label="t('settings.xSource.loginResultAria')"
+            >
+              <span class="status-badge" :class="loginStatusClass(loginCheckResult.status)">
+                {{ t(loginStatusLabelKey(loginCheckResult.status)) }}
+              </span>
+              <p>
+                {{
+                  t(loginStatusDetailKey(loginCheckResult.status), {
+                    xUsername: '@' + loginCheckResult.xUsername,
+                  })
+                }}
+              </p>
+              <small v-if="loginCheckResult.sourceCode !== undefined">
+                sourceCode=<code>{{ loginCheckResult.sourceCode }}</code>
+              </small>
+            </section>
+          </article>
+        </section>
+
         <section v-else class="settings-layout single-column">
           <article class="panel settings-form-panel">
             <header class="panel-header">
@@ -321,19 +514,30 @@
 import { onMounted, reactive, ref } from 'vue';
 
 import {
+  AdminApiRequestError,
+  checkXSourceLogin,
   createDeliveryTarget,
   deleteDeliveryTarget,
   getSettings,
+  getXSourceSettings,
   listDeliveryTargets,
+  openXLoginWindow,
   testDeliveryTarget,
+  testXSourceAnonymous,
   updateDeliveryTarget,
   updateDeliveryTargetEnabled,
+  updateXBrowserSettings,
   updatePollingSettings,
   type AdminPagination,
   type DeliveryTarget,
   type DeliveryTargetSummary,
   type RuntimeSettingSource,
   type RuntimeSettingsSummary,
+  type RuntimeXSourceSettings,
+  type XSourceAnonymousCheckResult,
+  type XSourceAnonymousCheckStatus,
+  type XSourceLoginCheckResult,
+  type XSourceLoginCheckStatus,
 } from '../api/admin-api';
 import ConfirmModal from '../components/ConfirmModal.vue';
 import PageHeader from '../components/PageHeader.vue';
@@ -359,8 +563,11 @@ const editingTarget = ref<DeliveryTarget | null>(null);
 const notice = ref('');
 const noticeDanger = ref(false);
 const settings = ref<RuntimeSettingsSummary | null>(null);
+const xSourceSettings = ref<RuntimeXSourceSettings | null>(null);
+const anonymousCheckResult = ref<XSourceAnonymousCheckResult | null>(null);
+const loginCheckResult = ref<XSourceLoginCheckResult | null>(null);
 
-type SettingsTabKey = 'feishu' | 'polling' | 'runtime';
+type SettingsTabKey = 'feishu' | 'polling' | 'xSource' | 'runtime';
 
 const activeSettingsTab = ref<SettingsTabKey>('feishu');
 const settingsTabs: Array<{ descriptionKey: MessageKey; key: SettingsTabKey; labelKey: MessageKey }> = [
@@ -373,6 +580,11 @@ const settingsTabs: Array<{ descriptionKey: MessageKey; key: SettingsTabKey; lab
     descriptionKey: 'settings.tabs.polling.description',
     key: 'polling',
     labelKey: 'settings.tabs.polling.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.xSource.description',
+    key: 'xSource',
+    labelKey: 'settings.tabs.xSource.label',
   },
   {
     descriptionKey: 'settings.tabs.runtime.description',
@@ -399,6 +611,12 @@ const editTargetForm = reactive({
   webhookUrl: '',
 });
 
+const xProxyForm = reactive({
+  proxyUrl: '',
+});
+
+const xDiagnosticUsername = ref('openai');
+
 onMounted(() => {
   void loadSettings({ silent: true });
 });
@@ -407,11 +625,13 @@ async function loadSettings(options: { silent?: boolean } = {}): Promise<void> {
   busy.value = true;
 
   try {
-    const [loadedSettings, loadedTargets] = await Promise.all([
+    const [loadedSettings, loadedXSourceSettings, loadedTargets] = await Promise.all([
       getSettings(),
+      getXSourceSettings(),
       listDeliveryTargets(toDeliveryTargetQuery(deliveryTargetPagination.value.page)),
     ]);
     applySettings(loadedSettings);
+    applyXSourceSettings(loadedXSourceSettings);
     applyDeliveryTargets(loadedTargets);
 
     if (options.silent !== true) {
@@ -473,6 +693,96 @@ async function savePolling(): Promise<void> {
     setNotice(t('settings.notice.savePollingSuccess'));
   } catch (error) {
     setNotice(t('settings.notice.savePollingFailure', { error: toErrorMessage(error) }), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function saveXProxy(): Promise<void> {
+  const validationError = validateXProxyUrl(xProxyForm.proxyUrl);
+
+  if (validationError !== null) {
+    setNotice(t('settings.notice.saveXProxyFailure', { error: validationError }), true);
+    return;
+  }
+
+  busy.value = true;
+
+  try {
+    const xSource = await updateXBrowserSettings({
+      proxyUrl: xProxyForm.proxyUrl.trim(),
+    });
+    applyXSourceSettings(xSource);
+    xProxyForm.proxyUrl = '';
+    setNotice(t('settings.notice.saveXProxySuccess'));
+  } catch (error) {
+    setNotice(t('settings.notice.saveXProxyFailure', { error: toErrorMessage(error) }), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function clearXProxy(): Promise<void> {
+  busy.value = true;
+
+  try {
+    const xSource = await updateXBrowserSettings({ proxyUrl: '' });
+    applyXSourceSettings(xSource);
+    xProxyForm.proxyUrl = '';
+    setNotice(t('settings.notice.clearXProxySuccess'));
+  } catch (error) {
+    setNotice(t('settings.notice.clearXProxyFailure', { error: toErrorMessage(error) }), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function runAnonymousTest(): Promise<void> {
+  busy.value = true;
+
+  try {
+    const result = await testXSourceAnonymous(normalizeXDiagnosticUsername());
+    anonymousCheckResult.value = result;
+    setNotice(
+      t('settings.notice.anonymousTestComplete', {
+        status: t(anonymousStatusLabelKey(result.status)),
+      }),
+      result.status !== 'available',
+    );
+  } catch (error) {
+    setNotice(t('settings.notice.anonymousTestFailure', { error: toXSourceActionErrorMessage(error) }), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function runLoginCheck(): Promise<void> {
+  busy.value = true;
+
+  try {
+    const result = await checkXSourceLogin(normalizeXDiagnosticUsername());
+    loginCheckResult.value = result;
+    setNotice(
+      t('settings.notice.loginCheckComplete', {
+        status: t(loginStatusLabelKey(result.status)),
+      }),
+      result.status !== 'logged_in_or_public_available',
+    );
+  } catch (error) {
+    setNotice(t('settings.notice.loginCheckFailure', { error: toXSourceActionErrorMessage(error) }), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function openLoginWindow(): Promise<void> {
+  busy.value = true;
+
+  try {
+    await openXLoginWindow();
+    setNotice(t('settings.notice.openXLoginSuccess'));
+  } catch (error) {
+    setNotice(t('settings.notice.openXLoginFailure', { error: toXSourceActionErrorMessage(error) }), true);
   } finally {
     busy.value = false;
   }
@@ -627,6 +937,28 @@ function applySettings(loadedSettings: RuntimeSettingsSummary): void {
   pollingForm.intervalSeconds = loadedSettings.polling.intervalSeconds;
 }
 
+function applyXSourceSettings(loadedXSourceSettings: RuntimeXSourceSettings): void {
+  xSourceSettings.value = loadedXSourceSettings;
+
+  if (settings.value === null) {
+    return;
+  }
+
+  settings.value = {
+    ...settings.value,
+    readonly: {
+      ...settings.value.readonly,
+      sourceMode: loadedXSourceSettings.mode,
+      xBrowserBaseUrl: loadedXSourceSettings.browser.baseUrl,
+      xBrowserHeadless: loadedXSourceSettings.browser.headless,
+      xBrowserProxyConfigured: loadedXSourceSettings.browser.proxyConfigured,
+      xBrowserProxyPreview: loadedXSourceSettings.browser.proxyPreview,
+      xBrowserProxySource: loadedXSourceSettings.browser.proxySource,
+      xBrowserUserDataDir: loadedXSourceSettings.browser.userDataDir,
+    },
+  };
+}
+
 function applyDeliveryTargets(result: {
   deliveryTargets: DeliveryTarget[];
   pagination: AdminPagination;
@@ -717,8 +1049,114 @@ function validateWebhookUrl(value: string): string | null {
   return null;
 }
 
+function validateXProxyUrl(value: string): string | null {
+  const normalizedValue = value.trim();
+
+  if (normalizedValue.length === 0) {
+    return null;
+  }
+
+  try {
+    const parsedUrl = new URL(normalizedValue);
+    const supportedProtocols = new Set(['http:', 'https:', 'socks5:']);
+
+    if (!supportedProtocols.has(parsedUrl.protocol)) {
+      return t('settings.xSource.validation.proxyProtocol');
+    }
+  } catch {
+    return t('settings.xSource.validation.proxyInvalid');
+  }
+
+  return null;
+}
+
 function sourceLabel(source: RuntimeSettingSource): string {
   return source === 'database_override' ? t('settings.source.databaseOverride') : t('settings.source.envDefault');
+}
+
+function isBrowserSourceMode(): boolean {
+  return xSourceSettings.value?.mode === 'browser';
+}
+
+function normalizeXDiagnosticUsername(): string {
+  const normalizedUsername = xDiagnosticUsername.value.trim().replace(/^@+/, '');
+  const fallbackUsername = normalizedUsername.length === 0 ? 'openai' : normalizedUsername;
+  xDiagnosticUsername.value = fallbackUsername;
+  return fallbackUsername;
+}
+
+function anonymousStatusClass(status: XSourceAnonymousCheckStatus): string {
+  if (status === 'available') {
+    return 'good';
+  }
+
+  if (status === 'login_required' || status === 'rate_limited') {
+    return 'warn';
+  }
+
+  return 'bad';
+}
+
+function loginStatusClass(status: XSourceLoginCheckStatus): string {
+  if (status === 'logged_in_or_public_available') {
+    return 'good';
+  }
+
+  if (status === 'login_required' || status === 'rate_limited') {
+    return 'warn';
+  }
+
+  return 'bad';
+}
+
+function anonymousStatusLabelKey(status: XSourceAnonymousCheckStatus): MessageKey {
+  const statusKeys: Record<XSourceAnonymousCheckStatus, MessageKey> = {
+    account_not_found: 'settings.xSource.anonymousStatus.accountNotFound',
+    available: 'settings.xSource.anonymousStatus.available',
+    login_required: 'settings.xSource.anonymousStatus.loginRequired',
+    network_error: 'settings.xSource.anonymousStatus.networkError',
+    page_unreadable: 'settings.xSource.anonymousStatus.pageUnreadable',
+    rate_limited: 'settings.xSource.anonymousStatus.rateLimited',
+  };
+
+  return statusKeys[status];
+}
+
+function anonymousStatusDetailKey(status: XSourceAnonymousCheckStatus): MessageKey {
+  const statusKeys: Record<XSourceAnonymousCheckStatus, MessageKey> = {
+    account_not_found: 'settings.xSource.anonymousDetail.accountNotFound',
+    available: 'settings.xSource.anonymousDetail.available',
+    login_required: 'settings.xSource.anonymousDetail.loginRequired',
+    network_error: 'settings.xSource.anonymousDetail.networkError',
+    page_unreadable: 'settings.xSource.anonymousDetail.pageUnreadable',
+    rate_limited: 'settings.xSource.anonymousDetail.rateLimited',
+  };
+
+  return statusKeys[status];
+}
+
+function loginStatusLabelKey(status: XSourceLoginCheckStatus): MessageKey {
+  const statusKeys: Record<XSourceLoginCheckStatus, MessageKey> = {
+    logged_in_or_public_available: 'settings.xSource.loginStatus.loggedInOrPublic',
+    login_required: 'settings.xSource.loginStatus.loginRequired',
+    network_error: 'settings.xSource.loginStatus.networkError',
+    page_unreadable: 'settings.xSource.loginStatus.pageUnreadable',
+    rate_limited: 'settings.xSource.loginStatus.rateLimited',
+  };
+
+  return statusKeys[status];
+}
+
+function loginStatusDetailKey(status: XSourceLoginCheckStatus): MessageKey {
+  const statusKeys: Record<XSourceLoginCheckStatus, MessageKey> = {
+    logged_in_or_public_available: 'settings.xSource.loginDetail.loggedInOrPublic',
+    login_required: 'settings.xSource.loginDetail.loginRequired',
+    network_error: 'settings.xSource.loginDetail.networkError',
+    page_unreadable: 'settings.xSource.loginDetail.pageUnreadable',
+    rate_limited: 'settings.xSource.loginDetail.rateLimited',
+  };
+
+  return statusKeys[status];
 }
 
 function setNotice(message: string, danger = false): void {
@@ -731,13 +1169,42 @@ function toDeliveryTargetErrorMessage(error: unknown): string {
   return message.includes('\u5df2\u5b58\u5728') ? t('settings.notice.duplicateWebhook') : sanitizeWebhookMessage(message);
 }
 
+function toXSourceActionErrorMessage(error: unknown): string {
+  if (error instanceof AdminApiRequestError) {
+    if (error.code === 'GRAPHICAL_ENV_UNAVAILABLE') {
+      return t('settings.xSource.openLoginNoGui');
+    }
+
+    if (error.code === 'X_SOURCE_MODE_NOT_BROWSER') {
+      return t('settings.xSource.browserModeRequired');
+    }
+
+    if (error.code === 'X_LOGIN_WINDOW_OPEN_FAILED') {
+      return t('settings.xSource.openLoginGenericFailure');
+    }
+  }
+
+  return toErrorMessage(error);
+}
+
 function toErrorMessage(error: unknown): string {
-  return sanitizeWebhookMessage(error instanceof Error ? error.message : String(error));
+  return sanitizeSensitiveMessage(error instanceof Error ? error.message : String(error));
+}
+
+function sanitizeSensitiveMessage(message: string): string {
+  return sanitizeProxyMessage(sanitizeWebhookMessage(message));
 }
 
 function sanitizeWebhookMessage(message: string): string {
   return message
     .replace(/https:\/\/open\.feishu\.cn\/open-apis\/bot\/v2\/hook\/[^\s"'，。)）]+/gi, t('settings.webhookHidden'))
     .replace(/https:\/\/[^\s"'，。)）]*(?:feishu|larksuite)[^\s"'，。)）]*/gi, t('settings.webhookHidden'));
+}
+
+function sanitizeProxyMessage(message: string): string {
+  return message.replace(
+    /\b(https?|socks5):\/\/[^/\s"'，。)）@]+:[^@\s"'，。)）]+@/gi,
+    '$1://[REDACTED]@',
+  );
 }
 </script>

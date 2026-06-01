@@ -20,6 +20,7 @@ export const adminJsonResponseSchema = {
   403: adminErrorResponseSchema,
   404: adminErrorResponseSchema,
   409: adminErrorResponseSchema,
+  429: adminErrorResponseSchema,
   500: adminErrorResponseSchema,
   502: adminErrorResponseSchema,
   503: adminErrorResponseSchema,

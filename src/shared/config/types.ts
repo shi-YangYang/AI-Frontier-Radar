@@ -36,6 +36,7 @@ export interface XBrowserSourceConfig {
   headless: boolean;
   navigationTimeoutMs: number;
   postLoadTimeoutMs: number;
+  proxyUrl?: string;
   userDataDir: string;
 }
 

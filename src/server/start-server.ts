@@ -16,12 +16,10 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     config: options.config,
     storage,
   });
-  const sourceProvider = createRuntimeSourceProvider(options.config);
   const scheduler = createRuntimeScheduler({
     config: options.config,
     logger: options.logger,
     runtimeSettings,
-    sourceProvider,
     storage,
   });
   const app = createApp({
@@ -29,7 +27,12 @@ export async function startServer(options: StartServerOptions): Promise<void> {
       runDeliveryWorkerNow: (runOptions) => scheduler.runDeliveryWorkerNow(runOptions),
       runPollingNow: (runOptions) => scheduler.runPollingNow(runOptions),
       updatePollingSchedule: (intervalSeconds) => scheduler.updatePollingSchedule(intervalSeconds),
-      validateWatchAccount: (input) => sourceProvider.validateAccount(input),
+      validateWatchAccount: async (input) => {
+        const effectiveConfig = await runtimeSettings.getEffectiveAppConfig();
+        const sourceProvider = createRuntimeSourceProvider(effectiveConfig);
+
+        return sourceProvider.validateAccount(input);
+      },
     },
     config: options.config,
     logger: options.logger,
