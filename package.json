@@ -4,6 +4,8 @@
   "private": true,
   "description": "V1 foundation for AI frontier message monitoring.",
   "scripts": {
+    "setup": "node scripts/setup.cjs",
+    "setup:dry-run": "node scripts/setup.cjs --dry-run",
     "bootstrap": "npm install --cache ./.npm-cache --prefer-online --offline=false --registry=https://registry.npmmirror.com/",
     "bootstrap:no-lock": "npm install --no-package-lock --cache ./.npm-cache --prefer-online --offline=false --registry=https://registry.npmmirror.com/",
     "admin:build": "vite build --config web/admin/vite.config.ts --configLoader native",
@@ -13,6 +15,7 @@
     "build": "npm run backend:build && npm run admin:build",
     "dev": "tsx watch src/server/main.ts",
     "local": "npm run prisma:generate && npm run prisma:migrate:deploy && npm run build && npm run start",
+    "playwright:install": "npx playwright install chromium",
     "prisma:generate": "node scripts/prisma-cli.cjs generate",
     "prisma:migrate:deploy": "node scripts/prisma-cli.cjs migrate deploy",
     "prisma:migrate:status": "node scripts/prisma-cli.cjs migrate status",
