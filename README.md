@@ -9,13 +9,12 @@
     · <a href="#常见问题">常见问题</a>
     · <a href="#开发">开发</a>
   </p>
-  <p>
-    <img alt="Node.js >= 20" src="https://img.shields.io/badge/Node.js-%3E%3D20-3C873A?style=flat-square" />
-    <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square" />
-    <img alt="SQLite" src="https://img.shields.io/badge/SQLite-local-044A64?style=flat-square" />
-    <img alt="Vue" src="https://img.shields.io/badge/Vue-3-42B883?style=flat-square" />
-  </p>
 </div>
+
+![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-3C873A?style=flat-square)
+![TypeScript 5.x](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square)
+![SQLite Local](https://img.shields.io/badge/SQLite-local-044A64?style=flat-square)
+![Vue 3](https://img.shields.io/badge/Vue-3-42B883?style=flat-square)
 
 ## English Summary
 
