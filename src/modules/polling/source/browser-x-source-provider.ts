@@ -53,6 +53,15 @@ const RATE_LIMIT_PATTERN =
   /(?:\b(?:Rate limit exceeded|rate limited|Too many requests)\b|超出速率限制|请求过于频繁)/iu;
 const ACCOUNT_NOT_FOUND_PATTERN =
   /(?:\b(?:This account doesn.?t exist|This account does not exist|Account suspended|User not found)\b|此账号不存在|账号不存在|帐号不存在|账号已被暂停|用户不存在)/iu;
+const CDP_PLATFORM_BY_OS: Record<string, string> = {
+  darwin: 'macOS',
+  linux: 'Linux',
+  win32: 'Windows',
+};
+const CDP_ARCHITECTURE_BY_CPU: Record<string, string> = {
+  arm64: 'arm',
+  x64: 'x86',
+};
 
 export class BrowserXSourceProvider implements SourceProvider {
   private readonly baseUrl: string;
@@ -104,6 +113,7 @@ export class BrowserXSourceProvider implements SourceProvider {
         ...toLaunchProxyOption(this.proxyUrl),
       });
       const page = context.pages()[0] ?? (await context.newPage());
+      await applyHeadlessUserAgentMask(context, page, this.headless);
       const profileUrl = `${this.baseUrl.replace(/\/$/u, '')}/${encodeURIComponent(xUsername)}`;
 
       await page.goto(profileUrl, {
@@ -172,6 +182,7 @@ export class BrowserXSourceProvider implements SourceProvider {
         ...toLaunchProxyOption(this.proxyUrl),
       });
       const page = context.pages()[0] ?? (await context.newPage());
+      await applyHeadlessUserAgentMask(context, page, this.headless);
       const profileUrl = `${this.baseUrl.replace(/\/$/u, '')}/${encodeURIComponent(xUsername)}`;
 
       await page.goto(profileUrl, {
@@ -255,6 +266,60 @@ function toLaunchProxyOption(
 ): { proxy?: BrowserXProxySettings } {
   const proxy = toBrowserXProxySettings(proxyUrl);
   return proxy === undefined ? {} : { proxy };
+}
+
+async function applyHeadlessUserAgentMask(
+  context: BrowserContext,
+  page: Page,
+  enabled: boolean,
+): Promise<void> {
+  if (!enabled) {
+    return;
+  }
+
+  const userAgent = await page.evaluate(() => navigator.userAgent).catch(() => '');
+  if (userAgent.length === 0) {
+    return;
+  }
+
+  const maskedUserAgent = userAgent.replace(/HeadlessChrome/gu, 'Chrome');
+  const version = context.browser()?.version() ?? '';
+  const majorVersion = version.split('.')[0] || '0';
+  const brands = [
+    { brand: 'Chromium', version: majorVersion },
+    { brand: 'Not.A/Brand', version: '8' },
+  ];
+  const fullVersionList =
+    version.length === 0
+      ? brands
+      : [
+          { brand: 'Chromium', version },
+          { brand: 'Not.A/Brand', version: '8.0.0.0' },
+        ];
+  const acceptLanguage =
+    (await page.evaluate(() => navigator.languages.join(',')).catch(() => '')) || 'en-US,en';
+  const platform = CDP_PLATFORM_BY_OS[process.platform] ?? 'Linux';
+  const architecture = CDP_ARCHITECTURE_BY_CPU[process.arch] ?? '';
+  const bitness = process.arch === 'x64' || process.arch === 'arm64' ? '64' : '';
+
+  const client = await context.newCDPSession(page);
+  await client.send('Emulation.setUserAgentOverride', {
+    acceptLanguage,
+    platform,
+    userAgent: maskedUserAgent,
+    userAgentMetadata: {
+      architecture,
+      bitness,
+      brands,
+      fullVersion: version,
+      fullVersionList,
+      mobile: false,
+      model: '',
+      platform,
+      platformVersion: '',
+      wow64: false,
+    },
+  });
 }
 
 export async function parseXTimelineFromPage(
