@@ -249,6 +249,8 @@ X_SOURCE_MODE=browser
 X_BROWSER_PROXY_URL=http://127.0.0.1:7890
 ```
 
+> 注意：X 当前会拦截无头浏览器访问（HTTP 403），browser 模式需要图形环境并有头运行，请设置 `X_BROWSER_HEADLESS=false`。无图形环境的服务器可参考下方登录窗口说明。
+
 支持协议：
 
 | 协议 | 示例 |

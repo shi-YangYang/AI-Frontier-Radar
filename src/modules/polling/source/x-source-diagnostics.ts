@@ -99,7 +99,6 @@ export class XSourceDiagnostics {
     try {
       const provider = this.createBrowserProvider({
         ...toBrowserProviderOptions(config.browser),
-        headless: true,
         userDataDir: tempUserDataDir,
       });
       const result = await provider.fetchPosts({
@@ -129,10 +128,7 @@ export class XSourceDiagnostics {
 
   public async checkLogin(xUsername: string): Promise<XSourceLoginCheckResult> {
     const config = await this.getBrowserConfig();
-    const provider = this.createBrowserProvider({
-      ...toBrowserProviderOptions(config.browser),
-      headless: true,
-    });
+    const provider = this.createBrowserProvider(toBrowserProviderOptions(config.browser));
 
     try {
       await provider.validateAccount({ xUsername });
