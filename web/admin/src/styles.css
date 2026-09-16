@@ -568,7 +568,8 @@ tr:last-child td {
   font-weight: 400;
 }
 
-.settings-form input:not([type="checkbox"]) {
+.settings-form input:not([type="checkbox"]),
+.settings-form select {
   width: 100%;
 }
 

@@ -233,6 +233,7 @@
                         : t('settings.xSource.headlessDisabled')
                     }}
                   </span>
+                  <span class="muted">({{ sourceLabel(xSourceSettings.browser.headlessSource) }})</span>
                 </dd>
               </div>
               <div>
@@ -250,6 +251,31 @@
                 </dd>
               </div>
             </dl>
+          </article>
+
+          <article class="panel settings-form-panel">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.xSource.runModeTitle') }}</h2>
+                <p>{{ t('settings.xSource.runModeDescription') }}</p>
+              </div>
+            </header>
+
+            <form class="settings-form x-source-form" @submit.prevent="saveXRunMode">
+              <label>
+                <span>{{ t('settings.xSource.runModeLabel') }}</span>
+                <select v-model="xRunModeForm.headless" :disabled="!isBrowserSourceMode()">
+                  <option :value="true">{{ t('settings.xSource.runModeHeadless') }}</option>
+                  <option :value="false">{{ t('settings.xSource.runModeHeaded') }}</option>
+                </select>
+                <small>{{ t('settings.xSource.runModeHelp') }}</small>
+              </label>
+              <div class="form-actions x-source-actions">
+                <button class="primary" type="submit" :disabled="busy || !isBrowserSourceMode()">
+                  {{ t('settings.xSource.saveRunMode') }}
+                </button>
+              </div>
+            </form>
           </article>
 
           <article class="panel settings-form-panel">
@@ -615,6 +641,10 @@ const xProxyForm = reactive({
   proxyUrl: '',
 });
 
+const xRunModeForm = reactive({
+  headless: true,
+});
+
 const xDiagnosticUsername = ref('openai');
 
 onMounted(() => {
@@ -717,6 +747,22 @@ async function saveXProxy(): Promise<void> {
     setNotice(t('settings.notice.saveXProxySuccess'));
   } catch (error) {
     setNotice(t('settings.notice.saveXProxyFailure', { error: toErrorMessage(error) }), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function saveXRunMode(): Promise<void> {
+  busy.value = true;
+
+  try {
+    const xSource = await updateXBrowserSettings({
+      headless: xRunModeForm.headless,
+    });
+    applyXSourceSettings(xSource);
+    setNotice(t('settings.notice.saveXRunModeSuccess'));
+  } catch (error) {
+    setNotice(t('settings.notice.saveXRunModeFailure', { error: toErrorMessage(error) }), true);
   } finally {
     busy.value = false;
   }
@@ -939,6 +985,7 @@ function applySettings(loadedSettings: RuntimeSettingsSummary): void {
 
 function applyXSourceSettings(loadedXSourceSettings: RuntimeXSourceSettings): void {
   xSourceSettings.value = loadedXSourceSettings;
+  xRunModeForm.headless = loadedXSourceSettings.browser.headless;
 
   if (settings.value === null) {
     return;

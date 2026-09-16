@@ -207,7 +207,7 @@ npm run dev
 | --- | --- | --- |
 | `X_SOURCE_MODE` | `browser` | `browser` 或 `api` |
 | `X_BROWSER_BASE_URL` | `https://x.com` | 浏览器模式访问入口 |
-| `X_BROWSER_HEADLESS` | `true` | 是否无头运行 |
+| `X_BROWSER_HEADLESS` | `true` | 是否无头运行，可在 Web 控制台 X 数据源中覆盖 |
 | `X_BROWSER_USER_DATA_DIR` | `.x-browser-public-profile` | 浏览器 profile 目录 |
 | `X_BROWSER_PROXY_URL` | 空 | 浏览器代理 URL，可在 Web 控制台覆盖 |
 | `X_BROWSER_NAVIGATION_TIMEOUT_MS` | `30000` | 页面导航超时 |
@@ -249,7 +249,7 @@ X_SOURCE_MODE=browser
 X_BROWSER_PROXY_URL=http://127.0.0.1:7890
 ```
 
-> 注意：X 会拦截暴露 `HeadlessChrome` 标识的无头浏览器。本项目在无头模式下会自动伪装该标识（UA 与 Client Hints），无需额外配置；如果 X 后续调整反爬策略导致页面不可读，可切换 `X_BROWSER_HEADLESS=false` 用有头模式排查。
+> 注意：X 会拦截暴露 `HeadlessChrome` 标识的无头浏览器。本项目在无头模式下会自动伪装该标识（UA 与 Client Hints）；如需切换无头/有头，到 `/settings -> X 数据源 -> 浏览器运行模式` 设置即可，无需修改 `.env`。
 
 支持协议：
 

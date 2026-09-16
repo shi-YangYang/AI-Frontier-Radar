@@ -209,6 +209,7 @@ export interface RuntimeXSourceSettings {
   browser: {
     baseUrl: string;
     headless: boolean;
+    headlessSource: RuntimeSettingSource;
     navigationTimeoutMs: number;
     postLoadTimeoutMs: number;
     proxyConfigured: boolean;
@@ -227,7 +228,8 @@ export interface UpdatePollingSettingsInput {
 }
 
 export interface UpdateXBrowserSettingsInput {
-  proxyUrl: string;
+  headless?: boolean;
+  proxyUrl?: string;
 }
 
 export type XSourceAnonymousCheckStatus =

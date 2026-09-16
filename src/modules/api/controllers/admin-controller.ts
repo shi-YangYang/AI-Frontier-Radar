@@ -1478,12 +1478,23 @@ function readXBrowserSettingsBody(body: unknown): SaveXBrowserSettingsInput {
     throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
   }
 
-  if (typeof body.proxyUrl !== 'string') {
+  if (body.proxyUrl !== undefined && typeof body.proxyUrl !== 'string') {
     throw new AdminApiError(400, 'INVALID_REQUEST', 'proxyUrl 必须是字符串。');
   }
 
+  if (body.headless !== undefined && typeof body.headless !== 'boolean') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'headless 必须是布尔值。');
+  }
+
+  if (body.proxyUrl === undefined && body.headless === undefined) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'proxyUrl 与 headless 至少提供一个。');
+  }
+
   return {
-    proxyUrl: normalizeOptionalProxyUrlBody(body.proxyUrl),
+    ...(typeof body.headless === 'boolean' ? { headless: body.headless } : {}),
+    ...(typeof body.proxyUrl === 'string'
+      ? { proxyUrl: normalizeOptionalProxyUrlBody(body.proxyUrl) }
+      : {}),
   };
 }
 

@@ -41,6 +41,7 @@ export interface RuntimeXSourceSettings {
   browser: {
     baseUrl: string;
     headless: boolean;
+    headlessSource: RuntimeSettingSource;
     navigationTimeoutMs: number;
     postLoadTimeoutMs: number;
     proxyConfigured: boolean;
@@ -58,7 +59,8 @@ export interface RuntimeSettingsSummary {
 }
 
 export interface SaveXBrowserSettingsInput {
-  proxyUrl: string;
+  headless?: boolean;
+  proxyUrl?: string;
 }
 
 export interface SavePollingSettingsInput {
@@ -69,6 +71,7 @@ export interface SavePollingSettingsInput {
 }
 
 interface RuntimeXBrowserEffectiveSettings extends XBrowserSourceConfig {
+  headlessSource: RuntimeSettingSource;
   proxySource: RuntimeSettingSource;
 }
 
@@ -81,6 +84,7 @@ const POLLING_INTERVAL_SECONDS_KEY = 'polling.intervalSeconds';
 const POLLING_FETCH_LIMIT_PER_ACCOUNT_KEY = 'polling.fetchLimitPerAccount';
 const POLLING_EXCLUDE_REPLIES_KEY = 'polling.excludeReplies';
 const POLLING_EXCLUDE_REPOSTS_KEY = 'polling.excludeReposts';
+const X_BROWSER_HEADLESS_KEY = 'source.x.browser.headless';
 const X_BROWSER_PROXY_URL_KEY = 'source.x.browser.proxyUrl';
 const POLLING_SETTING_KEYS = [
   POLLING_INTERVAL_SECONDS_KEY,
@@ -88,7 +92,7 @@ const POLLING_SETTING_KEYS = [
   POLLING_EXCLUDE_REPLIES_KEY,
   POLLING_EXCLUDE_REPOSTS_KEY,
 ];
-const X_BROWSER_SETTING_KEYS = [X_BROWSER_PROXY_URL_KEY];
+const X_BROWSER_SETTING_KEYS = [X_BROWSER_HEADLESS_KEY, X_BROWSER_PROXY_URL_KEY];
 const X_BROWSER_PROXY_PROTOCOLS = ['http:', 'https:', 'socks5:'] as const;
 
 export class RuntimeSettingsService {
@@ -125,6 +129,8 @@ export class RuntimeSettingsService {
 
     return {
       ...baseBrowser,
+      headless: resolveBooleanSetting(values, X_BROWSER_HEADLESS_KEY, baseBrowser.headless),
+      headlessSource: resolveSettingSource(values, X_BROWSER_HEADLESS_KEY),
       ...(resolvedProxy.proxyUrl === undefined ? {} : { proxyUrl: resolvedProxy.proxyUrl }),
       proxySource: resolvedProxy.source,
     };
@@ -199,6 +205,7 @@ export class RuntimeSettingsService {
       browser: {
         baseUrl: browser.baseUrl,
         headless: browser.headless,
+        headlessSource: browser.headlessSource,
         navigationTimeoutMs: browser.navigationTimeoutMs,
         postLoadTimeoutMs: browser.postLoadTimeoutMs,
         proxyConfigured: browser.proxyUrl !== undefined,
@@ -239,13 +246,24 @@ export class RuntimeSettingsService {
   public async saveXBrowserSettings(
     input: SaveXBrowserSettingsInput,
   ): Promise<RuntimeXSourceSettings> {
-    const proxyUrl = normalizeOptionalProxyUrl(input.proxyUrl);
+    const operations: Promise<unknown>[] = [];
 
-    if (proxyUrl === undefined) {
-      await this.options.storage.appSettings.deleteByKey(X_BROWSER_PROXY_URL_KEY);
-    } else {
-      await this.options.storage.appSettings.setJson(X_BROWSER_PROXY_URL_KEY, proxyUrl);
+    if (input.proxyUrl !== undefined) {
+      const proxyUrl = normalizeOptionalProxyUrl(input.proxyUrl);
+      operations.push(
+        proxyUrl === undefined
+          ? this.options.storage.appSettings.deleteByKey(X_BROWSER_PROXY_URL_KEY)
+          : this.options.storage.appSettings.setJson(X_BROWSER_PROXY_URL_KEY, proxyUrl),
+      );
     }
+
+    if (input.headless !== undefined) {
+      operations.push(
+        this.options.storage.appSettings.setJson(X_BROWSER_HEADLESS_KEY, input.headless),
+      );
+    }
+
+    await Promise.all(operations);
 
     return this.getXSourceSettingsSummary();
   }
@@ -257,6 +275,7 @@ export class RuntimeSettingsService {
   public getReadonlySettings(
     effectiveBrowser: RuntimeXBrowserEffectiveSettings = {
       ...this.options.config.source.x.browser,
+      headlessSource: 'env_default',
       proxySource: 'env_default',
     },
   ): RuntimeReadonlySettings {
@@ -272,7 +291,7 @@ export class RuntimeSettingsService {
       sourceMode: config.source.mode,
       sqlitePath: config.storage.sqlite.path,
       xBrowserBaseUrl: config.source.x.browser.baseUrl,
-      xBrowserHeadless: config.source.x.browser.headless,
+      xBrowserHeadless: effectiveBrowser.headless,
       xBrowserProxyConfigured: effectiveBrowser.proxyUrl !== undefined,
       xBrowserProxyPreview: previewProxyUrl(effectiveBrowser.proxyUrl),
       xBrowserProxySource: effectiveBrowser.proxySource,
@@ -327,7 +346,7 @@ export function previewProxyUrl(rawUrl: string | undefined): string | null {
 function toEffectiveBrowserConfig(
   browser: RuntimeXBrowserEffectiveSettings,
 ): XBrowserSourceConfig {
-  const { proxySource: _proxySource, ...browserConfig } = browser;
+  const { headlessSource: _headlessSource, proxySource: _proxySource, ...browserConfig } = browser;
 
   if (browserConfig.proxyUrl === undefined) {
     const { proxyUrl: _proxyUrl, ...withoutProxyUrl } = browserConfig;
