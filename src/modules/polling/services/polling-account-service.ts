@@ -33,10 +33,6 @@ export class PollingAccountService {
     account: WatchAccount,
     deliveryTargets: DeliveryTarget[],
   ): Promise<PollingAccountResult> {
-    if (deliveryTargets.length === 0) {
-      throw new Error('No enabled delivery targets are configured.');
-    }
-
     const fetchCursor = account.lastSeenPostId ?? account.baselinePostId ?? undefined;
     const fetchResult = await this.options.sourceProvider.fetchPosts({
       limit: this.options.fetchLimitPerAccount,
@@ -77,12 +73,13 @@ export class PollingAccountService {
     let newPostsDetected = 0;
 
     for (const post of posts) {
-      const createdForPost = await this.persistPost(post, deliveryTargets);
+      const persistResult = await this.persistPost(post, deliveryTargets);
 
-      if (createdForPost > 0) {
+      if (persistResult.isNewPost) {
         newPostsDetected += 1;
-        eventsCreated += createdForPost;
       }
+
+      eventsCreated += persistResult.eventsCreated;
     }
 
     return {
@@ -94,7 +91,12 @@ export class PollingAccountService {
   private async persistPost(
     post: StandardizedPost,
     deliveryTargets: DeliveryTarget[],
-  ): Promise<number> {
+  ): Promise<{
+    eventsCreated: number;
+    isNewPost: boolean;
+  }> {
+    const existingPost = await this.options.xPosts.findByXPostId(post.xPostId);
+
     await this.options.xPosts.upsertByXPostId({
       authorUserId: post.author.xUserId,
       authorUsername: post.author.xUsername,
@@ -108,7 +110,7 @@ export class PollingAccountService {
       xPostId: post.xPostId,
     });
 
-    let createdForPost = 0;
+    let eventsCreated = 0;
 
     for (const deliveryTarget of deliveryTargets) {
       const deliveryEvent = await this.options.deliveryEvents.createIfAbsent({
@@ -118,11 +120,14 @@ export class PollingAccountService {
       });
 
       if (deliveryEvent.created) {
-        createdForPost += 1;
+        eventsCreated += 1;
       }
     }
 
-    return createdForPost;
+    return {
+      eventsCreated,
+      isNewPost: existingPost === null,
+    };
   }
 }
 

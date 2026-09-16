@@ -93,6 +93,42 @@ async function main(): Promise<void> {
     assert(accountAfterEmptyPoll?.lastPollError === null, 'empty first poll must not set an error');
     checks.push({ name: '首次无帖不设置错误基线' });
 
+    const seededTarget = await storage.deliveryTargets.findByTargetKey(TARGET_KEY);
+    assert(seededTarget !== null, 'seed delivery target was not written');
+
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T00:30:00.000Z',
+        id: '1000000000000000000',
+        text: 'Smoke test post without delivery target',
+      },
+    ]);
+
+    await storage.deliveryTargets.update(seededTarget.id, { enabled: false });
+    const noTargetPoll = await runPollingJob({
+      config,
+      logger,
+      sourceProvider,
+      storage,
+    });
+    assert(noTargetPoll.status === 'success', 'polling without enabled delivery targets should succeed');
+    assert(
+      noTargetPoll.newPostsDetected === 1,
+      'polling without targets should still detect the new post',
+    );
+    assert(noTargetPoll.eventsCreated === 0, 'polling without targets should not create events');
+
+    const noTargetPost = await storage.xPosts.findByXPostId('1000000000000000000');
+    assert(noTargetPost !== null, 'post should be stored without enabled delivery targets');
+    const noTargetEvent = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000000000000000',
+      TARGET_KEY,
+    );
+    assert(noTargetEvent === null, 'no delivery event should be created without enabled targets');
+    checks.push({ name: '无投递目标时轮询成功并入库，不创建投递事件' });
+
+    await storage.deliveryTargets.update(seededTarget.id, { enabled: true });
+
     xApi.setPosts([
       {
         created_at: '2026-04-24T01:00:00.000Z',
