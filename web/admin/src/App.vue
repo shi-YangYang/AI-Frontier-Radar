@@ -13,7 +13,7 @@
       </RouterLink>
       <nav class="nav-list" :aria-label="t('nav.overview')">
         <RouterLink v-for="item in navItems" :key="item.to" class="nav-item" :to="item.to">
-          <span>{{ item.icon }}</span>
+          <NavIcon :name="item.icon" />
           {{ t(item.label) }}
         </RouterLink>
       </nav>
@@ -65,7 +65,7 @@
           :to="item.to"
           @click="closeDrawer"
         >
-          <span>{{ item.icon }}</span>
+          <NavIcon :name="item.icon" />
           {{ t(item.label) }}
         </RouterLink>
       </nav>
@@ -81,6 +81,7 @@ import { onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue';
 import { useRoute } from 'vue-router';
 
 import BrandLogo from './components/BrandLogo.vue';
+import NavIcon from './components/NavIcon.vue';
 import { useI18n } from './i18n';
 
 const { htmlLanguage, t, toggleLanguage } = useI18n();
@@ -88,12 +89,12 @@ const route = useRoute();
 const isDrawerOpen = ref(false);
 
 const navItems = [
-  { icon: '⌂', label: 'nav.overview', to: '/' },
-  { icon: '@', label: 'nav.accounts', to: '/accounts' },
-  { icon: '↻', label: 'nav.pollRuns', to: '/poll-runs' },
-  { icon: '✉', label: 'nav.posts', to: '/posts' },
-  { icon: '→', label: 'nav.deliveryEvents', to: '/delivery-events' },
-  { icon: '⚙', label: 'nav.settings', to: '/settings' },
+  { icon: 'home', label: 'nav.overview', to: '/' },
+  { icon: 'accounts', label: 'nav.accounts', to: '/accounts' },
+  { icon: 'poll', label: 'nav.pollRuns', to: '/poll-runs' },
+  { icon: 'posts', label: 'nav.posts', to: '/posts' },
+  { icon: 'delivery', label: 'nav.deliveryEvents', to: '/delivery-events' },
+  { icon: 'settings', label: 'nav.settings', to: '/settings' },
 ] as const;
 
 watchEffect(() => {

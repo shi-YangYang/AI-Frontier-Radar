@@ -128,6 +128,7 @@ export class BrowserXSourceProvider implements SourceProvider {
         xUsername,
       });
       await page.waitForTimeout(DEFAULT_RENDER_SETTLE_TIMEOUT_MS);
+      await expandCollapsedPosts(page);
 
       const account = await resolveAccountFromPage(page, input, xUsername);
       const parsedPosts = await parseXTimelineFromPage(page, xUsername);
@@ -390,7 +391,35 @@ export async function parseXTimelineFromPage(
             targetAnchors.map((anchor) => anchor.text).find((text) => text.length > 0) ?? undefined;
           const textBlocks = Array.from(articleNode.querySelectorAll('[dir="auto"]'))
             .filter((node: any) => node.querySelectorAll('div').length === 0)
-            .map((node: any) => ((node.textContent ?? '') as string).replace(/\s+/gu, ' ').trim())
+            .map((node: any) => {
+              const clone = node.cloneNode(true) as any;
+              clone.querySelectorAll('a').forEach((anchor: any) => {
+                const anchorText = (anchor.textContent ?? '') as string;
+                const href = String(anchor.getAttribute('href') ?? '');
+
+                if (!anchorText.includes('…') || href.length === 0) {
+                  return;
+                }
+
+                try {
+                  const url = new URL(href, 'https://x.com');
+                  const isInternalLink =
+                    url.hostname === 'x.com' ||
+                    url.hostname.endsWith('.x.com') ||
+                    url.hostname === 'twitter.com' ||
+                    url.hostname.endsWith('.twitter.com') ||
+                    url.hostname === 't.co';
+
+                  if (!isInternalLink) {
+                    anchor.textContent = `${url.host}${url.pathname}${url.search}`;
+                  }
+                } catch {
+                  // keep the original anchor text when the href cannot be parsed
+                }
+              });
+
+              return ((clone.textContent ?? '') as string).replace(/\s+/gu, ' ').trim();
+            })
             .filter(
               (value: string) => value.length > 0 && value !== 'Show more' && value !== '显示更多',
             )
@@ -504,6 +533,21 @@ async function waitForProfileOrKnownFailure(
         xUsername: options.xUsername,
       }),
     );
+  }
+}
+
+async function expandCollapsedPosts(page: Page): Promise<void> {
+  const showMore = page.getByText(/^(?:Show more|显示更多)$/u);
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const remaining = await showMore.count().catch(() => 0);
+
+    if (remaining === 0) {
+      return;
+    }
+
+    await showMore.first().click({ timeout: 1_500 }).catch(() => undefined);
+    await page.waitForTimeout(600);
   }
 }
 

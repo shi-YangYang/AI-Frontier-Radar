@@ -262,14 +262,16 @@
             </header>
 
             <form class="settings-form x-source-form" @submit.prevent="saveXRunMode">
-              <label>
+              <div class="settings-field">
                 <span>{{ t('settings.xSource.runModeLabel') }}</span>
-                <select v-model="xRunModeForm.headless" :disabled="!isBrowserSourceMode()">
-                  <option :value="true">{{ t('settings.xSource.runModeHeadless') }}</option>
-                  <option :value="false">{{ t('settings.xSource.runModeHeaded') }}</option>
-                </select>
+                <SelectControl
+                  v-model="xRunModeForm.mode"
+                  :aria-label="t('settings.xSource.runModeLabel')"
+                  :disabled="!isBrowserSourceMode()"
+                  :options="runModeOptions"
+                />
                 <small>{{ t('settings.xSource.runModeHelp') }}</small>
-              </label>
+              </div>
               <div class="form-actions x-source-actions">
                 <button class="primary" type="submit" :disabled="busy || !isBrowserSourceMode()">
                   {{ t('settings.xSource.saveRunMode') }}
@@ -537,7 +539,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 
 import {
   AdminApiRequestError,
@@ -568,6 +570,7 @@ import {
 import ConfirmModal from '../components/ConfirmModal.vue';
 import PageHeader from '../components/PageHeader.vue';
 import PaginationBar from '../components/PaginationBar.vue';
+import SelectControl from '../components/SelectControl.vue';
 import ToastNotice from '../components/ToastNotice.vue';
 import { t, type MessageKey } from '../i18n';
 import { DEFAULT_PAGE_SIZE, formatDateTime } from '../utils';
@@ -642,8 +645,13 @@ const xProxyForm = reactive({
 });
 
 const xRunModeForm = reactive({
-  headless: true,
+  mode: 'headless' as 'headless' | 'headed',
 });
+
+const runModeOptions = computed<{ label: string; value: 'headless' | 'headed' }[]>(() => [
+  { label: t('settings.xSource.runModeHeadless'), value: 'headless' },
+  { label: t('settings.xSource.runModeHeaded'), value: 'headed' },
+]);
 
 const xDiagnosticUsername = ref('openai');
 
@@ -757,7 +765,7 @@ async function saveXRunMode(): Promise<void> {
 
   try {
     const xSource = await updateXBrowserSettings({
-      headless: xRunModeForm.headless,
+      headless: xRunModeForm.mode === 'headless',
     });
     applyXSourceSettings(xSource);
     setNotice(t('settings.notice.saveXRunModeSuccess'));
@@ -985,7 +993,7 @@ function applySettings(loadedSettings: RuntimeSettingsSummary): void {
 
 function applyXSourceSettings(loadedXSourceSettings: RuntimeXSourceSettings): void {
   xSourceSettings.value = loadedXSourceSettings;
-  xRunModeForm.headless = loadedXSourceSettings.browser.headless;
+  xRunModeForm.mode = loadedXSourceSettings.browser.headless ? 'headless' : 'headed';
 
   if (settings.value === null) {
     return;
