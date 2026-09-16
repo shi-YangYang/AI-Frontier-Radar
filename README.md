@@ -357,6 +357,10 @@ npm run playwright:install
 ## 项目结构
 
 ```text
+AGENTS.md               Agent 开发规范与协作流程
+constitution/           项目使命、路线图、技术栈（长期约束）
+specs/                  SDD 规格目录（spec / plan / acceptance 与模板）
+.ai/                    决策留痕、工作流、提示词、规则
 prisma/                 SQLite schema 和 migrations
 scripts/                初始化、Prisma 包装、冒烟脚本
 src/app                 Fastify app 组装
@@ -371,14 +375,17 @@ web/admin               Vue 本地管理前端
 
 ## 开发
 
-项目采用规格驱动开发（SDD）。较大的功能迭代应先维护 `docs/specs/<feature-id>/` 下的需求、设计、实施计划和验收记录，再进入代码实现。
+项目遵循规格驱动开发（SDD），并融合多 Agent 协作模式，完整流程与硬性约束见 [AGENTS.md](./AGENTS.md)。
 
-每次版本验收后至少同步：
+| 结构 | 职责 |
+| --- | --- |
+| `constitution/` | 项目使命、路线图、技术栈等长期约束 |
+| `specs/spec-XXX-short-name/` | 需求规格 `spec.md`、实施计划 `plan.md`、验收记录 `acceptance.md` |
+| `.ai/` | 决策留痕、工作流、提示词、项目规则 |
 
-- `README.md`
-- 对应 feature 的 `handoff.md`
-- 对应 feature 的 `verification/acceptance.md`
-- 必要时更新 `prompts/context-recovery.md`
+较大的功能迭代：先维护 `specs/spec-XXX-*/` 下的 `spec.md` 与 `plan.md`，关键决策确认后实施；实施完成后由独立验收产出 `acceptance.md`，未通过则进入返工流程，直到 PASS。
+
+任何 Agent 任务开始前，按 AGENTS.md 第 11 节顺序阅读固定必读与任务必读文档。项目行为变化时，同步更新本 README 与相关文档。
 
 ## 许可证
 

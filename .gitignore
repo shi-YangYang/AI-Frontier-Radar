@@ -9,8 +9,3 @@ data/
 dist/
 dist-web/
 node_modules/
-
-# Local planning and specification docs are not committed.
-constitution/**/*.md
-docs/**/*.md
-prompts/**/*.md
