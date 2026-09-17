@@ -1,5 +1,7 @@
 export type WatchAccountPollStatus = 'failed' | 'pending' | 'success';
 
+export type WatchAccountSourceType = 'github' | 'hf_papers' | 'rss' | 'x';
+
 export type DeliveryChannelType = 'feishu_webhook';
 
 export type DeliveryEventStatus = 'dead' | 'failed' | 'pending' | 'retry_wait' | 'sending' | 'sent';
@@ -8,7 +10,9 @@ export type PollRunStatus = 'failed' | 'partial_failed' | 'running' | 'success';
 
 export interface WatchAccount {
   id: string;
-  xUsername: string;
+  sourceType: WatchAccountSourceType;
+  sourceUrl: string | null;
+  xUsername: string | null;
   xUserId: string | null;
   displayName: string | null;
   enabled: boolean;
@@ -23,7 +27,9 @@ export interface WatchAccount {
 
 export interface CreateWatchAccountInput {
   id?: string;
-  xUsername: string;
+  sourceType?: WatchAccountSourceType;
+  sourceUrl?: string | null;
+  xUsername?: string | null;
   xUserId?: string | null;
   displayName?: string | null;
   enabled?: boolean;
@@ -48,6 +54,7 @@ export interface UpdateWatchAccountInput {
 export interface XPostRaw {
   id: string;
   xPostId: string;
+  dedupeKey: string | null;
   authorUsername: string;
   authorUserId: string | null;
   postedAt: string;
@@ -86,6 +93,7 @@ export interface XPostSummary {
 export interface CreateXPostRawInput {
   id?: string;
   xPostId: string;
+  dedupeKey?: string;
   authorUsername: string;
   authorUserId?: string | null;
   postedAt: string;

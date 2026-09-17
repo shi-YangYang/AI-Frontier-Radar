@@ -19,7 +19,9 @@ import {
   deleteAdminPollRun,
   deleteAdminWatchAccount,
   checkAdminXSourceLogin,
+  getAdminRssSettings,
   getAdminSettings,
+  getAdminSubscriptionRules,
   getAdminSummary,
   getAdminXSourceSettings,
   listAdminDeliveryEvents,
@@ -28,6 +30,7 @@ import {
   listAdminPosts,
   listAdminWatchAccounts,
   openAdminXLoginWindow,
+  resolveAdminYoutubeChannel,
   runAdminDeliveryNow,
   runAdminPollingNow,
   testAdminDeliveryTarget,
@@ -37,6 +40,8 @@ import {
   updateAdminDeliveryTarget,
   updateAdminDeliveryTargetEnabled,
   updateAdminFeishuSettings,
+  updateAdminRssSettings,
+  updateAdminSubscriptionRules,
   updateAdminXBrowserSettings,
   updateAdminPollingSettings,
 } from '../controllers/admin-controller';
@@ -127,6 +132,59 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     },
     async (request, reply) =>
       sendAdminResponse(reply, () => updateAdminXBrowserSettings(request.body, options)),
+  );
+
+  app.get(
+    '/admin/api/settings/rss',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => getAdminRssSettings(options)),
+  );
+
+  app.put(
+    '/admin/api/settings/rss',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => updateAdminRssSettings(request.body, options)),
+  );
+
+  app.get(
+    '/admin/api/subscription-rules',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => getAdminSubscriptionRules(options)),
+  );
+
+  app.put(
+    '/admin/api/subscription-rules',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => updateAdminSubscriptionRules(request.body, options)),
+  );
+
+  app.post(
+    '/admin/api/source-presets/youtube/resolve',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => resolveAdminYoutubeChannel(request.body, options)),
   );
 
   app.post(

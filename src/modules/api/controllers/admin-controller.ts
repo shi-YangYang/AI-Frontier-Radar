@@ -2,7 +2,12 @@ import { randomBytes } from 'node:crypto';
 
 import type { AppConfig } from '../../../shared/config/types';
 import { createFeishuWebhookClient, type FeishuWebhookFailureResult } from '../../delivery';
-import { SourceProviderError, type SourceProviderAccount } from '../../polling';
+import {
+  SourceProviderError,
+  YoutubeChannelResolveError,
+  resolveYoutubeChannel,
+  type SourceProviderAccount,
+} from '../../polling';
 import {
   XSourceDiagnosticError,
   createXSourceDiagnostics,
@@ -25,18 +30,27 @@ import {
   type StorageContext,
   type WatchAccount,
 } from '../../storage';
+import { SubscriptionRuleValidationError, createSubscriptionRuleService } from '../../storage';
 import type {
+  RuntimeRssSettings,
   RuntimeXSourceSettings,
+  SaveRssSettingsInput,
   SaveXBrowserSettingsInput,
 } from '../../storage/runtime-settings-service';
 import type { XPostPageQuery, XPostRawWithDeliveryEvents, XPostSummary } from '../../storage/types';
 import { normalizeXUsername } from '../../storage/watch-account-repository';
 
+export type AdminWatchAccountValidationInput =
+  | { sourceType: 'github'; sourceUrl: string }
+  | { sourceType: 'hf_papers'; sourceUrl: string }
+  | { sourceType: 'rss'; sourceUrl: string }
+  | { sourceType: 'x'; xUsername: string };
+
 export interface AdminActions {
   runDeliveryWorkerNow?(options?: { recoverStartupState?: boolean; trigger?: string }): Promise<RuntimeSchedulerRunNowResult>;
   runPollingNow?(options?: { trigger?: string }): Promise<RuntimeSchedulerRunNowResult>;
   updatePollingSchedule?(intervalSeconds: number): void | Promise<void>;
-  validateWatchAccount?(input: { xUsername: string }): Promise<SourceProviderAccount>;
+  validateWatchAccount?(input: AdminWatchAccountValidationInput): Promise<SourceProviderAccount>;
 }
 
 export interface AdminControllerOptions {
@@ -79,6 +93,7 @@ const MAX_ADMIN_PAGE_SIZE = 100;
 const DELIVERY_TARGET_KEY_PREFIX = 'feishu';
 const DEFAULT_X_SOURCE_TEST_USERNAME = 'openai';
 const X_BROWSER_PROXY_PROTOCOLS = ['http:', 'https:', 'socks5:'] as const;
+const RSS_PROXY_PROTOCOLS = ['http:', 'https:'] as const;
 
 export class AdminApiError extends Error {
   public readonly code: string;
@@ -150,13 +165,31 @@ export async function createAdminWatchAccount(
   body: unknown,
   options: AdminControllerOptions,
 ): Promise<{ ok: true; data: { created: boolean; watchAccount: WatchAccount } }> {
-  const username = readUsername(body);
-  const account = await validateWatchAccount(username, options);
+  const input = readCreateWatchAccountBody(body);
+  const account = await validateWatchSource(input, options);
+
+  if (input.sourceType === 'rss' || input.sourceType === 'github' || input.sourceType === 'hf_papers') {
+    const { created, watchAccount } = await options.storage.watchAccounts.createIfAbsentBySource({
+      displayName: account.displayName ?? null,
+      enabled: true,
+      sourceType: input.sourceType,
+      sourceUrl: normalizeRssSourceUrl(input.sourceUrl),
+    });
+
+    return {
+      ok: true,
+      data: {
+        created,
+        watchAccount,
+      },
+    };
+  }
+
   const { created, watchAccount } = await options.storage.watchAccounts.createIfAbsentByUsername({
     displayName: account.displayName ?? null,
     enabled: true,
-    xUserId: account.xUserId,
-    xUsername: account.xUsername,
+    xUserId: account.sourceId,
+    xUsername: account.sourceLabel,
   });
 
   return {
@@ -246,7 +279,9 @@ export async function listAdminPosts(
     options.storage.deliveryTargets.listAll(),
   ]);
   const displayNameByUsername = new Map(
-    watchAccounts.map((account) => [account.xUsername, account.displayName]),
+    watchAccounts
+      .filter((account): account is WatchAccount & { xUsername: string } => account.xUsername !== null)
+      .map((account) => [account.xUsername, account.displayName]),
   );
   const webhookUrlByTargetKey = new Map(
     deliveryTargets.map((target) => [target.targetKey, target.webhookUrl]),
@@ -425,6 +460,100 @@ export async function updateAdminXBrowserSettings(
     ok: true,
     data: settings,
   };
+}
+
+export async function getAdminRssSettings(
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: RuntimeRssSettings }> {
+  const runtimeSettings = resolveRuntimeSettings(options);
+  const settings = await runtimeSettings.getRssSettings();
+
+  return {
+    ok: true,
+    data: settings,
+  };
+}
+
+export async function updateAdminRssSettings(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: RuntimeRssSettings }> {
+  const input = readRssSettingsBody(body);
+  const runtimeSettings = resolveRuntimeSettings(options);
+  const settings = await runtimeSettings.saveRssSettings(input);
+
+  return {
+    ok: true,
+    data: settings,
+  };
+}
+
+export async function getAdminSubscriptionRules(
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { rules: unknown[] } }> {
+  const service = createSubscriptionRuleService({ appSettings: options.storage.appSettings });
+  const rules = await service.getRules();
+
+  return {
+    ok: true,
+    data: { rules },
+  };
+}
+
+export async function updateAdminSubscriptionRules(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { rules: unknown[] } }> {
+  if (!isRecord(body) || !Array.isArray(body.rules)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'rules 必须是数组。');
+  }
+
+  const service = createSubscriptionRuleService({ appSettings: options.storage.appSettings });
+
+  try {
+    const rules = await service.saveRules(body.rules);
+
+    return {
+      ok: true,
+      data: { rules },
+    };
+  } catch (error) {
+    if (error instanceof SubscriptionRuleValidationError) {
+      throw new AdminApiError(400, 'INVALID_REQUEST', error.message);
+    }
+
+    throw error;
+  }
+}
+
+export async function resolveAdminYoutubeChannel(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { feedUrl: string; label?: string } }> {
+  const input = readYoutubeResolveInput(body);
+  const runtimeSettings = resolveRuntimeSettings(options);
+  const rssSettings = await runtimeSettings.getEffectiveRssProxySettings();
+
+  try {
+    const resolved = await resolveYoutubeChannel(input, {
+      ...(rssSettings.proxyUrl === undefined ? {} : { proxyUrl: rssSettings.proxyUrl }),
+    });
+
+    return {
+      ok: true,
+      data: resolved,
+    };
+  } catch (error) {
+    if (error instanceof YoutubeChannelResolveError) {
+      if (error.kind === 'invalid-input') {
+        throw new AdminApiError(400, 'INVALID_REQUEST', error.message);
+      }
+
+      throw new AdminApiError(502, 'YOUTUBE_RESOLVE_FAILED', error.message);
+    }
+
+    throw error;
+  }
 }
 
 export async function testAdminXSourceAnonymous(
@@ -1146,26 +1275,31 @@ function toAdminXSourceDiagnosticError(error: unknown): AdminApiError {
   return new AdminApiError(502, 'X_SOURCE_DIAGNOSTIC_FAILED', 'X 数据源诊断失败。');
 }
 
-async function validateWatchAccount(
-  xUsername: string,
+async function validateWatchSource(
+  input: AdminWatchAccountValidationInput,
   options: AdminControllerOptions,
 ): Promise<SourceProviderAccount> {
   if (options.actions?.validateWatchAccount === undefined) {
     throw new AdminApiError(
       503,
       'SOURCE_VALIDATION_UNAVAILABLE',
-      'X 账号校验服务不可用，无法添加监听账号。',
+      input.sourceType === 'rss'
+        ? 'RSS 源校验服务不可用，无法添加 RSS 源。'
+        : 'X 账号校验服务不可用，无法添加监听账号。',
     );
   }
 
   try {
-    return await options.actions.validateWatchAccount({ xUsername });
+    return await options.actions.validateWatchAccount(input);
   } catch (error) {
-    throw toAdminSourceValidationError(error);
+    throw toAdminSourceValidationError(error, input.sourceType);
   }
 }
 
-function toAdminSourceValidationError(error: unknown): AdminApiError {
+function toAdminSourceValidationError(
+  error: unknown,
+  sourceType: AdminWatchAccountValidationInput['sourceType'],
+): AdminApiError {
   if (error instanceof AdminApiError) {
     return error;
   }
@@ -1173,49 +1307,110 @@ function toAdminSourceValidationError(error: unknown): AdminApiError {
   if (error instanceof SourceProviderError) {
     const details = toSafeSourceErrorDetails(error);
 
-    if (error.code === 'SOURCE_ACCOUNT_NOT_FOUND') {
-      return new AdminApiError(404, error.code, 'X 账号不存在，未添加监听账号。', details);
+    if (sourceType === 'rss') {
+      return toAdminRssSourceValidationError(error, details);
     }
 
-    if (error.code === 'SOURCE_AUTH_FAILED') {
-      return new AdminApiError(
-        502,
-        error.code,
-        'X 数据源未登录或认证失败，无法校验账号。',
-        details,
-      );
-    }
-
-    if (error.code === 'SOURCE_RATE_LIMITED') {
-      return new AdminApiError(429, error.code, 'X 数据源请求过于频繁，请稍后再试。', details);
-    }
-
-    if (error.code === 'SOURCE_INVALID_INPUT') {
-      return new AdminApiError(400, error.code, 'X 账号名无效，未添加监听账号。', details);
-    }
-
-    if (error.code === 'SOURCE_REQUEST_FAILED') {
-      return new AdminApiError(
-        502,
-        error.code,
-        'X 数据源网络请求失败，请检查网络或 X browser proxy 配置。',
-        details,
-      );
-    }
-
-    if (error.code === 'SOURCE_RESPONSE_INVALID') {
-      return new AdminApiError(
-        502,
-        error.code,
-        'X 页面结构不可解析，无法校验账号。',
-        details,
-      );
-    }
-
-    return new AdminApiError(502, error.code, 'X 账号校验失败，未添加监听账号。', details);
+    return toAdminXSourceValidationError(error, details);
   }
 
-  return new AdminApiError(502, 'SOURCE_VALIDATION_FAILED', 'X 账号校验失败，未添加监听账号。');
+  return new AdminApiError(
+    502,
+    'SOURCE_VALIDATION_FAILED',
+    sourceType === 'rss' ? 'RSS 源校验失败，未添加订阅源。' : 'X 账号校验失败，未添加监听账号。',
+  );
+}
+
+function toAdminXSourceValidationError(
+  error: SourceProviderError,
+  details: Record<string, unknown>,
+): AdminApiError {
+  if (error.code === 'SOURCE_ACCOUNT_NOT_FOUND') {
+    return new AdminApiError(404, error.code, 'X 账号不存在，未添加监听账号。', details);
+  }
+
+  if (error.code === 'SOURCE_AUTH_FAILED') {
+    return new AdminApiError(
+      502,
+      error.code,
+      'X 数据源未登录或认证失败，无法校验账号。',
+      details,
+    );
+  }
+
+  if (error.code === 'SOURCE_RATE_LIMITED') {
+    return new AdminApiError(429, error.code, 'X 数据源请求过于频繁，请稍后再试。', details);
+  }
+
+  if (error.code === 'SOURCE_INVALID_INPUT') {
+    return new AdminApiError(400, error.code, 'X 账号名无效，未添加监听账号。', details);
+  }
+
+  if (error.code === 'SOURCE_REQUEST_FAILED') {
+    return new AdminApiError(
+      502,
+      error.code,
+      'X 数据源网络请求失败，请检查网络或 X browser proxy 配置。',
+      details,
+    );
+  }
+
+  if (error.code === 'SOURCE_RESPONSE_INVALID') {
+    return new AdminApiError(
+      502,
+      error.code,
+      'X 页面结构不可解析，无法校验账号。',
+      details,
+    );
+  }
+
+  return new AdminApiError(502, error.code, 'X 账号校验失败，未添加监听账号。', details);
+}
+
+function toAdminRssSourceValidationError(
+  error: SourceProviderError,
+  details: Record<string, unknown>,
+): AdminApiError {
+  if (error.code === 'SOURCE_ACCOUNT_NOT_FOUND') {
+    return new AdminApiError(404, error.code, 'RSS 源不存在或不可访问，未添加订阅源。', details);
+  }
+
+  if (error.code === 'SOURCE_AUTH_FAILED') {
+    return new AdminApiError(502, error.code, 'RSS 源需要认证，暂不支持该订阅源。', details);
+  }
+
+  if (error.code === 'SOURCE_RATE_LIMITED') {
+    return new AdminApiError(429, error.code, 'RSS 源请求过于频繁，请稍后再试。', details);
+  }
+
+  if (error.code === 'SOURCE_INVALID_INPUT') {
+    return new AdminApiError(
+      400,
+      error.code,
+      'RSS 源 URL 无效，请输入完整的 http/https 地址。',
+      details,
+    );
+  }
+
+  if (error.code === 'SOURCE_REQUEST_FAILED') {
+    return new AdminApiError(
+      502,
+      error.code,
+      'RSS 源网络请求失败，请检查 URL 或网络。',
+      details,
+    );
+  }
+
+  if (error.code === 'SOURCE_RESPONSE_INVALID') {
+    return new AdminApiError(
+      502,
+      error.code,
+      'RSS 源内容无法解析，请确认是有效的 RSS/Atom 地址。',
+      details,
+    );
+  }
+
+  return new AdminApiError(502, error.code, 'RSS 源校验失败，未添加订阅源。', details);
 }
 
 function toSafeSourceErrorDetails(error: SourceProviderError): Record<string, unknown> {
@@ -1226,6 +1421,9 @@ function toSafeSourceErrorDetails(error: SourceProviderError): Record<string, un
 
   if (error.diagnostics.statusCode !== undefined) {
     details.statusCode = error.diagnostics.statusCode;
+  }
+  if (error.diagnostics.sourceUrl !== undefined) {
+    details.sourceUrl = error.diagnostics.sourceUrl;
   }
   if (error.diagnostics.xUsername !== undefined) {
     details.xUsername = error.diagnostics.xUsername;
@@ -1478,13 +1676,46 @@ function readXBrowserSettingsBody(body: unknown): SaveXBrowserSettingsInput {
     throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
   }
 
+  if (body.proxyUrl !== undefined && typeof body.proxyUrl !== 'string') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'proxyUrl 必须是字符串。');
+  }
+
+  if (body.headless !== undefined && typeof body.headless !== 'boolean') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'headless 必须是布尔值。');
+  }
+
+  if (body.proxyUrl === undefined && body.headless === undefined) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'proxyUrl 与 headless 至少提供一个。');
+  }
+
+  return {
+    ...(typeof body.headless === 'boolean' ? { headless: body.headless } : {}),
+    ...(typeof body.proxyUrl === 'string'
+      ? { proxyUrl: normalizeOptionalProxyUrlBody(body.proxyUrl) }
+      : {}),
+  };
+}
+
+function readRssSettingsBody(body: unknown): SaveRssSettingsInput {
+  if (!isRecord(body)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
+  }
+
   if (typeof body.proxyUrl !== 'string') {
     throw new AdminApiError(400, 'INVALID_REQUEST', 'proxyUrl 必须是字符串。');
   }
 
   return {
-    proxyUrl: normalizeOptionalProxyUrlBody(body.proxyUrl),
+    proxyUrl: normalizeOptionalProxyUrlBody(body.proxyUrl, RSS_PROXY_PROTOCOLS),
   };
+}
+
+function readYoutubeResolveInput(body: unknown): string {
+  if (!isRecord(body) || typeof body.input !== 'string') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'input 必须是字符串。');
+  }
+
+  return body.input;
 }
 
 function readXSourceUsernameBody(body: unknown): string {
@@ -1515,7 +1746,10 @@ function readXSourceUsernameBody(body: unknown): string {
   return username;
 }
 
-function normalizeOptionalProxyUrlBody(rawValue: string): string {
+function normalizeOptionalProxyUrlBody(
+  rawValue: string,
+  protocols: readonly string[] = X_BROWSER_PROXY_PROTOCOLS,
+): string {
   const value = rawValue.trim();
 
   if (value.length === 0) {
@@ -1530,11 +1764,11 @@ function normalizeOptionalProxyUrlBody(rawValue: string): string {
     throw new AdminApiError(400, 'INVALID_REQUEST', 'proxyUrl 必须是有效 URL。');
   }
 
-  if (!X_BROWSER_PROXY_PROTOCOLS.includes(url.protocol as typeof X_BROWSER_PROXY_PROTOCOLS[number])) {
+  if (!protocols.includes(url.protocol)) {
     throw new AdminApiError(
       400,
       'INVALID_REQUEST',
-      `proxyUrl 必须使用以下协议之一：${X_BROWSER_PROXY_PROTOCOLS.join(', ')}。`,
+      `proxyUrl 必须使用以下协议之一：${protocols.join(', ')}。`,
     );
   }
 
@@ -1678,6 +1912,58 @@ function redactFeishuWebhookUrlsFromText(value: string): string {
     /https:\/\/open\.feishu\.cn\/open-apis\/bot\/v2\/hook\/[^\s"',\\<>)}\]]+/gu,
     (webhookUrl) => previewSecretUrl(webhookUrl),
   );
+}
+
+function readCreateWatchAccountBody(body: unknown): AdminWatchAccountValidationInput {
+  if (!isRecord(body)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
+  }
+
+  if (
+    body.sourceType !== undefined &&
+    body.sourceType !== 'x' &&
+    body.sourceType !== 'rss' &&
+    body.sourceType !== 'github' &&
+    body.sourceType !== 'hf_papers'
+  ) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'sourceType 必须是 x、rss、github 或 hf_papers。');
+  }
+
+  const sourceType = body.sourceType ?? 'x';
+
+  if (sourceType === 'rss' || sourceType === 'github' || sourceType === 'hf_papers') {
+    return {
+      sourceType,
+      sourceUrl: readRssSourceUrl(body.sourceUrl),
+    };
+  }
+
+  return {
+    sourceType,
+    xUsername: readUsername(body),
+  };
+}
+
+function readRssSourceUrl(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'sourceUrl 必须是字符串。');
+  }
+
+  const sourceUrl = value.trim();
+
+  if (sourceUrl.length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'sourceUrl 不能为空。');
+  }
+
+  if (sourceUrl.length > 2_048) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'sourceUrl 不能超过 2048 个字符。');
+  }
+
+  return sourceUrl;
+}
+
+function normalizeRssSourceUrl(sourceUrl: string): string {
+  return new URL(sourceUrl.trim()).toString();
 }
 
 function readUsername(body: unknown): string {

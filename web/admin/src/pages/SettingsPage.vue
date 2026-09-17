@@ -233,6 +233,7 @@
                         : t('settings.xSource.headlessDisabled')
                     }}
                   </span>
+                  <span class="muted">({{ sourceLabel(xSourceSettings.browser.headlessSource) }})</span>
                 </dd>
               </div>
               <div>
@@ -250,6 +251,33 @@
                 </dd>
               </div>
             </dl>
+          </article>
+
+          <article class="panel settings-form-panel">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.xSource.runModeTitle') }}</h2>
+                <p>{{ t('settings.xSource.runModeDescription') }}</p>
+              </div>
+            </header>
+
+            <form class="settings-form x-source-form" @submit.prevent="saveXRunMode">
+              <div class="settings-field">
+                <span>{{ t('settings.xSource.runModeLabel') }}</span>
+                <SelectControl
+                  v-model="xRunModeForm.mode"
+                  :aria-label="t('settings.xSource.runModeLabel')"
+                  :disabled="!isBrowserSourceMode()"
+                  :options="runModeOptions"
+                />
+                <small>{{ t('settings.xSource.runModeHelp') }}</small>
+              </div>
+              <div class="form-actions x-source-actions">
+                <button class="primary" type="submit" :disabled="busy || !isBrowserSourceMode()">
+                  {{ t('settings.xSource.saveRunMode') }}
+                </button>
+              </div>
+            </form>
           </article>
 
           <article class="panel settings-form-panel">
@@ -386,6 +414,146 @@
           </article>
         </section>
 
+        <section v-else-if="activeSettingsTab === 'rss'" class="settings-layout single-column">
+          <article class="panel settings-wide">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.rss.summaryTitle') }}</h2>
+                <p>{{ t('settings.rss.summaryDescription') }}</p>
+              </div>
+            </header>
+            <dl class="detail-list">
+              <div>
+                <dt>{{ t('settings.rss.proxyPreview') }}</dt>
+                <dd>
+                  <code class="wrap">
+                    {{ rssSettings?.proxyPreview ?? t('settings.rss.proxyNotConfigured') }}
+                  </code>
+                  <span v-if="rssSettings !== null" class="muted">
+                    ({{ sourceLabel(rssSettings.proxySource) }})
+                  </span>
+                </dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="panel settings-form-panel">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.rss.proxyTitle') }}</h2>
+                <p>{{ t('settings.rss.proxyDescription') }}</p>
+              </div>
+            </header>
+
+            <form class="settings-form" @submit.prevent="saveRssProxy">
+              <label>
+                <span>{{ t('settings.rss.proxyUrlLabel') }}</span>
+                <input
+                  v-model="rssProxyForm.proxyUrl"
+                  autocomplete="off"
+                  inputmode="url"
+                  :placeholder="t('settings.rss.proxyUrlPlaceholder')"
+                />
+                <small>{{ t('settings.rss.proxyHelp') }}</small>
+              </label>
+              <div class="inline-alert">
+                {{ t('settings.rss.proxySecurityHint') }}
+              </div>
+              <div class="form-actions">
+                <button class="primary" type="submit" :disabled="busy">
+                  {{ t('settings.rss.saveProxy') }}
+                </button>
+                <button type="button" :disabled="busy" @click="clearRssProxy">
+                  {{ t('settings.rss.clearProxy') }}
+                </button>
+              </div>
+            </form>
+          </article>
+        </section>
+
+        <section v-else-if="activeSettingsTab === 'rules'" class="settings-layout single-column">
+          <article class="panel settings-wide">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.rules.title') }}</h2>
+                <p>{{ t('settings.rules.description') }}</p>
+              </div>
+            </header>
+            <div class="settings-form">
+              <div v-if="subscriptionRules.length === 0" class="empty-panel">
+                {{ t('settings.rules.empty') }}
+              </div>
+              <div v-for="rule in subscriptionRules" :key="rule.id" class="rule-row">
+                <label class="compact-checkbox">
+                  <input
+                    type="checkbox"
+                    :checked="rule.enabled"
+                    :disabled="busy"
+                    @change="toggleSubscriptionRule(rule)"
+                  />
+                  <span>{{ rule.name }}</span>
+                </label>
+                <div class="rule-summary">
+                  <span class="status-badge neutral">
+                    {{ rule.mode === 'all' ? t('settings.rules.modeAll') : t('settings.rules.modeAny') }}
+                  </span>
+                  <code class="wrap">+ {{ rule.include.join(' / ') || '-' }}</code>
+                  <code v-if="rule.exclude.length > 0" class="wrap">- {{ rule.exclude.join(' / ') }}</code>
+                </div>
+                <button class="danger" type="button" :disabled="busy" @click="deleteSubscriptionRule(rule)">
+                  {{ t('actions.delete') }}
+                </button>
+              </div>
+
+              <form class="rule-add-form" @submit.prevent="addSubscriptionRule">
+                <label>
+                  <span>{{ t('settings.rules.nameLabel') }}</span>
+                  <input
+                    v-model="ruleForm.name"
+                    autocomplete="off"
+                    :disabled="busy"
+                    :placeholder="t('settings.rules.namePlaceholder')"
+                  />
+                </label>
+                <label>
+                  <span>{{ t('settings.rules.includeLabel') }}</span>
+                  <input
+                    v-model="ruleForm.include"
+                    autocomplete="off"
+                    :disabled="busy"
+                    :placeholder="t('settings.rules.includePlaceholder')"
+                  />
+                </label>
+                <label>
+                  <span>{{ t('settings.rules.excludeLabel') }}</span>
+                  <input
+                    v-model="ruleForm.exclude"
+                    autocomplete="off"
+                    :disabled="busy"
+                    :placeholder="t('settings.rules.excludePlaceholder')"
+                  />
+                </label>
+                <div class="settings-field">
+                  <span>{{ t('settings.rules.modeLabel') }}</span>
+                  <SelectControl
+                    v-model="ruleForm.mode"
+                    :aria-label="t('settings.rules.modeLabel')"
+                    :disabled="busy"
+                    :options="ruleModeOptions"
+                  />
+                </div>
+                <div class="form-actions">
+                  <button class="primary" type="submit" :disabled="busy">
+                    {{ t('settings.rules.add') }}
+                  </button>
+                </div>
+              </form>
+
+              <div class="inline-alert">{{ t('settings.rules.hint') }}</div>
+            </div>
+          </article>
+        </section>
+
         <section v-else class="settings-layout single-column">
           <article class="panel settings-form-panel">
             <header class="panel-header">
@@ -511,14 +679,16 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 
 import {
   AdminApiRequestError,
   checkXSourceLogin,
   createDeliveryTarget,
   deleteDeliveryTarget,
+  getRssSettings,
   getSettings,
+  getSubscriptionRules,
   getXSourceSettings,
   listDeliveryTargets,
   openXLoginWindow,
@@ -526,11 +696,16 @@ import {
   testXSourceAnonymous,
   updateDeliveryTarget,
   updateDeliveryTargetEnabled,
+  updateRssSettings,
+  updateSubscriptionRules,
   updateXBrowserSettings,
   updatePollingSettings,
   type AdminPagination,
   type DeliveryTarget,
   type DeliveryTargetSummary,
+  type RuntimeRssSettings,
+  type SubscriptionRule,
+  type SubscriptionRuleMode,
   type RuntimeSettingSource,
   type RuntimeSettingsSummary,
   type RuntimeXSourceSettings,
@@ -542,6 +717,7 @@ import {
 import ConfirmModal from '../components/ConfirmModal.vue';
 import PageHeader from '../components/PageHeader.vue';
 import PaginationBar from '../components/PaginationBar.vue';
+import SelectControl from '../components/SelectControl.vue';
 import ToastNotice from '../components/ToastNotice.vue';
 import { t, type MessageKey } from '../i18n';
 import { DEFAULT_PAGE_SIZE, formatDateTime } from '../utils';
@@ -567,7 +743,7 @@ const xSourceSettings = ref<RuntimeXSourceSettings | null>(null);
 const anonymousCheckResult = ref<XSourceAnonymousCheckResult | null>(null);
 const loginCheckResult = ref<XSourceLoginCheckResult | null>(null);
 
-type SettingsTabKey = 'feishu' | 'polling' | 'xSource' | 'runtime';
+type SettingsTabKey = 'feishu' | 'polling' | 'rss' | 'rules' | 'xSource' | 'runtime';
 
 const activeSettingsTab = ref<SettingsTabKey>('feishu');
 const settingsTabs: Array<{ descriptionKey: MessageKey; key: SettingsTabKey; labelKey: MessageKey }> = [
@@ -585,6 +761,16 @@ const settingsTabs: Array<{ descriptionKey: MessageKey; key: SettingsTabKey; lab
     descriptionKey: 'settings.tabs.xSource.description',
     key: 'xSource',
     labelKey: 'settings.tabs.xSource.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.rss.description',
+    key: 'rss',
+    labelKey: 'settings.tabs.rss.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.rules.description',
+    key: 'rules',
+    labelKey: 'settings.tabs.rules.label',
   },
   {
     descriptionKey: 'settings.tabs.runtime.description',
@@ -615,6 +801,35 @@ const xProxyForm = reactive({
   proxyUrl: '',
 });
 
+const rssSettings = ref<RuntimeRssSettings | null>(null);
+
+const rssProxyForm = reactive({
+  proxyUrl: '',
+});
+
+const subscriptionRules = ref<SubscriptionRule[]>([]);
+
+const ruleForm = reactive({
+  exclude: '',
+  include: '',
+  mode: 'any' as SubscriptionRuleMode,
+  name: '',
+});
+
+const ruleModeOptions = computed<{ label: string; value: SubscriptionRuleMode }[]>(() => [
+  { label: t('settings.rules.modeAny'), value: 'any' },
+  { label: t('settings.rules.modeAll'), value: 'all' },
+]);
+
+const xRunModeForm = reactive({
+  mode: 'headless' as 'headless' | 'headed',
+});
+
+const runModeOptions = computed<{ label: string; value: 'headless' | 'headed' }[]>(() => [
+  { label: t('settings.xSource.runModeHeadless'), value: 'headless' },
+  { label: t('settings.xSource.runModeHeaded'), value: 'headed' },
+]);
+
 const xDiagnosticUsername = ref('openai');
 
 onMounted(() => {
@@ -625,14 +840,19 @@ async function loadSettings(options: { silent?: boolean } = {}): Promise<void> {
   busy.value = true;
 
   try {
-    const [loadedSettings, loadedXSourceSettings, loadedTargets] = await Promise.all([
-      getSettings(),
-      getXSourceSettings(),
-      listDeliveryTargets(toDeliveryTargetQuery(deliveryTargetPagination.value.page)),
-    ]);
+    const [loadedSettings, loadedXSourceSettings, loadedRssSettings, loadedTargets, loadedRules] =
+      await Promise.all([
+        getSettings(),
+        getXSourceSettings(),
+        getRssSettings(),
+        listDeliveryTargets(toDeliveryTargetQuery(deliveryTargetPagination.value.page)),
+        getSubscriptionRules(),
+      ]);
     applySettings(loadedSettings);
     applyXSourceSettings(loadedXSourceSettings);
+    applyRssSettings(loadedRssSettings);
     applyDeliveryTargets(loadedTargets);
+    subscriptionRules.value = loadedRules;
 
     if (options.silent !== true) {
       setNotice(t('settings.notice.refreshSuccess'));
@@ -717,6 +937,118 @@ async function saveXProxy(): Promise<void> {
     setNotice(t('settings.notice.saveXProxySuccess'));
   } catch (error) {
     setNotice(t('settings.notice.saveXProxyFailure', { error: toErrorMessage(error) }), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function saveRssProxy(): Promise<void> {
+  busy.value = true;
+
+  try {
+    const settings = await updateRssSettings({
+      proxyUrl: rssProxyForm.proxyUrl.trim(),
+    });
+    applyRssSettings(settings);
+    rssProxyForm.proxyUrl = '';
+    setNotice(t('settings.notice.saveRssProxySuccess'));
+  } catch (error) {
+    setNotice(t('settings.notice.saveRssProxyFailure', { error: toErrorMessage(error) }), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function clearRssProxy(): Promise<void> {
+  busy.value = true;
+
+  try {
+    const settings = await updateRssSettings({ proxyUrl: '' });
+    applyRssSettings(settings);
+    setNotice(t('settings.notice.saveRssProxySuccess'));
+  } catch (error) {
+    setNotice(t('settings.notice.saveRssProxyFailure', { error: toErrorMessage(error) }), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+function parseRuleTerms(value: string): string[] {
+  return value
+    .split(/[,，\n]/u)
+    .map((term) => term.trim())
+    .filter((term) => term.length > 0);
+}
+
+async function persistSubscriptionRules(next: SubscriptionRule[]): Promise<void> {
+  busy.value = true;
+
+  try {
+    subscriptionRules.value = await updateSubscriptionRules(next);
+    setNotice(t('settings.notice.saveRulesSuccess'));
+  } catch (error) {
+    setNotice(t('settings.notice.saveRulesFailure', { error: toErrorMessage(error) }), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function addSubscriptionRule(): Promise<void> {
+  const include = parseRuleTerms(ruleForm.include);
+  const exclude = parseRuleTerms(ruleForm.exclude);
+
+  if (include.length === 0 && exclude.length === 0) {
+    setNotice(t('settings.notice.saveRulesFailure', { error: t('settings.rules.needTerms') }), true);
+    return;
+  }
+
+  const next: SubscriptionRule[] = [
+    ...subscriptionRules.value,
+    {
+      enabled: true,
+      exclude,
+      id: `rule-${Date.now()}`,
+      include,
+      mode: ruleForm.mode,
+      name:
+        ruleForm.name.trim().length > 0
+          ? ruleForm.name.trim()
+          : t('settings.rules.unnamed'),
+    },
+  ];
+
+  await persistSubscriptionRules(next);
+
+  if (subscriptionRules.value.length === next.length) {
+    ruleForm.name = '';
+    ruleForm.include = '';
+    ruleForm.exclude = '';
+  }
+}
+
+async function toggleSubscriptionRule(rule: SubscriptionRule): Promise<void> {
+  await persistSubscriptionRules(
+    subscriptionRules.value.map((entry) =>
+      entry.id === rule.id ? { ...entry, enabled: !entry.enabled } : entry,
+    ),
+  );
+}
+
+async function deleteSubscriptionRule(rule: SubscriptionRule): Promise<void> {
+  await persistSubscriptionRules(subscriptionRules.value.filter((entry) => entry.id !== rule.id));
+}
+
+async function saveXRunMode(): Promise<void> {
+  busy.value = true;
+
+  try {
+    const xSource = await updateXBrowserSettings({
+      headless: xRunModeForm.mode === 'headless',
+    });
+    applyXSourceSettings(xSource);
+    setNotice(t('settings.notice.saveXRunModeSuccess'));
+  } catch (error) {
+    setNotice(t('settings.notice.saveXRunModeFailure', { error: toErrorMessage(error) }), true);
   } finally {
     busy.value = false;
   }
@@ -937,8 +1269,13 @@ function applySettings(loadedSettings: RuntimeSettingsSummary): void {
   pollingForm.intervalSeconds = loadedSettings.polling.intervalSeconds;
 }
 
+function applyRssSettings(loadedRssSettings: RuntimeRssSettings): void {
+  rssSettings.value = loadedRssSettings;
+}
+
 function applyXSourceSettings(loadedXSourceSettings: RuntimeXSourceSettings): void {
   xSourceSettings.value = loadedXSourceSettings;
+  xRunModeForm.mode = loadedXSourceSettings.browser.headless ? 'headless' : 'headed';
 
   if (settings.value === null) {
     return;

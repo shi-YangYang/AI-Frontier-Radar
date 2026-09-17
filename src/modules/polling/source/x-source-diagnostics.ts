@@ -99,12 +99,14 @@ export class XSourceDiagnostics {
     try {
       const provider = this.createBrowserProvider({
         ...toBrowserProviderOptions(config.browser),
-        headless: true,
         userDataDir: tempUserDataDir,
       });
       const result = await provider.fetchPosts({
         limit: 1,
-        xUsername,
+        source: {
+          sourceType: 'x',
+          xUsername,
+        },
       });
 
       if (result.posts.length === 0) {
@@ -129,13 +131,15 @@ export class XSourceDiagnostics {
 
   public async checkLogin(xUsername: string): Promise<XSourceLoginCheckResult> {
     const config = await this.getBrowserConfig();
-    const provider = this.createBrowserProvider({
-      ...toBrowserProviderOptions(config.browser),
-      headless: true,
-    });
+    const provider = this.createBrowserProvider(toBrowserProviderOptions(config.browser));
 
     try {
-      await provider.validateAccount({ xUsername });
+      await provider.validateSource({
+        source: {
+          sourceType: 'x',
+          xUsername,
+        },
+      });
 
       return {
         message: '当前 browser profile 可访问 X 页面；这可能是已登录，也可能是公开页面匿名可读。',

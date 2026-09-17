@@ -2,8 +2,8 @@ import { toStartupConfigLogContext } from '../shared/config';
 import type { AppConfig } from '../shared/config/types';
 import { createApp } from '../app/create-app';
 import type { AppLogger } from '../lib/logger';
-import { createRuntimeScheduler, createRuntimeSourceProvider } from '../modules/scheduler';
-import { createRuntimeSettingsService, createStorageFromConfig } from '../modules/storage';
+import { createRuntimeScheduler, createRuntimeSourceProviders } from '../modules/scheduler';
+import { createRuntimeSettingsService, createStorageFromConfig, importDefaultWatchSources } from '../modules/storage';
 
 export interface StartServerOptions {
   config: AppConfig;
@@ -29,9 +29,41 @@ export async function startServer(options: StartServerOptions): Promise<void> {
       updatePollingSchedule: (intervalSeconds) => scheduler.updatePollingSchedule(intervalSeconds),
       validateWatchAccount: async (input) => {
         const effectiveConfig = await runtimeSettings.getEffectiveAppConfig();
-        const sourceProvider = createRuntimeSourceProvider(effectiveConfig);
+        const sourceProviders = createRuntimeSourceProviders(effectiveConfig);
 
-        return sourceProvider.validateAccount(input);
+        if (input.sourceType === 'rss') {
+          return sourceProviders.rss.validateSource({
+            source: {
+              sourceType: 'rss',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
+        if (input.sourceType === 'github') {
+          return sourceProviders.github.validateSource({
+            source: {
+              sourceType: 'github',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
+        if (input.sourceType === 'hf_papers') {
+          return sourceProviders.hf_papers.validateSource({
+            source: {
+              sourceType: 'hf_papers',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
+        return sourceProviders.x.validateSource({
+          source: {
+            sourceType: 'x',
+            xUsername: input.xUsername,
+          },
+        });
       },
     },
     config: options.config,
@@ -76,6 +108,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
 
   try {
     await storage.initialize();
+    await importDefaultWatchSources(storage, options.logger);
     await app.listen({
       host: options.config.service.host,
       port: options.config.service.port,

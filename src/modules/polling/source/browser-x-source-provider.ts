@@ -5,7 +5,7 @@ import type {
   SourceProviderAccount,
   SourceProviderFetchInput,
   SourceProviderFetchResult,
-  SourceProviderValidateAccountInput,
+  SourceProviderValidateSourceInput,
   StandardizedPost,
 } from '../types';
 import { SourceProviderError } from './source-provider-error';
@@ -26,9 +26,8 @@ export interface BrowserXProxySettings {
 }
 
 interface BrowserXParsedPost {
-  authorDisplayName?: string;
   authorUsername: string;
-  datetime?: string;
+  dateText?: string;
   isPinned: boolean;
   isPromoted: boolean;
   isReply: boolean;
@@ -39,19 +38,27 @@ interface BrowserXParsedPost {
   xPostId: string;
 }
 
-interface BrowserXResolvedAccount {
-  displayName?: string;
-  xUserId: string;
-  xUsername: string;
-}
-
 const DEFAULT_BASE_URL = 'https://x.com';
 const DEFAULT_POST_LOAD_TIMEOUT_MS = 15_000;
 const DEFAULT_NAVIGATION_TIMEOUT_MS = 30_000;
 const DEFAULT_RENDER_SETTLE_TIMEOUT_MS = 3_000;
 const DEFAULT_USER_DATA_DIR = path.resolve(process.cwd(), '.x-browser-profile');
+const RATE_LIMIT_PATTERN =
+  /(?:\b(?:Rate limit exceeded|rate limited|Too many requests)\b|超出速率限制|请求过于频繁)/iu;
+const ACCOUNT_NOT_FOUND_PATTERN =
+  /(?:\b(?:This account doesn.?t exist|This account does not exist|Account suspended|User not found)\b|此账号不存在|账号不存在|帐号不存在|账号已被暂停|用户不存在)/iu;
+const CDP_PLATFORM_BY_OS: Record<string, string> = {
+  darwin: 'macOS',
+  linux: 'Linux',
+  win32: 'Windows',
+};
+const CDP_ARCHITECTURE_BY_CPU: Record<string, string> = {
+  arm64: 'arm',
+  x64: 'x86',
+};
 
 export class BrowserXSourceProvider implements SourceProvider {
+  public readonly sourceType = 'x' as const;
   private readonly baseUrl: string;
   private readonly headless: boolean;
   private readonly navigationTimeoutMs: number;
@@ -75,17 +82,17 @@ export class BrowserXSourceProvider implements SourceProvider {
     return this.runBrowserOperation(() => this.fetchPostsExclusive(input));
   }
 
-  public async validateAccount(
-    input: SourceProviderValidateAccountInput,
+  public async validateSource(
+    input: SourceProviderValidateSourceInput,
   ): Promise<SourceProviderAccount> {
-    return this.runBrowserOperation(() => this.validateAccountExclusive(input));
+    return this.runBrowserOperation(() => this.validateSourceExclusive(input));
   }
 
   private async fetchPostsExclusive(
     input: SourceProviderFetchInput,
   ): Promise<SourceProviderFetchResult> {
 
-    const xUsername = normalizeUsername(input.xUsername);
+    const xUsername = normalizeUsername(input.source.xUsername);
     if (xUsername === undefined) {
       throw new SourceProviderError(
         'SOURCE_INVALID_INPUT',
@@ -101,6 +108,7 @@ export class BrowserXSourceProvider implements SourceProvider {
         ...toLaunchProxyOption(this.proxyUrl),
       });
       const page = context.pages()[0] ?? (await context.newPage());
+      await applyHeadlessUserAgentMask(context, page, this.headless);
       const profileUrl = `${this.baseUrl.replace(/\/$/u, '')}/${encodeURIComponent(xUsername)}`;
 
       await page.goto(profileUrl, {
@@ -115,10 +123,11 @@ export class BrowserXSourceProvider implements SourceProvider {
         xUsername,
       });
       await page.waitForTimeout(DEFAULT_RENDER_SETTLE_TIMEOUT_MS);
+      await expandCollapsedPosts(page);
 
       const account = await resolveAccountFromPage(page, input, xUsername);
       const parsedPosts = await parseXTimelineFromPage(page, xUsername);
-      const posts = normalizeParsedPosts(parsedPosts, account, input);
+      const posts = normalizeParsedPosts(parsedPosts, account, input, new Date());
 
       return {
         account,
@@ -150,10 +159,10 @@ export class BrowserXSourceProvider implements SourceProvider {
     }
   }
 
-  private async validateAccountExclusive(
-    input: SourceProviderValidateAccountInput,
+  private async validateSourceExclusive(
+    input: SourceProviderValidateSourceInput,
   ): Promise<SourceProviderAccount> {
-    const xUsername = normalizeUsername(input.xUsername);
+    const xUsername = normalizeUsername(input.source.xUsername);
     if (xUsername === undefined) {
       throw new SourceProviderError(
         'SOURCE_INVALID_INPUT',
@@ -169,6 +178,7 @@ export class BrowserXSourceProvider implements SourceProvider {
         ...toLaunchProxyOption(this.proxyUrl),
       });
       const page = context.pages()[0] ?? (await context.newPage());
+      await applyHeadlessUserAgentMask(context, page, this.headless);
       const profileUrl = `${this.baseUrl.replace(/\/$/u, '')}/${encodeURIComponent(xUsername)}`;
 
       await page.goto(profileUrl, {
@@ -254,6 +264,60 @@ function toLaunchProxyOption(
   return proxy === undefined ? {} : { proxy };
 }
 
+async function applyHeadlessUserAgentMask(
+  context: BrowserContext,
+  page: Page,
+  enabled: boolean,
+): Promise<void> {
+  if (!enabled) {
+    return;
+  }
+
+  const userAgent = await page.evaluate(() => navigator.userAgent).catch(() => '');
+  if (userAgent.length === 0) {
+    return;
+  }
+
+  const maskedUserAgent = userAgent.replace(/HeadlessChrome/gu, 'Chrome');
+  const version = context.browser()?.version() ?? '';
+  const majorVersion = version.split('.')[0] || '0';
+  const brands = [
+    { brand: 'Chromium', version: majorVersion },
+    { brand: 'Not.A/Brand', version: '8' },
+  ];
+  const fullVersionList =
+    version.length === 0
+      ? brands
+      : [
+          { brand: 'Chromium', version },
+          { brand: 'Not.A/Brand', version: '8.0.0.0' },
+        ];
+  const acceptLanguage =
+    (await page.evaluate(() => navigator.languages.join(',')).catch(() => '')) || 'en-US,en';
+  const platform = CDP_PLATFORM_BY_OS[process.platform] ?? 'Linux';
+  const architecture = CDP_ARCHITECTURE_BY_CPU[process.arch] ?? '';
+  const bitness = process.arch === 'x64' || process.arch === 'arm64' ? '64' : '';
+
+  const client = await context.newCDPSession(page);
+  await client.send('Emulation.setUserAgentOverride', {
+    acceptLanguage,
+    platform,
+    userAgent: maskedUserAgent,
+    userAgentMetadata: {
+      architecture,
+      bitness,
+      brands,
+      fullVersion: version,
+      fullVersionList,
+      mobile: false,
+      model: '',
+      platform,
+      platformVersion: '',
+      wow64: false,
+    },
+  });
+}
+
 export async function parseXTimelineFromPage(
   page: Page,
   xUsername: string,
@@ -272,62 +336,106 @@ export async function parseXTimelineFromPage(
   }
 
   const posts = await page.$$eval(
-    'article[data-testid="tweet"]',
+    'article',
     (articles, targetUsername) => {
       const target = String(targetUsername).toLowerCase();
+
+      const toPathname = (href: string): string => {
+        try {
+          return new URL(href, 'https://x.com').pathname;
+        } catch {
+          return '';
+        }
+      };
 
       return articles
         .map((article) => {
           const articleNode = article as any;
-          const articleText = articleNode.textContent ?? '';
-          const statusLink = Array.from(articleNode.querySelectorAll('a[href*="/status/"]'))
-            .map((anchor) => (anchor as any).href as string)
-            .find((href) => {
-              try {
-                const url = new URL(href);
-                const [, username, statusSegment, postId] = url.pathname.split('/');
-                return (
-                  username?.toLowerCase() === target &&
-                  statusSegment === 'status' &&
-                  /^\d+$/u.test(postId ?? '')
-                );
-              } catch {
-                return false;
-              }
-            });
+          const articleText = (articleNode.textContent ?? '') as string;
+          const statusAnchors = Array.from(articleNode.querySelectorAll('a[href*="/status/"]')).map(
+            (anchor) => {
+              const anchorNode = anchor as any;
+              const match = /^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)(?:\/.*)?$/u.exec(
+                toPathname(String(anchorNode.getAttribute('href') ?? '')),
+              );
 
-          if (statusLink === undefined) {
+              return {
+                authorUsername: match?.[1] as string | undefined,
+                text: ((anchorNode.textContent ?? '') as string).trim(),
+                xPostId: match?.[2] as string | undefined,
+              };
+            },
+          );
+          const targetAnchors = statusAnchors.filter(
+            (anchor) =>
+              anchor.authorUsername !== undefined &&
+              anchor.xPostId !== undefined &&
+              anchor.authorUsername.toLowerCase() === target,
+          );
+
+          if (targetAnchors.length === 0) {
             return undefined;
           }
 
-          const statusUrl = new URL(statusLink);
-          const [, authorUsername, , xPostId] = statusUrl.pathname.split('/');
-          const datetime = articleNode.querySelector('time[datetime]')?.dateTime as string | undefined;
-          const authorNameText =
-            (articleNode.querySelector('[data-testid="User-Name"]')?.textContent as string | undefined) ??
-            undefined;
-          const promoted = /\bPromoted\b/u.test(articleText);
-          const pinned = /\bPinned\b|已置顶/u.test(articleText);
-          const repost = /\bReposted\b/u.test(articleText);
-          const reply = /\bReplying to\b/u.test(articleText);
-          const tweetText =
-            Array.from(articleNode.querySelectorAll('[data-testid="tweetText"]'))
-              .map((node) => ((node as any).innerText as string).trim())
-              .filter(Boolean)
-              .join('\n') || articleText.trim();
+          const primaryAnchor = targetAnchors[0] as {
+            authorUsername: string;
+            text: string;
+            xPostId: string;
+          };
+          const dateText =
+            targetAnchors.map((anchor) => anchor.text).find((text) => text.length > 0) ?? undefined;
+          const textBlocks = Array.from(articleNode.querySelectorAll('[dir="auto"]'))
+            .filter((node: any) => node.querySelectorAll('div').length === 0)
+            .map((node: any) => {
+              const clone = node.cloneNode(true) as any;
+              clone.querySelectorAll('a').forEach((anchor: any) => {
+                const anchorText = (anchor.textContent ?? '') as string;
+                const href = String(anchor.getAttribute('href') ?? '');
+
+                if (!anchorText.includes('…') || href.length === 0) {
+                  return;
+                }
+
+                try {
+                  const url = new URL(href, 'https://x.com');
+                  const isInternalLink =
+                    url.hostname === 'x.com' ||
+                    url.hostname.endsWith('.x.com') ||
+                    url.hostname === 'twitter.com' ||
+                    url.hostname.endsWith('.twitter.com') ||
+                    url.hostname === 't.co';
+
+                  if (!isInternalLink) {
+                    anchor.textContent = `${url.host}${url.pathname}${url.search}`;
+                  }
+                } catch {
+                  // keep the original anchor text when the href cannot be parsed
+                }
+              });
+
+              return ((clone.textContent ?? '') as string).replace(/\s+/gu, ' ').trim();
+            })
+            .filter(
+              (value: string) => value.length > 0 && value !== 'Show more' && value !== '显示更多',
+            )
+            .filter((value: string, index: number, all: string[]) => all.indexOf(value) === index);
+          const textContent =
+            textBlocks.join('\n').replace(/\s*(?:Show more|显示更多)$/u, '').trim() ||
+            articleText.trim();
 
           return {
-            authorDisplayName: authorNameText?.split('@')[0]?.trim() || undefined,
-            authorUsername,
-            datetime,
-            isPinned: pinned,
-            isPromoted: promoted,
-            isReply: reply,
-            isRepost: repost,
-            permalinkUrl: `https://x.com/${authorUsername}/status/${xPostId}`,
+            authorUsername: primaryAnchor.authorUsername,
+            dateText,
+            isPinned:
+              articleNode.querySelector('svg[data-icon="icon-pin-fill"]') !== null ||
+              /\bPinned\b|已置顶/u.test(articleText),
+            isPromoted: /\bPromoted\b|推广/u.test(articleText),
+            isReply: /\bReplying to\b|回复/u.test(articleText),
+            isRepost: /\bReposted\b|转推/u.test(articleText),
+            permalinkUrl: `https://x.com/${primaryAnchor.authorUsername}/status/${primaryAnchor.xPostId}`,
             rawText: articleText,
-            textContent: tweetText,
-            xPostId,
+            textContent,
+            xPostId: primaryAnchor.xPostId,
           };
         })
         .filter((post): post is NonNullable<typeof post> => post !== undefined);
@@ -339,7 +447,7 @@ export async function parseXTimelineFromPage(
 }
 
 function validateBrowserFetchInput(input: SourceProviderFetchInput): void {
-  if (!isPresent(input.xUsername)) {
+  if (!isPresent(input.source.xUsername)) {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
       'BrowserXSourceProvider requires xUsername.',
@@ -359,7 +467,7 @@ function validateBrowserFetchInput(input: SourceProviderFetchInput): void {
 async function waitForProfileOrKnownFailure(
   page: Page,
   options: {
-    input: SourceProviderFetchInput | SourceProviderValidateAccountInput;
+    input: SourceProviderFetchInput | SourceProviderValidateSourceInput;
     operation: 'fetch-timeline' | 'resolve-account';
     postLoadTimeoutMs: number;
     profileUrl: string;
@@ -367,12 +475,9 @@ async function waitForProfileOrKnownFailure(
   },
 ): Promise<void> {
   try {
-    await page.waitForSelector(
-      '[data-testid="UserName"], article[data-testid="tweet"], a[href="/login"], [data-testid="emptyState"]',
-      {
-        timeout: options.postLoadTimeoutMs,
-      },
-    );
+    await page.waitForSelector('article, h1', {
+      timeout: options.postLoadTimeoutMs,
+    });
   } catch (error) {
     const pageText = await getBodyText(page);
     throw classifyBrowserPageError(pageText, options.input, {
@@ -386,7 +491,11 @@ async function waitForProfileOrKnownFailure(
   const pageText = await getBodyText(page);
   const currentUrl = page.url();
 
-  if (/\/i\/flow\/login/u.test(currentUrl) || /\b(Log in|Sign in) to X\b/u.test(pageText)) {
+  if (
+    /\/i\/flow\/login/u.test(currentUrl) ||
+    /\/i\/jf\/onboarding/u.test(currentUrl) ||
+    /\b(Log in|Sign in) to X\b/u.test(pageText)
+  ) {
     throw new SourceProviderError(
       'SOURCE_AUTH_FAILED',
       'Browser X source is not logged in. Open with headless=false and sign in with the user account.',
@@ -397,7 +506,7 @@ async function waitForProfileOrKnownFailure(
     );
   }
 
-  if (/\b(Rate limit exceeded|rate limited|Too many requests)\b/iu.test(pageText)) {
+  if (RATE_LIMIT_PATTERN.test(pageText)) {
     throw new SourceProviderError(
       'SOURCE_RATE_LIMITED',
       'Browser X source was rate limited.',
@@ -409,7 +518,7 @@ async function waitForProfileOrKnownFailure(
     );
   }
 
-  if (/\b(This account doesn.?t exist|This account does not exist|Account suspended|User not found)\b/iu.test(pageText)) {
+  if (ACCOUNT_NOT_FOUND_PATTERN.test(pageText)) {
     throw new SourceProviderError(
       'SOURCE_ACCOUNT_NOT_FOUND',
       'The requested X account was not found.',
@@ -422,9 +531,24 @@ async function waitForProfileOrKnownFailure(
   }
 }
 
+async function expandCollapsedPosts(page: Page): Promise<void> {
+  const showMore = page.getByText(/^(?:Show more|显示更多)$/u);
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const remaining = await showMore.count().catch(() => 0);
+
+    if (remaining === 0) {
+      return;
+    }
+
+    await showMore.first().click({ timeout: 1_500 }).catch(() => undefined);
+    await page.waitForTimeout(600);
+  }
+}
+
 function classifyBrowserPageError(
   pageText: string,
-  input: SourceProviderFetchInput | SourceProviderValidateAccountInput,
+  input: SourceProviderFetchInput | SourceProviderValidateSourceInput,
   context: {
     cause: unknown;
     endpoint: string;
@@ -432,7 +556,7 @@ function classifyBrowserPageError(
     xUsername: string;
   },
 ): SourceProviderError {
-  if (/\b(Rate limit exceeded|rate limited|Too many requests)\b/iu.test(pageText)) {
+  if (RATE_LIMIT_PATTERN.test(pageText)) {
     return new SourceProviderError(
       'SOURCE_RATE_LIMITED',
       'Browser X source was rate limited.',
@@ -445,7 +569,7 @@ function classifyBrowserPageError(
     );
   }
 
-  if (/\b(This account doesn.?t exist|This account does not exist|Account suspended|User not found)\b/iu.test(pageText)) {
+  if (ACCOUNT_NOT_FOUND_PATTERN.test(pageText)) {
     return new SourceProviderError(
       'SOURCE_ACCOUNT_NOT_FOUND',
       'The requested X account was not found.',
@@ -472,24 +596,44 @@ function classifyBrowserPageError(
 
 async function resolveAccountFromPage(
   page: Page,
-  input: SourceProviderFetchInput | SourceProviderValidateAccountInput,
+  input: SourceProviderFetchInput | SourceProviderValidateSourceInput,
   xUsername: string,
-): Promise<BrowserXResolvedAccount> {
-  const displayName = await page
-    .locator('[data-testid="UserName"]')
-    .first()
-    .textContent({ timeout: 1_000 })
-    .catch(() => undefined);
+): Promise<SourceProviderAccount> {
+  const displayName = await resolveDisplayNameFromPage(page, xUsername);
   const xUserId =
-    ('xUserId' in input ? input.xUserId : undefined) ??
+    input.source.xUserId ??
     (await findXUserIdInPageScripts(page, xUsername)) ??
     `x:${xUsername}`;
 
   return {
-    displayName: normalizeOptionalString(displayName?.split('@')[0]),
-    xUserId,
-    xUsername,
+    displayName,
+    sourceId: xUserId,
+    sourceLabel: xUsername,
   };
+}
+
+async function resolveDisplayNameFromPage(
+  page: Page,
+  xUsername: string,
+): Promise<string | undefined> {
+  const title = await page.title().catch(() => '');
+  const titleMatch = /^(.+?)\s*\(@([A-Za-z0-9_]{1,15})\)\s*\/\s*X$/u.exec(title.trim());
+
+  if (titleMatch !== null && titleMatch[2].toLowerCase() === xUsername.toLowerCase()) {
+    return normalizeOptionalString(titleMatch[1]);
+  }
+
+  const heading = await page
+    .locator('h1')
+    .first()
+    .textContent({ timeout: 1_000 })
+    .catch(() => null);
+
+  if (heading === null || /\bLog in\b|Sign up|登录|注册/u.test(heading)) {
+    return undefined;
+  }
+
+  return normalizeOptionalString(heading);
 }
 
 async function findXUserIdInPageScripts(page: Page, xUsername: string): Promise<string | undefined> {
@@ -514,6 +658,7 @@ function normalizeParsedPosts(
   parsedPosts: BrowserXParsedPost[],
   account: SourceProviderAccount,
   input: SourceProviderFetchInput,
+  now: Date,
 ): StandardizedPost[] {
   const posts: StandardizedPost[] = [];
   const seenPostIds = new Set<string>();
@@ -531,20 +676,11 @@ function normalizeParsedPosts(
       continue;
     }
 
-    if (parsedPost.authorUsername.toLowerCase() !== account.xUsername.toLowerCase()) {
+    if (parsedPost.authorUsername.toLowerCase() !== account.sourceLabel.toLowerCase()) {
       continue;
     }
 
-    if (!isPresent(parsedPost.datetime)) {
-      throw new SourceProviderError(
-        'SOURCE_RESPONSE_INVALID',
-        'Browser X source found a post without a stable time datetime.',
-        buildDiagnostics(input, 'fetch-timeline', {
-          xUserId: account.xUserId,
-          xUsername: account.xUsername,
-        }),
-      );
-    }
+    const postedAt = resolvePostedAtFromText(parsedPost.dateText, now) ?? now.toISOString();
 
     if (input.sincePostId !== undefined && comparePostIds(parsedPost.xPostId, input.sincePostId) <= 0) {
       continue;
@@ -552,15 +688,11 @@ function normalizeParsedPosts(
 
     seenPostIds.add(parsedPost.xPostId);
     posts.push({
-      author: {
-        displayName: account.displayName ?? parsedPost.authorDisplayName,
-        xUserId: account.xUserId,
-        xUsername: account.xUsername,
-      },
+      author: account,
       isReply: parsedPost.isReply,
       isRepost: parsedPost.isRepost,
       permalinkUrl: parsedPost.permalinkUrl,
-      postedAt: parsedPost.datetime,
+      postedAt,
       rawPayload: parsedPost,
       textContent: parsedPost.textContent,
       xPostId: parsedPost.xPostId,
@@ -579,7 +711,7 @@ async function getBodyText(page: Page): Promise<string> {
 }
 
 function buildDiagnostics(
-  input: SourceProviderFetchInput | SourceProviderValidateAccountInput,
+  input: SourceProviderFetchInput | SourceProviderValidateSourceInput,
   operation: 'fetch-timeline' | 'resolve-account',
   extra: Partial<{
     causeMessage: string;
@@ -599,8 +731,8 @@ function buildDiagnostics(
     responseBodySnippet: extra.responseBodySnippet,
     sincePostId: 'sincePostId' in input ? input.sincePostId : undefined,
     statusCode: extra.statusCode,
-    xUserId: extra.xUserId ?? ('xUserId' in input ? input.xUserId : undefined),
-    xUsername: extra.xUsername ?? input.xUsername,
+    xUserId: extra.xUserId ?? input.source.xUserId,
+    xUsername: extra.xUsername ?? input.source.xUsername,
   };
 }
 
@@ -616,6 +748,167 @@ function comparePostIds(left: string, right: string): number {
   } catch {
     return left.localeCompare(right);
   }
+}
+
+const ENGLISH_MONTH_INDEX: Record<string, number> = {
+  apr: 4,
+  aug: 8,
+  dec: 12,
+  feb: 2,
+  jan: 1,
+  jul: 7,
+  jun: 6,
+  mar: 3,
+  may: 5,
+  nov: 11,
+  oct: 10,
+  sep: 9,
+};
+
+const RELATIVE_UNIT_MS: Record<string, number> = {
+  d: 86_400_000,
+  h: 3_600_000,
+  m: 60_000,
+  s: 1_000,
+  天: 86_400_000,
+  小时: 3_600_000,
+  分: 60_000,
+  分钟: 60_000,
+  秒: 1_000,
+};
+
+export function resolvePostedAtFromText(dateText: string | undefined, now: Date): string | null {
+  const value = dateText?.trim() ?? '';
+  if (value.length === 0) {
+    return null;
+  }
+
+  if (/^(?:now|刚刚)$/iu.test(value)) {
+    return now.toISOString();
+  }
+
+  if (/^(?:yesterday|昨天)$/iu.test(value)) {
+    return new Date(now.getTime() - 86_400_000).toISOString();
+  }
+
+  const relativeMatch = /^(\d+)\s*(s|m|h|d|秒|分钟|分|小时|天)前?$/u.exec(value);
+  if (relativeMatch !== null) {
+    const amount = Number(relativeMatch[1]);
+    const unitMs = RELATIVE_UNIT_MS[relativeMatch[2]];
+
+    if (Number.isFinite(amount) && unitMs !== undefined) {
+      return new Date(now.getTime() - amount * unitMs).toISOString();
+    }
+  }
+
+  const zhFullMatch = /^(\d{4})年(\d{1,2})月(\d{1,2})日$/u.exec(value);
+  if (zhFullMatch !== null) {
+    return toIsoDateFromParts(
+      Number(zhFullMatch[1]),
+      Number(zhFullMatch[2]),
+      Number(zhFullMatch[3]),
+    );
+  }
+
+  const zhShortMatch = /^(\d{1,2})月(\d{1,2})日$/u.exec(value);
+  if (zhShortMatch !== null) {
+    return toIsoDateFromParts(
+      now.getFullYear(),
+      Number(zhShortMatch[1]),
+      Number(zhShortMatch[2]),
+      now,
+    );
+  }
+
+  const enFullMatch = /^([A-Za-z]{3}) (\d{1,2}),\s*(\d{4})$/u.exec(value);
+  if (enFullMatch !== null) {
+    const month = ENGLISH_MONTH_INDEX[enFullMatch[1].toLowerCase()];
+
+    if (month !== undefined) {
+      return toIsoDateFromParts(Number(enFullMatch[3]), month, Number(enFullMatch[2]));
+    }
+  }
+
+  const enShortMatch = /^([A-Za-z]{3}) (\d{1,2})$/u.exec(value);
+  if (enShortMatch !== null) {
+    const month = ENGLISH_MONTH_INDEX[enShortMatch[1].toLowerCase()];
+
+    if (month !== undefined) {
+      return toIsoDateFromParts(now.getFullYear(), month, Number(enShortMatch[2]), now);
+    }
+  }
+
+  const zhClockMatch = /^(上午|下午|凌晨)?\s*(\d{1,2}):(\d{2})$/u.exec(value);
+  if (zhClockMatch !== null) {
+    const meridiem = zhClockMatch[1];
+    let hour = Number(zhClockMatch[2]);
+    const minute = Number(zhClockMatch[3]);
+
+    if (meridiem === '下午' && hour < 12) {
+      hour += 12;
+    }
+
+    if ((meridiem === '上午' || meridiem === '凌晨') && hour === 12) {
+      hour = 0;
+    }
+
+    return toIsoDateTime(now, hour, minute);
+  }
+
+  const enClockMatch = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/iu.exec(value);
+  if (enClockMatch !== null) {
+    let hour = Number(enClockMatch[1]);
+    const minute = Number(enClockMatch[2]);
+    const meridiem = enClockMatch[3].toUpperCase();
+
+    if (meridiem === 'PM' && hour < 12) {
+      hour += 12;
+    }
+
+    if (meridiem === 'AM' && hour === 12) {
+      hour = 0;
+    }
+
+    return toIsoDateTime(now, hour, minute);
+  }
+
+  return null;
+}
+
+function toIsoDateFromParts(year: number, month: number, day: number, now?: Date): string | null {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return null;
+  }
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return null;
+  }
+
+  if (now !== undefined && date.getTime() > now.getTime() + 86_400_000) {
+    return toIsoDateFromParts(year - 1, month, day);
+  }
+
+  return date.toISOString();
+}
+
+function toIsoDateTime(now: Date, hour: number, minute: number): string | null {
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return null;
+  }
+
+  const date = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute);
+
+  if (date.getTime() > now.getTime() + 5 * 60_000) {
+    date.setDate(date.getDate() - 1);
+  }
+
+  return date.toISOString();
 }
 
 function normalizeUsername(value: string | undefined): string | undefined {

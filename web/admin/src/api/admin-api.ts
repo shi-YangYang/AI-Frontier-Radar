@@ -13,13 +13,16 @@ export interface AdminErrorResponse {
 }
 
 export type WatchAccountPollStatus = 'failed' | 'pending' | 'success';
+export type WatchAccountSourceType = 'github' | 'hf_papers' | 'rss' | 'x';
 export type PollRunStatus = 'failed' | 'partial_failed' | 'running' | 'success';
 export type DeliveryEventStatus = 'dead' | 'failed' | 'pending' | 'retry_wait' | 'sending' | 'sent';
 export type PostBooleanFilter = 'all' | 'false' | 'true';
 
 export interface WatchAccount {
   id: string;
-  xUsername: string;
+  sourceType: WatchAccountSourceType;
+  sourceUrl: string | null;
+  xUsername: string | null;
   xUserId: string | null;
   displayName: string | null;
   enabled: boolean;
@@ -209,6 +212,7 @@ export interface RuntimeXSourceSettings {
   browser: {
     baseUrl: string;
     headless: boolean;
+    headlessSource: RuntimeSettingSource;
     navigationTimeoutMs: number;
     postLoadTimeoutMs: number;
     proxyConfigured: boolean;
@@ -227,7 +231,8 @@ export interface UpdatePollingSettingsInput {
 }
 
 export interface UpdateXBrowserSettingsInput {
-  proxyUrl: string;
+  headless?: boolean;
+  proxyUrl?: string;
 }
 
 export type XSourceAnonymousCheckStatus =
@@ -376,6 +381,65 @@ export async function updateXBrowserSettings(
   });
 }
 
+export interface RuntimeRssSettings {
+  proxyConfigured: boolean;
+  proxyPreview: string | null;
+  proxySource: RuntimeSettingSource;
+}
+
+export async function getRssSettings(): Promise<RuntimeRssSettings> {
+  return requestJson<RuntimeRssSettings>('/admin/api/settings/rss');
+}
+
+export async function updateRssSettings(input: {
+  proxyUrl: string;
+}): Promise<RuntimeRssSettings> {
+  return requestJson<RuntimeRssSettings>('/admin/api/settings/rss', {
+    body: JSON.stringify(input),
+    method: 'PUT',
+  });
+}
+
+export interface ResolvedYoutubeChannel {
+  feedUrl: string;
+  label?: string;
+}
+
+export type SubscriptionRuleMode = 'all' | 'any';
+
+export interface SubscriptionRule {
+  enabled: boolean;
+  exclude: string[];
+  id: string;
+  include: string[];
+  mode: SubscriptionRuleMode;
+  name: string;
+}
+
+export async function getSubscriptionRules(): Promise<SubscriptionRule[]> {
+  const data = await requestJson<{ rules: SubscriptionRule[] }>('/admin/api/subscription-rules');
+
+  return data.rules;
+}
+
+export async function updateSubscriptionRules(
+  rules: SubscriptionRule[],
+): Promise<SubscriptionRule[]> {
+  const data = await requestJson<{ rules: SubscriptionRule[] }>('/admin/api/subscription-rules', {
+    body: JSON.stringify({ rules }),
+    method: 'PUT',
+  });
+
+  return data.rules;
+}
+
+export async function resolveYoutubeChannel(input: string): Promise<ResolvedYoutubeChannel> {
+  return requestJson<ResolvedYoutubeChannel>('/admin/api/source-presets/youtube/resolve', {
+    body: JSON.stringify({ input }),
+    method: 'POST',
+  });
+}
+
 export async function testXSourceAnonymous(
   xUsername: string,
 ): Promise<XSourceAnonymousCheckResult> {
@@ -485,9 +549,17 @@ export async function listWatchAccounts(query?: WatchAccountPageQuery): Promise<
   );
 }
 
-export async function createWatchAccount(username: string): Promise<{ created: boolean; watchAccount: WatchAccount }> {
+export type CreateWatchAccountInput =
+  | { sourceType: 'github'; sourceUrl: string }
+  | { sourceType: 'hf_papers'; sourceUrl: string }
+  | { sourceType: 'rss'; sourceUrl: string }
+  | { sourceType: 'x'; xUsername: string };
+
+export async function createWatchAccount(
+  input: CreateWatchAccountInput,
+): Promise<{ created: boolean; watchAccount: WatchAccount }> {
   return requestJson<{ created: boolean; watchAccount: WatchAccount }>('/admin/api/watch-accounts', {
-    body: JSON.stringify({ username }),
+    body: JSON.stringify(input),
     method: 'POST',
   });
 }

@@ -41,6 +41,7 @@ export interface RuntimeXSourceSettings {
   browser: {
     baseUrl: string;
     headless: boolean;
+    headlessSource: RuntimeSettingSource;
     navigationTimeoutMs: number;
     postLoadTimeoutMs: number;
     proxyConfigured: boolean;
@@ -58,6 +59,17 @@ export interface RuntimeSettingsSummary {
 }
 
 export interface SaveXBrowserSettingsInput {
+  headless?: boolean;
+  proxyUrl?: string;
+}
+
+export interface RuntimeRssSettings {
+  proxyConfigured: boolean;
+  proxyPreview: string | null;
+  proxySource: RuntimeSettingSource;
+}
+
+export interface SaveRssSettingsInput {
   proxyUrl: string;
 }
 
@@ -69,6 +81,7 @@ export interface SavePollingSettingsInput {
 }
 
 interface RuntimeXBrowserEffectiveSettings extends XBrowserSourceConfig {
+  headlessSource: RuntimeSettingSource;
   proxySource: RuntimeSettingSource;
 }
 
@@ -81,6 +94,7 @@ const POLLING_INTERVAL_SECONDS_KEY = 'polling.intervalSeconds';
 const POLLING_FETCH_LIMIT_PER_ACCOUNT_KEY = 'polling.fetchLimitPerAccount';
 const POLLING_EXCLUDE_REPLIES_KEY = 'polling.excludeReplies';
 const POLLING_EXCLUDE_REPOSTS_KEY = 'polling.excludeReposts';
+const X_BROWSER_HEADLESS_KEY = 'source.x.browser.headless';
 const X_BROWSER_PROXY_URL_KEY = 'source.x.browser.proxyUrl';
 const POLLING_SETTING_KEYS = [
   POLLING_INTERVAL_SECONDS_KEY,
@@ -88,16 +102,19 @@ const POLLING_SETTING_KEYS = [
   POLLING_EXCLUDE_REPLIES_KEY,
   POLLING_EXCLUDE_REPOSTS_KEY,
 ];
-const X_BROWSER_SETTING_KEYS = [X_BROWSER_PROXY_URL_KEY];
+const X_BROWSER_SETTING_KEYS = [X_BROWSER_HEADLESS_KEY, X_BROWSER_PROXY_URL_KEY];
 const X_BROWSER_PROXY_PROTOCOLS = ['http:', 'https:', 'socks5:'] as const;
+const RSS_PROXY_URL_KEY = 'source.rss.proxyUrl';
+const RSS_PROXY_PROTOCOLS = ['http:', 'https:'] as const;
 
 export class RuntimeSettingsService {
   public constructor(private readonly options: RuntimeSettingsServiceOptions) {}
 
   public async getEffectiveAppConfig(): Promise<AppConfig> {
-    const [polling, browser] = await Promise.all([
+    const [polling, browser, rss] = await Promise.all([
       this.getEffectivePollingSettings(),
       this.getEffectiveXBrowserSettings(),
+      this.getEffectiveRssProxySettings(),
     ]);
 
     return {
@@ -110,12 +127,53 @@ export class RuntimeSettingsService {
       },
       source: {
         ...this.options.config.source,
+        rss: rss.proxyUrl === undefined ? {} : { proxyUrl: rss.proxyUrl },
         x: {
           ...this.options.config.source.x,
           browser: toEffectiveBrowserConfig(browser),
         },
       },
     };
+  }
+
+  public async getEffectiveRssProxySettings(): Promise<{
+    proxySource: RuntimeSettingSource;
+    proxyUrl?: string;
+  }> {
+    const values = await this.options.storage.appSettings.getManyJson([RSS_PROXY_URL_KEY]);
+    const resolved = resolveProxyUrlSetting(
+      values,
+      RSS_PROXY_URL_KEY,
+      this.options.config.source.rss?.proxyUrl,
+      RSS_PROXY_PROTOCOLS,
+    );
+
+    return {
+      ...(resolved.proxyUrl === undefined ? {} : { proxyUrl: resolved.proxyUrl }),
+      proxySource: resolved.source,
+    };
+  }
+
+  public async getRssSettings(): Promise<RuntimeRssSettings> {
+    const settings = await this.getEffectiveRssProxySettings();
+
+    return {
+      proxyConfigured: settings.proxyUrl !== undefined,
+      proxyPreview: previewProxyUrl(settings.proxyUrl),
+      proxySource: settings.proxySource,
+    };
+  }
+
+  public async saveRssSettings(input: SaveRssSettingsInput): Promise<RuntimeRssSettings> {
+    const proxyUrl = normalizeOptionalProxyUrl(input.proxyUrl, RSS_PROXY_PROTOCOLS);
+
+    if (proxyUrl === undefined) {
+      await this.options.storage.appSettings.deleteByKey(RSS_PROXY_URL_KEY);
+    } else {
+      await this.options.storage.appSettings.setJson(RSS_PROXY_URL_KEY, proxyUrl);
+    }
+
+    return this.getRssSettings();
   }
 
   public async getEffectiveXBrowserSettings(): Promise<RuntimeXBrowserEffectiveSettings> {
@@ -125,6 +183,8 @@ export class RuntimeSettingsService {
 
     return {
       ...baseBrowser,
+      headless: resolveBooleanSetting(values, X_BROWSER_HEADLESS_KEY, baseBrowser.headless),
+      headlessSource: resolveSettingSource(values, X_BROWSER_HEADLESS_KEY),
       ...(resolvedProxy.proxyUrl === undefined ? {} : { proxyUrl: resolvedProxy.proxyUrl }),
       proxySource: resolvedProxy.source,
     };
@@ -199,6 +259,7 @@ export class RuntimeSettingsService {
       browser: {
         baseUrl: browser.baseUrl,
         headless: browser.headless,
+        headlessSource: browser.headlessSource,
         navigationTimeoutMs: browser.navigationTimeoutMs,
         postLoadTimeoutMs: browser.postLoadTimeoutMs,
         proxyConfigured: browser.proxyUrl !== undefined,
@@ -239,13 +300,24 @@ export class RuntimeSettingsService {
   public async saveXBrowserSettings(
     input: SaveXBrowserSettingsInput,
   ): Promise<RuntimeXSourceSettings> {
-    const proxyUrl = normalizeOptionalProxyUrl(input.proxyUrl);
+    const operations: Promise<unknown>[] = [];
 
-    if (proxyUrl === undefined) {
-      await this.options.storage.appSettings.deleteByKey(X_BROWSER_PROXY_URL_KEY);
-    } else {
-      await this.options.storage.appSettings.setJson(X_BROWSER_PROXY_URL_KEY, proxyUrl);
+    if (input.proxyUrl !== undefined) {
+      const proxyUrl = normalizeOptionalProxyUrl(input.proxyUrl);
+      operations.push(
+        proxyUrl === undefined
+          ? this.options.storage.appSettings.deleteByKey(X_BROWSER_PROXY_URL_KEY)
+          : this.options.storage.appSettings.setJson(X_BROWSER_PROXY_URL_KEY, proxyUrl),
+      );
     }
+
+    if (input.headless !== undefined) {
+      operations.push(
+        this.options.storage.appSettings.setJson(X_BROWSER_HEADLESS_KEY, input.headless),
+      );
+    }
+
+    await Promise.all(operations);
 
     return this.getXSourceSettingsSummary();
   }
@@ -257,6 +329,7 @@ export class RuntimeSettingsService {
   public getReadonlySettings(
     effectiveBrowser: RuntimeXBrowserEffectiveSettings = {
       ...this.options.config.source.x.browser,
+      headlessSource: 'env_default',
       proxySource: 'env_default',
     },
   ): RuntimeReadonlySettings {
@@ -272,7 +345,7 @@ export class RuntimeSettingsService {
       sourceMode: config.source.mode,
       sqlitePath: config.storage.sqlite.path,
       xBrowserBaseUrl: config.source.x.browser.baseUrl,
-      xBrowserHeadless: config.source.x.browser.headless,
+      xBrowserHeadless: effectiveBrowser.headless,
       xBrowserProxyConfigured: effectiveBrowser.proxyUrl !== undefined,
       xBrowserProxyPreview: previewProxyUrl(effectiveBrowser.proxyUrl),
       xBrowserProxySource: effectiveBrowser.proxySource,
@@ -327,7 +400,7 @@ export function previewProxyUrl(rawUrl: string | undefined): string | null {
 function toEffectiveBrowserConfig(
   browser: RuntimeXBrowserEffectiveSettings,
 ): XBrowserSourceConfig {
-  const { proxySource: _proxySource, ...browserConfig } = browser;
+  const { headlessSource: _headlessSource, proxySource: _proxySource, ...browserConfig } = browser;
 
   if (browserConfig.proxyUrl === undefined) {
     const { proxyUrl: _proxyUrl, ...withoutProxyUrl } = browserConfig;
@@ -341,6 +414,7 @@ function resolveProxyUrlSetting(
   values: Record<string, unknown>,
   key: string,
   defaultValue: string | undefined,
+  protocols: readonly string[] = X_BROWSER_PROXY_PROTOCOLS,
 ): { proxyUrl?: string; source: RuntimeSettingSource } {
   if (!hasSetting(values, key) || values[key] === null) {
     return defaultValue === undefined
@@ -354,7 +428,7 @@ function resolveProxyUrlSetting(
     throw new Error(`App setting "${key}" must be a string or null.`);
   }
 
-  const proxyUrl = normalizeOptionalProxyUrl(value);
+  const proxyUrl = normalizeOptionalProxyUrl(value, protocols);
 
   if (proxyUrl === undefined) {
     return defaultValue === undefined
@@ -368,7 +442,10 @@ function resolveProxyUrlSetting(
   };
 }
 
-function normalizeOptionalProxyUrl(rawValue: string): string | undefined {
+function normalizeOptionalProxyUrl(
+  rawValue: string,
+  protocols: readonly string[] = X_BROWSER_PROXY_PROTOCOLS,
+): string | undefined {
   const value = rawValue.trim();
 
   if (value.length === 0) {
@@ -383,10 +460,8 @@ function normalizeOptionalProxyUrl(rawValue: string): string | undefined {
     throw new Error('Proxy URL must be a valid URL.');
   }
 
-  if (!X_BROWSER_PROXY_PROTOCOLS.includes(url.protocol as typeof X_BROWSER_PROXY_PROTOCOLS[number])) {
-    throw new Error(
-      `Proxy URL must use one of these protocols: ${X_BROWSER_PROXY_PROTOCOLS.join(', ')}.`,
-    );
+  if (!protocols.includes(url.protocol)) {
+    throw new Error(`Proxy URL must use one of these protocols: ${protocols.join(', ')}.`);
   }
 
   return url.toString();

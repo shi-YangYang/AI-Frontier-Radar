@@ -1,4 +1,5 @@
 export type {
+  SourceDescriptor,
   SourceProvider,
   SourceProviderAccount,
   SourceProviderErrorCode,
@@ -6,6 +7,8 @@ export type {
   SourceProviderFetchInput,
   SourceProviderFetchMeta,
   SourceProviderFetchResult,
-  SourceProviderValidateAccountInput,
+  SourceProviderRegistry,
+  SourceProviderValidateSourceInput,
+  SourceType,
   StandardizedPost,
 } from './source-provider';

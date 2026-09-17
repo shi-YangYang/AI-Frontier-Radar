@@ -25,6 +25,7 @@ const DEFAULT_X_BROWSER_NAVIGATION_TIMEOUT_MS = 30_000;
 const DEFAULT_X_BROWSER_POST_LOAD_TIMEOUT_MS = 15_000;
 const DEFAULT_X_BROWSER_USER_DATA_DIR = '.x-browser-public-profile';
 const X_BROWSER_PROXY_PROTOCOLS = ['http:', 'https:', 'socks5:'] as const;
+const RSS_PROXY_PROTOCOLS = ['http:', 'https:'] as const;
 
 interface LoadAppConfigOption {
   cwd?: string;
@@ -80,6 +81,7 @@ export async function loadAppConfig(options: LoadAppConfigOption = {}): Promise<
     'X_BROWSER_PROXY_URL',
     X_BROWSER_PROXY_PROTOCOLS,
   );
+  const rssProxyUrl = readOptionalUrl(reader, 'RSS_PROXY_URL', RSS_PROXY_PROTOCOLS);
   const xBrowserNavigationTimeoutMs = reader.readInteger('X_BROWSER_NAVIGATION_TIMEOUT_MS', {
     defaultValue: DEFAULT_X_BROWSER_NAVIGATION_TIMEOUT_MS,
     max: 120_000,
@@ -150,6 +152,7 @@ export async function loadAppConfig(options: LoadAppConfigOption = {}): Promise<
     },
     source: {
       mode: sourceMode,
+      ...(rssProxyUrl.length === 0 ? {} : { rss: { proxyUrl: rssProxyUrl } }),
       x: {
         apiBaseUrl: xApiBaseUrl.length > 0 ? xApiBaseUrl : undefined,
         bearerToken: xApiBearerToken.length > 0 ? xApiBearerToken : undefined,

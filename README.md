@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./web/admin/public/brand/logo-mark.png" width="96" alt="AI Frontier Radar logo" />
   <h1>AI 前沿雷达</h1>
-  <p><strong>本地优先的 AI 公开消息监测工具：监听 X 账号新帖，沉淀到 SQLite，并同步推送到飞书群。</strong></p>
+  <p><strong>本地优先的 AI 公开消息监测工具：监听 X 账号与 RSS 订阅源新帖，沉淀到 SQLite，并同步推送到飞书群。</strong></p>
   <p>
     <a href="#快速开始">快速开始</a>
     · <a href="#功能">功能</a>
@@ -22,7 +22,7 @@
 
 ## English Summary
 
-AI Frontier Radar is a local-first monitor for public X posts. It polls selected AI-related accounts, stores state in SQLite, sends new posts to Feishu webhooks, and provides a local Web dashboard for account, message, delivery, and runtime configuration management.
+AI Frontier Radar is a local-first monitor for public X posts and RSS/Atom feeds. It polls selected AI-related accounts and feeds, stores state in SQLite, sends new posts to Feishu webhooks, and provides a local Web dashboard for source, message, delivery, and runtime configuration management.
 
 ## 这是什么
 
@@ -31,10 +31,11 @@ AI 领域的重要消息经常先出现在 X 上。这个项目的目标不是�
 | 能力 | 说明 |
 | --- | --- |
 | 监听公开 X 账号 | 维护一个账号列表，定时检测新帖 |
-| 防止历史消息轰炸 | 首次接入账号时建立基线，不补发旧帖 |
+| 监听 RSS/Atom 订阅源 | 添加官方博客、媒体、Newsletter 等 feed URL，与 X 账号统一管理 |
+| 防止历史消息轰炸 | 首次接入来源时建立基线，不补发旧帖 |
 | 飞书群通知 | 支持多个飞书自定义机器人 Webhook |
-| 本地 Web 控制台 | 管理账号、查看消息、查看轮询/发送历史、调整配置 |
-| SQLite 持久化 | 本地保存账号、帖子、投递事件、运行配置 |
+| 本地 Web 控制台 | 管理订阅源、查看消息、查看轮询/发送历史、调整配置 |
+| SQLite 持久化 | 本地保存订阅源、帖子、投递事件、运行配置 |
 | 浏览器数据源 | 支持代理、匿名抓取测试、登录态检查 |
 
 ## 项目边界
@@ -56,7 +57,7 @@ AI 领域的重要消息经常先出现在 X 上。这个项目的目标不是�
 | 模块 | 页面 | 功能 |
 | --- | --- | --- |
 | 总览 | `/` | 查看运行摘要、手动轮询、手动发送 |
-| 监听账号 | `/accounts` | 查询、分页、新增、删除监听账号 |
+| 监听源 | `/accounts` | 查询、分页、新增、删除 X 账号与 RSS 源 |
 | 消息内容 | `/posts` | 查看已轮询到的帖子、筛选、详情抽屉、自动刷新 |
 | 最近轮询 | `/poll-runs` | 查询、分页、删除、批量删除、清空历史、查看错误 |
 | 最近发送 | `/delivery-events` | 查询、分页、删除、批量删除、清空历史 |
@@ -66,7 +67,8 @@ AI 领域的重要消息经常先出现在 X 上。这个项目的目标不是�
 
 ```mermaid
 flowchart LR
-  X["X public pages / API"] --> Source["SourceProvider"]
+  X["X public pages / API"] --> Source["SourceProvider (x / rss)"]
+  RSS["RSS / Atom feeds"] --> Source
   Source --> Polling["Polling Orchestrator"]
   Polling --> SQLite["SQLite + Prisma"]
   SQLite --> Delivery["Delivery Worker"]
@@ -109,7 +111,7 @@ http://127.0.0.1:3000/
 | --- | --- | --- |
 | 1 | `/settings` -> 飞书配置 | 添加飞书群自定义机器人 Webhook |
 | 2 | `/settings` -> X 数据源 | 配置代理或运行匿名抓取测试 |
-| 3 | `/accounts` | 添加监听账号，例如 `openai` 或 `@openai` |
+| 3 | `/accounts` | 添加监听源：X 账号（例如 `openai` 或 `@openai`）或 RSS 源（例如 `https://openai.com/blog/rss.xml`） |
 | 4 | `/` | 手动触发轮询和发送，确认链路可用 |
 
 ## 初始化
@@ -195,7 +197,7 @@ npm run dev
 | `PORT` | `3000` | 服务端口 |
 | `REDIS_URL` | `redis://127.0.0.1:1` | 就绪检查使用；本地核心功能不强依赖 |
 | `FEISHU_WEBHOOK_URL` | 空 | 可选启动种子，推荐在 Web 控制台配置 |
-| `WATCH_ACCOUNTS_SOURCE` | `database` | 监听账号来源，推荐保持数据库 |
+| `WATCH_ACCOUNTS_SOURCE` | `database` | X 账号启动种子来源，推荐保持数据库 |
 | `POLL_INTERVAL_SECONDS` | `300` | 轮询间隔，也可在 Web 控制台修改 |
 | `FETCH_LIMIT_PER_ACCOUNT` | `5` | 每账号单次抓取数量 |
 | `EXCLUDE_REPLIES` | `true` | 默认排除回复 |
@@ -207,13 +209,14 @@ npm run dev
 | --- | --- | --- |
 | `X_SOURCE_MODE` | `browser` | `browser` 或 `api` |
 | `X_BROWSER_BASE_URL` | `https://x.com` | 浏览器模式访问入口 |
-| `X_BROWSER_HEADLESS` | `true` | 是否无头运行 |
+| `X_BROWSER_HEADLESS` | `true` | 是否无头运行，可在 Web 控制台 X 数据源中覆盖 |
 | `X_BROWSER_USER_DATA_DIR` | `.x-browser-public-profile` | 浏览器 profile 目录 |
 | `X_BROWSER_PROXY_URL` | 空 | 浏览器代理 URL，可在 Web 控制台覆盖 |
 | `X_BROWSER_NAVIGATION_TIMEOUT_MS` | `30000` | 页面导航超时 |
 | `X_BROWSER_POST_LOAD_TIMEOUT_MS` | `15000` | 帖子加载等待时间 |
 | `X_API_BASE_URL` | 空 | API 模式使用 |
 | `X_API_BEARER_TOKEN` | 空 | API 模式使用 |
+| `RSS_PROXY_URL` | 空 | RSS 抓取代理（仅 http/https），可在 Web 控制台 RSS 源中覆盖 |
 
 真实的飞书 Webhook、代理认证信息、Token、Cookie、浏览器 profile 都不应该提交到 Git。
 
@@ -249,6 +252,8 @@ X_SOURCE_MODE=browser
 X_BROWSER_PROXY_URL=http://127.0.0.1:7890
 ```
 
+> 注意：X 会拦截暴露 `HeadlessChrome` 标识的无头浏览器。本项目在无头模式下会自动伪装该标识（UA 与 Client Hints）；如需切换无头/有头，到 `/settings -> X 数据源 -> 浏览器运行模式` 设置即可，无需修改 `.env`。
+
 支持协议：
 
 | 协议 | 示例 |
@@ -282,6 +287,68 @@ X_SOURCE_MODE=api
 X_API_BASE_URL=https://api.x.com
 X_API_BEARER_TOKEN=replace-with-real-token
 ```
+
+## RSS 订阅源
+
+在 `/accounts` 页面把新增类型切换为 `RSS 源`，填入 feed URL 即可添加（仅支持 http/https 绝对地址）。列表展示来源类型、feed 标题与最近轮询状态。
+
+| 项 | 说明 |
+| --- | --- |
+| Feed 格式 | RSS 2.0、Atom；RSS 1.0 / RDF 尽力支持 |
+| 抓取方式 | 直接 HTTP GET，30 秒超时，固定 User-Agent，跟随跳转 |
+| 内容范围 | 只使用 feed 提供的 title / description / content，不抓取全文 |
+| HTML 处理 | 去标签并解码常见实体，正文截断到 4000 字 |
+| 日期 | 使用 pubDate / published / updated；缺失时回退为抓取时刻 |
+| 去重 | 稳定去重键（feed URL + guid/link 的哈希）；缺日期条目跨轮不会重复入库 |
+| 代理 | 支持 `RSS_PROXY_URL` 或在 `/settings -> RSS 源` 配置 http/https 代理 |
+| 错误处理 | 404/410 → 源不存在；其他非 2xx → 请求失败；解析失败 → 内容无效；单个源失败不影响其他源 |
+
+RSS 与 X 走同一条基线 / 增量 / 去重 / 入库 / 投递链路：首次接入只建立基线（最新 1 条），之后只入库新条目；有启用的飞书 Webhook 时同步创建投递事件。
+
+需要出网代理时，在 `/settings -> RSS 源` 保存代理（优先级：Web 控制台 > `.env` 的 `RSS_PROXY_URL`）。仅支持 `http://` 与 `https://`，不支持 `socks5://`。
+
+首次初始化（监听源表为空）时，服务会自动导入一组推荐源：arXiv cs.AI / cs.CL / cs.LG / cs.CV、Techmeme、Hacker News、Product Hunt、Reddit r/LocalLLaMA、OpenAI News、Google AI、Google DeepMind、量子位、GitHub Trending（每日）、HF Daily Papers。默认源只导入一次，删除后不会恢复；导入发生在首次启动，不阻塞服务启动。
+
+### 按来源添加（预设）
+
+`/accounts` 的“添加监听源”支持按来源类型直接添加，自动转换为标准 feed URL：
+
+| 类型 | 输入 | 生成地址 |
+| --- | --- | --- |
+| RSS / 播客 | feed URL | 原样 |
+| YouTube 频道 | `@handle`、频道链接或 `UC...` 频道 ID | `youtube.com/feeds/videos.xml?channel_id=...`（服务端解析） |
+| Reddit 子版块 | 子版块名 + 排序（热门/最新/最高） | `reddit.com/r/<name>/<sort>/.rss` |
+| arXiv | 分类（cs.AI / cs.CL / cs.CV / cs.LG / cs.RO / stat.ML） | `export.arxiv.org/rss/<category>` |
+| Hacker News | 首页 / 最新 / ≥100 分 / ≥300 分 | `hnrss.org/...` |
+| Product Hunt | 无需输入 | `producthunt.com/feed` |
+| HF Daily Papers | 无需输入 | `huggingface.co/api/daily_papers`（JSON API） |
+| GitHub 热门仓库 | 周期（每日/每周/每月）+ 可选语言 | `github.com/trending[/<lang>]?since=...`（服务端解析页面） |
+| GitHub 仓库发布 | `owner/repo` | `github.com/<owner>/<repo>/releases.atom` |
+| GitHub 用户动态 | 用户名 | `github.com/<user>.atom` |
+
+YouTube 解析与 GitHub 页面抓取遵循“RSS 源”页签里的代理配置；GitHub 热门仓库首次接入会把当前榜单整体作为基线入库（不推送），之后只有新进入榜单的仓库才会推送。
+
+## 订阅规则（推送过滤）
+
+在 `/settings -> 订阅规则` 配置关键词规则：**只有命中任一启用规则的帖子才会推送**；帖子始终入库，可在 `/posts` 查看。未配置规则或全部停用时，保持全量推送。
+
+| 字段 | 说明 |
+| --- | --- |
+| 包含词 | 逗号分隔；匹配方式可选“任一命中”或“全部命中（共现）” |
+| 排除词 | 命中任一排除词即不推送（优先于包含词） |
+| 启用 | 停用的规则不参与匹配 |
+
+示例：规则「CCF-A 顶会」包含 `NeurIPS, ICML, ICLR, CVPR, ACL`（任一命中），排除 `workshop`，即可近似实现按会议名过滤。
+
+## CI
+
+向 `master`（或 `main`）发起 Pull Request 时会自动触发 GitHub Actions 校验：
+
+```text
+npm run prisma:generate → npm run typecheck → npm run build → npm run smoke:e2e
+```
+
+工作流文件：`.github/workflows/ci.yml`。推送分支本身不触发；只有 PR 打开/更新时运行。
 
 ## 常用命令
 
@@ -343,6 +410,18 @@ npm run playwright:install
 </details>
 
 <details>
+<summary><strong>新增 RSS 源失败怎么办？</strong></summary>
+
+按错误提示区分处理：
+
+- 源不存在（feed 返回 404/410）：确认 URL 是否可公开访问。
+- 网络请求失败：检查本机网络、服务器出口或目标站点可达性。
+- 内容无法解析：确认地址返回的是 RSS/Atom XML，而不是网页或 JSON。
+- URL 无效：必须是完整的 `http://` 或 `https://` 地址。
+
+</details>
+
+<details>
 <summary><strong>飞书没有收到消息怎么办？</strong></summary>
 
 检查：
@@ -357,13 +436,17 @@ npm run playwright:install
 ## 项目结构
 
 ```text
+AGENTS.md               Agent 开发规范与协作流程
+constitution/           项目使命、路线图、技术栈（长期约束）
+specs/                  SDD 规格目录（spec / plan / acceptance 与模板）
+.ai/                    决策留痕、工作流、提示词、规则
 prisma/                 SQLite schema 和 migrations
 scripts/                初始化、Prisma 包装、冒烟脚本
 src/app                 Fastify app 组装
 src/config              运行时配置加载
 src/modules/api         HTTP API 和本地管理 API
 src/modules/delivery    飞书发送、worker、retry
-src/modules/polling     X 数据源、轮询编排
+src/modules/polling     X / RSS 数据源、轮询编排
 src/modules/scheduler   本地运行时调度器
 src/modules/storage     Prisma storage 和 repository
 web/admin               Vue 本地管理前端
@@ -371,14 +454,17 @@ web/admin               Vue 本地管理前端
 
 ## 开发
 
-项目采用规格驱动开发（SDD）。较大的功能迭代应先维护 `docs/specs/<feature-id>/` 下的需求、设计、实施计划和验收记录，再进入代码实现。
+项目遵循规格驱动开发（SDD），并融合多 Agent 协作模式，完整流程与硬性约束见 [AGENTS.md](./AGENTS.md)。
 
-每次版本验收后至少同步：
+| 结构 | 职责 |
+| --- | --- |
+| `constitution/` | 项目使命、路线图、技术栈等长期约束 |
+| `specs/spec-XXX-short-name/` | 需求规格 `spec.md`、实施计划 `plan.md`、验收记录 `acceptance.md` |
+| `.ai/` | 决策留痕、工作流、提示词、项目规则 |
 
-- `README.md`
-- 对应 feature 的 `handoff.md`
-- 对应 feature 的 `verification/acceptance.md`
-- 必要时更新 `prompts/context-recovery.md`
+较大的功能迭代：先维护 `specs/spec-XXX-*/` 下的 `spec.md` 与 `plan.md`，关键决策确认后实施；实施完成后由独立验收产出 `acceptance.md`，未通过则进入返工流程，直到 PASS。
+
+任何 Agent 任务开始前，按 AGENTS.md 第 11 节顺序阅读固定必读与任务必读文档。项目行为变化时，同步更新本 README 与相关文档。
 
 ## 许可证
 

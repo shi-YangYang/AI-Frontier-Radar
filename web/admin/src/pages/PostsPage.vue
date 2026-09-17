@@ -59,36 +59,51 @@
         </label>
         <label>
           <span>{{ t('posts.filters.postedFrom') }}</span>
-          <input v-model="filters.postedFrom" type="datetime-local" />
+          <input
+            v-model="filters.postedFrom"
+            type="datetime-local"
+            @input="activePostedPreset = null"
+          />
         </label>
         <label>
           <span>{{ t('posts.filters.postedTo') }}</span>
-          <input v-model="filters.postedTo" type="datetime-local" />
+          <input
+            v-model="filters.postedTo"
+            type="datetime-local"
+            @input="activePostedPreset = null"
+          />
         </label>
-        <label>
-          <span>{{ t('posts.filters.detectedFrom') }}</span>
-          <input v-model="filters.detectedFrom" type="datetime-local" />
-        </label>
-        <label>
-          <span>{{ t('posts.filters.detectedTo') }}</span>
-          <input v-model="filters.detectedTo" type="datetime-local" />
-        </label>
-        <label>
+        <div class="posts-filter-presets">
+          <span>{{ t('posts.filters.postedPreset') }}</span>
+          <div class="preset-chips">
+            <button
+              v-for="preset in postedPresets"
+              :key="preset.key"
+              type="button"
+              class="preset-chip"
+              :class="{ active: activePostedPreset === preset.key }"
+              @click="applyPostedPreset(preset.key)"
+            >
+              {{ t(preset.labelKey) }}
+            </button>
+          </div>
+        </div>
+        <div class="filter-field">
           <span>{{ t('posts.filters.isReply') }}</span>
-          <select v-model="filters.isReply">
-            <option value="all">{{ t('posts.filters.all') }}</option>
-            <option value="true">{{ t('posts.filters.onlyReplies') }}</option>
-            <option value="false">{{ t('posts.filters.excludeReplies') }}</option>
-          </select>
-        </label>
-        <label>
+          <SelectControl
+            v-model="filters.isReply"
+            :aria-label="t('posts.filters.isReply')"
+            :options="replyOptions"
+          />
+        </div>
+        <div class="filter-field">
           <span>{{ t('posts.filters.isRepost') }}</span>
-          <select v-model="filters.isRepost">
-            <option value="all">{{ t('posts.filters.all') }}</option>
-            <option value="true">{{ t('posts.filters.onlyReposts') }}</option>
-            <option value="false">{{ t('posts.filters.excludeReposts') }}</option>
-          </select>
-        </label>
+          <SelectControl
+            v-model="filters.isRepost"
+            :aria-label="t('posts.filters.isRepost')"
+            :options="repostOptions"
+          />
+        </div>
         <p class="posts-filter-hint">{{ t('posts.filters.replyRepostHint') }}</p>
         <div class="posts-filter-actions">
           <button class="primary" type="submit" :disabled="busy">{{ t('actions.query') }}</button>
@@ -291,13 +306,6 @@
               </dl>
             </div>
           </section>
-
-          <section class="post-detail-section">
-            <details>
-              <summary>{{ t('posts.rawPayload') }}</summary>
-              <pre class="raw-payload">{{ prettyRawPayload(selectedPost.rawPayloadJson) }}</pre>
-            </details>
-          </section>
         </div>
       </aside>
     </div>
@@ -305,7 +313,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 
 import {
   listPosts,
@@ -317,6 +325,7 @@ import {
 } from '../api/admin-api';
 import PageHeader from '../components/PageHeader.vue';
 import PaginationBar from '../components/PaginationBar.vue';
+import SelectControl from '../components/SelectControl.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import ToastNotice from '../components/ToastNotice.vue';
 import { t } from '../i18n';
@@ -324,18 +333,36 @@ import { DEFAULT_PAGE_SIZE, dash, validateTimeRange } from '../utils';
 
 const AUTO_REFRESH_MS = 15_000;
 
+const postedPresets = [
+  { key: 'today', labelKey: 'posts.filters.presetToday' },
+  { key: 'week', labelKey: 'posts.filters.presetWeek' },
+  { key: 'month', labelKey: 'posts.filters.presetMonth' },
+  { key: 'all', labelKey: 'posts.filters.presetAll' },
+] as const;
+
+type PostedPresetKey = (typeof postedPresets)[number]['key'];
+
 const autoRefreshEnabled = ref(true);
 const busy = ref(false);
+const activePostedPreset = ref<PostedPresetKey | null>(null);
 const filters = reactive({
   authorUsername: '',
-  detectedFrom: '',
-  detectedTo: '',
   isReply: 'all' as PostBooleanFilter,
   isRepost: 'all' as PostBooleanFilter,
   postedFrom: '',
   postedTo: '',
   query: '',
 });
+const replyOptions = computed<{ label: string; value: PostBooleanFilter }[]>(() => [
+  { label: t('posts.filters.all'), value: 'all' },
+  { label: t('posts.filters.onlyReplies'), value: 'true' },
+  { label: t('posts.filters.excludeReplies'), value: 'false' },
+]);
+const repostOptions = computed<{ label: string; value: PostBooleanFilter }[]>(() => [
+  { label: t('posts.filters.all'), value: 'all' },
+  { label: t('posts.filters.onlyReposts'), value: 'true' },
+  { label: t('posts.filters.excludeReposts'), value: 'false' },
+]);
 const notice = ref('');
 const noticeDanger = ref(false);
 const filtersExpanded = ref(false);
@@ -402,9 +429,7 @@ async function loadPage(page: number, options: { silent?: boolean } = {}): Promi
 }
 
 async function applyFilters(): Promise<void> {
-  const errorKey =
-    validateTimeRange(filters.postedFrom, filters.postedTo) ??
-    validateTimeRange(filters.detectedFrom, filters.detectedTo);
+  const errorKey = validateTimeRange(filters.postedFrom, filters.postedTo);
 
   if (errorKey !== null) {
     setNotice(t('notice.invalidTimeRange'), true);
@@ -414,10 +439,44 @@ async function applyFilters(): Promise<void> {
   await loadPage(1);
 }
 
+function applyPostedPreset(preset: PostedPresetKey): void {
+  if (preset === 'all') {
+    filters.postedFrom = '';
+    filters.postedTo = '';
+  } else {
+    const now = new Date();
+    const start =
+      preset === 'today'
+        ? new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        : new Date(now.getTime() - (preset === 'week' ? 7 : 30) * 86_400_000);
+
+    filters.postedFrom = toLocalDateTimeValue(start);
+    filters.postedTo = '';
+  }
+
+  activePostedPreset.value = preset;
+  void loadPage(1);
+}
+
+function toLocalDateTimeValue(date: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, '0');
+
+  return [
+    date.getFullYear(),
+    '-',
+    pad(date.getMonth() + 1),
+    '-',
+    pad(date.getDate()),
+    'T',
+    pad(date.getHours()),
+    ':',
+    pad(date.getMinutes()),
+  ].join('');
+}
+
 async function clearFilters(): Promise<void> {
+  activePostedPreset.value = null;
   filters.authorUsername = '';
-  filters.detectedFrom = '';
-  filters.detectedTo = '';
   filters.isReply = 'all';
   filters.isRepost = 'all';
   filters.postedFrom = '';
@@ -515,8 +574,6 @@ function toTimestamp(value: string | null | undefined): number {
 function toQuery(page: number): PostPageQuery {
   return {
     authorUsername: filters.authorUsername,
-    detectedFrom: filters.detectedFrom,
-    detectedTo: filters.detectedTo,
     isReply: filters.isReply,
     isRepost: filters.isRepost,
     page,
@@ -572,13 +629,5 @@ function formatTimeInZone(value: string | null | undefined, timeZone: string): s
     ':',
     partMap.second,
   ].join('');
-}
-
-function prettyRawPayload(value: string): string {
-  try {
-    return JSON.stringify(JSON.parse(value), null, 2);
-  } catch {
-    return value;
-  }
 }
 </script>
