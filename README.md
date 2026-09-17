@@ -58,7 +58,7 @@ AI 领域的重要消息经常先出现在 X 上。这个项目的目标不是�
 | --- | --- | --- |
 | 总览 | `/` | 查看运行摘要、手动轮询、手动发送 |
 | 监听源 | `/accounts` | 查询、分页、新增、删除 X 账号与 RSS 源 |
-| 消息内容 | `/posts` | 查看已轮询到的帖子、筛选、详情抽屉、自动刷新 |
+| 消息内容 | `/posts` | 查看已轮询到的帖子、筛选、详情抽屉、自动刷新、一键清空 |
 | 最近轮询 | `/poll-runs` | 查询、分页、删除、批量删除、清空历史、查看错误 |
 | 最近发送 | `/delivery-events` | 查询、分页、删除、批量删除、清空历史 |
 | 配置 | `/settings` | 飞书 Webhook、轮询参数、X 数据源、运行信息 |
@@ -198,7 +198,7 @@ npm run dev
 | `REDIS_URL` | `redis://127.0.0.1:1` | 就绪检查使用；本地核心功能不强依赖 |
 | `FEISHU_WEBHOOK_URL` | 空 | 可选启动种子，推荐在 Web 控制台配置 |
 | `WATCH_ACCOUNTS_SOURCE` | `database` | X 账号启动种子来源，推荐保持数据库 |
-| `POLL_INTERVAL_SECONDS` | `300` | 轮询间隔，也可在 Web 控制台修改 |
+| `POLL_INTERVAL_SECONDS` | `300` | 轮询间隔（秒）；Web 控制台按分钟配置（1-3600 分钟） |
 | `FETCH_LIMIT_PER_ACCOUNT` | `5` | 每账号单次抓取数量 |
 | `EXCLUDE_REPLIES` | `true` | 默认排除回复 |
 | `EXCLUDE_REPOSTS` | `true` | 默认排除转发 |
@@ -302,6 +302,8 @@ X_API_BEARER_TOKEN=replace-with-real-token
 | 去重 | 稳定去重键（feed URL + guid/link 的哈希）；缺日期条目跨轮不会重复入库 |
 | 代理 | 支持 `RSS_PROXY_URL` 或在 `/settings -> RSS 源` 配置 http/https 代理 |
 | 错误处理 | 404/410 → 源不存在；其他非 2xx → 请求失败；解析失败 → 内容无效；单个源失败不影响其他源 |
+
+没有启用中的监听源时，轮询会自动跳过（不产生轮询记录）；「立即轮询」也会返回"已跳过"。
 
 RSS 与 X 走同一条基线 / 增量 / 去重 / 入库 / 投递链路：首次接入只建立基线（最新 1 条），之后只入库新条目；有启用的飞书 Webhook 时同步创建投递事件。
 

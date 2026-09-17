@@ -405,6 +405,17 @@ export interface ResolvedYoutubeChannel {
   label?: string;
 }
 
+export async function clearPostsHistory(): Promise<{
+  deletedEvents: number;
+  deletedPosts: number;
+  resetBoardSources: number;
+}> {
+  return requestJson<{ deletedEvents: number; deletedPosts: number; resetBoardSources: number }>(
+    '/admin/api/posts/clear-all',
+    { method: 'POST' },
+  );
+}
+
 export interface SourceGroupStatus {
   description: string;
   details?: string;

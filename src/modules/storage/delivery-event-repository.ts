@@ -76,6 +76,12 @@ export class DeliveryEventRepository {
     return result.count;
   }
 
+  public async deleteAll(): Promise<number> {
+    const result = await this.prisma.deliveryEvent.deleteMany({});
+
+    return result.count;
+  }
+
   public async deleteHistory(): Promise<{ deletedCount: number; retainedActiveCount: number }> {
     const [retainedActiveCount, deleteResult] = await this.prisma.$transaction([
       this.prisma.deliveryEvent.count({

@@ -141,14 +141,13 @@
               <label>
                 <span>{{ t('settings.polling.intervalSeconds') }}</span>
                 <input
-                  v-model.number="pollingForm.intervalSeconds"
+                  v-model.number="pollingForm.intervalMinutes"
                   inputmode="numeric"
                   max="3600"
-                  min="10"
+                  min="1"
                   type="number"
                 />
-                <small>
-                </small>
+                <small>{{ t('settings.polling.rangeSeconds') }}</small>
               </label>
 
               <label>
@@ -775,7 +774,7 @@ const pollingForm = reactive({
   excludeReplies: true,
   excludeReposts: true,
   fetchLimitPerAccount: 5,
-  intervalSeconds: 300,
+  intervalMinutes: 5,
 });
 
 const newTargetForm = reactive({
@@ -892,7 +891,7 @@ async function savePolling(): Promise<void> {
       excludeReplies: pollingForm.excludeReplies,
       excludeReposts: pollingForm.excludeReposts,
       fetchLimitPerAccount: pollingForm.fetchLimitPerAccount,
-      intervalSeconds: pollingForm.intervalSeconds,
+      intervalSeconds: pollingForm.intervalMinutes * 60,
     });
 
     if (settings.value !== null) {
@@ -1258,7 +1257,7 @@ function applySettings(loadedSettings: RuntimeSettingsSummary): void {
   pollingForm.excludeReplies = loadedSettings.polling.excludeReplies;
   pollingForm.excludeReposts = loadedSettings.polling.excludeReposts;
   pollingForm.fetchLimitPerAccount = loadedSettings.polling.fetchLimitPerAccount;
-  pollingForm.intervalSeconds = loadedSettings.polling.intervalSeconds;
+  pollingForm.intervalMinutes = Math.max(1, Math.round(loadedSettings.polling.intervalSeconds / 60));
 }
 
 function applyRssSettings(loadedRssSettings: RuntimeRssSettings): void {
@@ -1322,11 +1321,11 @@ function toDeliveryTargetQuery(page: number): { page: number; pageSize: number }
 }
 
 function validatePollingForm(): string | null {
-  if (!Number.isInteger(pollingForm.intervalSeconds)) {
+  if (!Number.isInteger(pollingForm.intervalMinutes)) {
     return t('settings.validation.intervalInteger');
   }
 
-  if (pollingForm.intervalSeconds < 10 || pollingForm.intervalSeconds > 3600) {
+  if (pollingForm.intervalMinutes < 1 || pollingForm.intervalMinutes > 3600) {
     return t('settings.validation.intervalRange');
   }
 

@@ -216,8 +216,8 @@ export class RuntimeSettingsService {
         values,
         POLLING_INTERVAL_SECONDS_KEY,
         basePolling.intervalSeconds,
-        10,
-        3600,
+        60,
+        216_000,
       ),
       sources: {
         excludeReplies: resolveSettingSource(values, POLLING_EXCLUDE_REPLIES_KEY),

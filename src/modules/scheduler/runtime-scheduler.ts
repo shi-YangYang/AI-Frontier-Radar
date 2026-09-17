@@ -272,6 +272,24 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
       'scheduler job started',
     );
 
+    const enabledAccounts = await this.options.storage.watchAccounts.listEnabled();
+
+    if (enabledAccounts.length === 0) {
+      this.logger.info(
+        {
+          job: 'polling',
+          trigger,
+        },
+        'scheduler skipped polling tick because no enabled sources are configured',
+      );
+      return {
+        job: 'polling',
+        message: 'No enabled sources are configured.',
+        status: 'skipped',
+        trigger,
+      };
+    }
+
     try {
       const config =
         this.options.runtimeSettings === undefined

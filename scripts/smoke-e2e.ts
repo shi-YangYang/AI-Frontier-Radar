@@ -10,7 +10,7 @@ import { createLogger } from '../src/lib/logger';
 import { createApp } from '../src/app/create-app';
 import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createGithubTrendingSourceProvider, createHfDailyPapersSourceProvider, createRssSourceProvider, createSourceProviderRegistry, createSubscriptionRuleMatcher, createXSourceProvider, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
 import { runDeliveryWorkerJob } from '../src/modules/delivery';
-import { createRuntimeSourceProviders } from '../src/modules/scheduler';
+import { createRuntimeScheduler, createRuntimeSourceProviders } from '../src/modules/scheduler';
 import { applySourceGroup, createPrismaClient, createStorage, getSourceGroupStatuses } from '../src/modules/storage';
 import { SOURCE_GROUPS } from '../src/config/source-groups';
 import { ConfigValidationError } from '../src/shared/env/config-validation-error';
@@ -1125,6 +1125,35 @@ async function main(): Promise<void> {
     assert(noRuleEvent !== null, 'with no enabled rules every new post should be delivered');
     checks.push({ name: '订阅规则：清空规则后恢复全量投递' });
 
+    const scheduler = createRuntimeScheduler({
+      config,
+      logger,
+      sourceProviders,
+      storage,
+    });
+    const enabledAccounts = await storage.watchAccounts.listEnabled();
+
+    for (const account of enabledAccounts) {
+      await storage.watchAccounts.update(account.id, { enabled: false });
+    }
+
+    const pollRunsBeforeSkip = await prisma.pollRun.count();
+    const skippedResult = await scheduler.runPollingNow({ trigger: 'smoke-skip' });
+    const pollRunsAfterSkip = await prisma.pollRun.count();
+    assert(
+      skippedResult.status === 'skipped',
+      `polling without enabled sources should be skipped, got ${skippedResult.status}`,
+    );
+    assert(
+      pollRunsAfterSkip === pollRunsBeforeSkip,
+      'skipped polling must not create a poll run record',
+    );
+
+    for (const account of enabledAccounts) {
+      await storage.watchAccounts.update(account.id, { enabled: true });
+    }
+    checks.push({ name: '无启用监听源时跳过轮询且不产生记录' });
+
     const youtubeHtml = [
       '<!doctype html><html><head>',
       '<meta property="og:title" content="OpenAI - YouTube">',
@@ -1221,6 +1250,23 @@ async function main(): Promise<void> {
       detail: `watch_accounts=${counts[0]}, x_posts_raw=${counts[1]}, delivery_events=${counts[2]}, poll_runs=${counts[3]}`,
       name: '临时 SQLite 记录完整链路状态',
     });
+
+    const clearResponse = await app.inject({
+      method: 'POST',
+      url: '/admin/api/posts/clear-all',
+    });
+    assert(clearResponse.statusCode === 200, `clear posts returned ${clearResponse.statusCode}`);
+    const postsAfterClear = await prisma.xPostRaw.count();
+    const eventsAfterClear = await prisma.deliveryEvent.count();
+    assert(postsAfterClear === 0, `posts should be cleared, got ${postsAfterClear}`);
+    assert(eventsAfterClear === 0, `delivery events should be cleared, got ${eventsAfterClear}`);
+    const githubAccountAfterClear = await storage.watchAccounts.findById(githubAccount.id);
+    assert(
+      githubAccountAfterClear?.baselinePostId === null &&
+        githubAccountAfterClear?.lastSeenPostId === null,
+      'board source cursors should be reset after clearing posts',
+    );
+    checks.push({ name: '一键清空消息（帖子 + 投递事件 + 榜单游标重置）' });
 
     printSuccess(checks);
   } finally {

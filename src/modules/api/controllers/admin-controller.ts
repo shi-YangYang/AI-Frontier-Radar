@@ -494,6 +494,26 @@ export async function updateAdminRssSettings(
   };
 }
 
+export async function clearAdminPostsHistory(
+  options: AdminControllerOptions,
+): Promise<{
+  ok: true;
+  data: { deletedEvents: number; deletedPosts: number; resetBoardSources: number };
+}> {
+  const deletedEvents = await options.storage.deliveryEvents.deleteAll();
+  const deletedPosts = await options.storage.xPosts.deleteAll();
+  const resetBoardSources = await options.storage.watchAccounts.resetBoardSourceCursors();
+
+  return {
+    ok: true,
+    data: {
+      deletedEvents,
+      deletedPosts,
+      resetBoardSources,
+    },
+  };
+}
+
 export async function getAdminSourceGroups(
   options: AdminControllerOptions,
 ): Promise<{ ok: true; data: { groups: SourceGroupStatus[] } }> {

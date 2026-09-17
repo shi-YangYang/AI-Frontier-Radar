@@ -11,6 +11,14 @@
         >
           {{ autoRefreshEnabled ? t('posts.autoRefreshOn') : t('posts.autoRefreshOff') }}
         </button>
+        <button
+          class="danger"
+          type="button"
+          :disabled="busy || summary.totalPosts === 0"
+          @click="clearPostsOpen = true"
+        >
+          {{ t('posts.clearAll') }}
+        </button>
       </div>
     </PageHeader>
 
@@ -183,6 +191,15 @@
       />
     </div>
 
+    <ConfirmModal
+      :open="clearPostsOpen"
+      :title="t('posts.clearTitle')"
+      :body="t('posts.clearBody')"
+      :detail="t('posts.clearDetail')"
+      @cancel="clearPostsOpen = false"
+      @confirm="confirmClearPosts"
+    />
+
     <div
       v-if="selectedPost !== null"
       class="post-drawer-backdrop"
@@ -301,6 +318,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 
 import {
+  clearPostsHistory,
   listPosts,
   type AdminPagination,
   type PostBooleanFilter,
@@ -308,6 +326,7 @@ import {
   type PostsSummary,
   type XPostContent,
 } from '../api/admin-api';
+import ConfirmModal from '../components/ConfirmModal.vue';
 import EmptyState from '../components/EmptyState.vue';
 import PageHeader from '../components/PageHeader.vue';
 import PaginationBar from '../components/PaginationBar.vue';
@@ -329,6 +348,7 @@ const postedPresets = [
 type PostedPresetKey = (typeof postedPresets)[number]['key'];
 
 const autoRefreshEnabled = ref(true);
+const clearPostsOpen = ref(false);
 const busy = ref(false);
 const activePostedPreset = ref<PostedPresetKey | null>(null);
 const filters = reactive({
@@ -506,6 +526,26 @@ async function runAutoRefresh(): Promise<void> {
 async function showNewContent(): Promise<void> {
   selectedPost.value = null;
   await loadPage(1);
+}
+
+async function confirmClearPosts(): Promise<void> {
+  clearPostsOpen.value = false;
+  busy.value = true;
+
+  try {
+    const result = await clearPostsHistory();
+    await loadPage(1, { silent: true });
+    setNotice(
+      t('notice.postsCleared', {
+        events: result.deletedEvents,
+        posts: result.deletedPosts,
+      }),
+    );
+  } catch (error) {
+    setNotice(error instanceof Error ? error.message : String(error), true);
+  } finally {
+    busy.value = false;
+  }
 }
 
 function toPostAuthorLabel(post: XPostContent): string {

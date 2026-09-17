@@ -20,6 +20,7 @@ import {
   deleteAdminWatchAccount,
   checkAdminXSourceLogin,
   applyAdminSourceGroup,
+  clearAdminPostsHistory,
   getAdminRssSettings,
   getAdminSettings,
   getAdminSourceGroups,
@@ -155,6 +156,16 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     },
     async (request, reply) =>
       sendAdminResponse(reply, () => updateAdminRssSettings(request.body, options)),
+  );
+
+  app.post(
+    '/admin/api/posts/clear-all',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => clearAdminPostsHistory(options)),
   );
 
   app.get(

@@ -36,6 +36,12 @@ export class XPostRepository {
     return mapXPostRaw(xPost);
   }
 
+  public async deleteAll(): Promise<number> {
+    const result = await this.prisma.xPostRaw.deleteMany({});
+
+    return result.count;
+  }
+
   public async delete(id: string): Promise<boolean> {
     const result = await this.prisma.xPostRaw.deleteMany({
       where: { id },
