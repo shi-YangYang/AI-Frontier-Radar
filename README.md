@@ -340,6 +340,16 @@ YouTube 解析与 GitHub 页面抓取遵循“RSS 源”页签里的代理配置
 
 示例：规则「CCF-A 顶会」包含 `NeurIPS, ICML, ICLR, CVPR, ACL`（任一命中），排除 `workshop`，即可近似实现按会议名过滤。
 
+## CI
+
+向 `master`（或 `main`）发起 Pull Request 时会自动触发 GitHub Actions 校验：
+
+```text
+npm run prisma:generate → npm run typecheck → npm run build → npm run smoke:e2e
+```
+
+工作流文件：`.github/workflows/ci.yml`。推送分支本身不触发；只有 PR 打开/更新时运行。
+
 ## 常用命令
 
 | 命令 | 用途 |
