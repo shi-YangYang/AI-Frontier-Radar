@@ -471,6 +471,89 @@
           </article>
         </section>
 
+        <section v-else-if="activeSettingsTab === 'rules'" class="settings-layout single-column">
+          <article class="panel settings-wide">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.rules.title') }}</h2>
+                <p>{{ t('settings.rules.description') }}</p>
+              </div>
+            </header>
+            <div class="settings-form">
+              <div v-if="subscriptionRules.length === 0" class="empty-panel">
+                {{ t('settings.rules.empty') }}
+              </div>
+              <div v-for="rule in subscriptionRules" :key="rule.id" class="rule-row">
+                <label class="compact-checkbox">
+                  <input
+                    type="checkbox"
+                    :checked="rule.enabled"
+                    :disabled="busy"
+                    @change="toggleSubscriptionRule(rule)"
+                  />
+                  <span>{{ rule.name }}</span>
+                </label>
+                <div class="rule-summary">
+                  <span class="status-badge neutral">
+                    {{ rule.mode === 'all' ? t('settings.rules.modeAll') : t('settings.rules.modeAny') }}
+                  </span>
+                  <code class="wrap">+ {{ rule.include.join(' / ') || '-' }}</code>
+                  <code v-if="rule.exclude.length > 0" class="wrap">- {{ rule.exclude.join(' / ') }}</code>
+                </div>
+                <button class="danger" type="button" :disabled="busy" @click="deleteSubscriptionRule(rule)">
+                  {{ t('actions.delete') }}
+                </button>
+              </div>
+
+              <form class="rule-add-form" @submit.prevent="addSubscriptionRule">
+                <label>
+                  <span>{{ t('settings.rules.nameLabel') }}</span>
+                  <input
+                    v-model="ruleForm.name"
+                    autocomplete="off"
+                    :disabled="busy"
+                    :placeholder="t('settings.rules.namePlaceholder')"
+                  />
+                </label>
+                <label>
+                  <span>{{ t('settings.rules.includeLabel') }}</span>
+                  <input
+                    v-model="ruleForm.include"
+                    autocomplete="off"
+                    :disabled="busy"
+                    :placeholder="t('settings.rules.includePlaceholder')"
+                  />
+                </label>
+                <label>
+                  <span>{{ t('settings.rules.excludeLabel') }}</span>
+                  <input
+                    v-model="ruleForm.exclude"
+                    autocomplete="off"
+                    :disabled="busy"
+                    :placeholder="t('settings.rules.excludePlaceholder')"
+                  />
+                </label>
+                <div class="settings-field">
+                  <span>{{ t('settings.rules.modeLabel') }}</span>
+                  <SelectControl
+                    v-model="ruleForm.mode"
+                    :aria-label="t('settings.rules.modeLabel')"
+                    :disabled="busy"
+                    :options="ruleModeOptions"
+                  />
+                </div>
+                <div class="form-actions">
+                  <button class="primary" type="submit" :disabled="busy">
+                    {{ t('settings.rules.add') }}
+                  </button>
+                </div>
+              </form>
+
+              <div class="inline-alert">{{ t('settings.rules.hint') }}</div>
+            </div>
+          </article>
+        </section>
+
         <section v-else class="settings-layout single-column">
           <article class="panel settings-form-panel">
             <header class="panel-header">
@@ -605,6 +688,7 @@ import {
   deleteDeliveryTarget,
   getRssSettings,
   getSettings,
+  getSubscriptionRules,
   getXSourceSettings,
   listDeliveryTargets,
   openXLoginWindow,
@@ -613,12 +697,15 @@ import {
   updateDeliveryTarget,
   updateDeliveryTargetEnabled,
   updateRssSettings,
+  updateSubscriptionRules,
   updateXBrowserSettings,
   updatePollingSettings,
   type AdminPagination,
   type DeliveryTarget,
   type DeliveryTargetSummary,
   type RuntimeRssSettings,
+  type SubscriptionRule,
+  type SubscriptionRuleMode,
   type RuntimeSettingSource,
   type RuntimeSettingsSummary,
   type RuntimeXSourceSettings,
@@ -656,7 +743,7 @@ const xSourceSettings = ref<RuntimeXSourceSettings | null>(null);
 const anonymousCheckResult = ref<XSourceAnonymousCheckResult | null>(null);
 const loginCheckResult = ref<XSourceLoginCheckResult | null>(null);
 
-type SettingsTabKey = 'feishu' | 'polling' | 'rss' | 'xSource' | 'runtime';
+type SettingsTabKey = 'feishu' | 'polling' | 'rss' | 'rules' | 'xSource' | 'runtime';
 
 const activeSettingsTab = ref<SettingsTabKey>('feishu');
 const settingsTabs: Array<{ descriptionKey: MessageKey; key: SettingsTabKey; labelKey: MessageKey }> = [
@@ -679,6 +766,11 @@ const settingsTabs: Array<{ descriptionKey: MessageKey; key: SettingsTabKey; lab
     descriptionKey: 'settings.tabs.rss.description',
     key: 'rss',
     labelKey: 'settings.tabs.rss.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.rules.description',
+    key: 'rules',
+    labelKey: 'settings.tabs.rules.label',
   },
   {
     descriptionKey: 'settings.tabs.runtime.description',
@@ -715,6 +807,20 @@ const rssProxyForm = reactive({
   proxyUrl: '',
 });
 
+const subscriptionRules = ref<SubscriptionRule[]>([]);
+
+const ruleForm = reactive({
+  exclude: '',
+  include: '',
+  mode: 'any' as SubscriptionRuleMode,
+  name: '',
+});
+
+const ruleModeOptions = computed<{ label: string; value: SubscriptionRuleMode }[]>(() => [
+  { label: t('settings.rules.modeAny'), value: 'any' },
+  { label: t('settings.rules.modeAll'), value: 'all' },
+]);
+
 const xRunModeForm = reactive({
   mode: 'headless' as 'headless' | 'headed',
 });
@@ -734,17 +840,19 @@ async function loadSettings(options: { silent?: boolean } = {}): Promise<void> {
   busy.value = true;
 
   try {
-    const [loadedSettings, loadedXSourceSettings, loadedRssSettings, loadedTargets] =
+    const [loadedSettings, loadedXSourceSettings, loadedRssSettings, loadedTargets, loadedRules] =
       await Promise.all([
         getSettings(),
         getXSourceSettings(),
         getRssSettings(),
         listDeliveryTargets(toDeliveryTargetQuery(deliveryTargetPagination.value.page)),
+        getSubscriptionRules(),
       ]);
     applySettings(loadedSettings);
     applyXSourceSettings(loadedXSourceSettings);
     applyRssSettings(loadedRssSettings);
     applyDeliveryTargets(loadedTargets);
+    subscriptionRules.value = loadedRules;
 
     if (options.silent !== true) {
       setNotice(t('settings.notice.refreshSuccess'));
@@ -863,6 +971,71 @@ async function clearRssProxy(): Promise<void> {
   } finally {
     busy.value = false;
   }
+}
+
+function parseRuleTerms(value: string): string[] {
+  return value
+    .split(/[,，\n]/u)
+    .map((term) => term.trim())
+    .filter((term) => term.length > 0);
+}
+
+async function persistSubscriptionRules(next: SubscriptionRule[]): Promise<void> {
+  busy.value = true;
+
+  try {
+    subscriptionRules.value = await updateSubscriptionRules(next);
+    setNotice(t('settings.notice.saveRulesSuccess'));
+  } catch (error) {
+    setNotice(t('settings.notice.saveRulesFailure', { error: toErrorMessage(error) }), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function addSubscriptionRule(): Promise<void> {
+  const include = parseRuleTerms(ruleForm.include);
+  const exclude = parseRuleTerms(ruleForm.exclude);
+
+  if (include.length === 0 && exclude.length === 0) {
+    setNotice(t('settings.notice.saveRulesFailure', { error: t('settings.rules.needTerms') }), true);
+    return;
+  }
+
+  const next: SubscriptionRule[] = [
+    ...subscriptionRules.value,
+    {
+      enabled: true,
+      exclude,
+      id: `rule-${Date.now()}`,
+      include,
+      mode: ruleForm.mode,
+      name:
+        ruleForm.name.trim().length > 0
+          ? ruleForm.name.trim()
+          : t('settings.rules.unnamed'),
+    },
+  ];
+
+  await persistSubscriptionRules(next);
+
+  if (subscriptionRules.value.length === next.length) {
+    ruleForm.name = '';
+    ruleForm.include = '';
+    ruleForm.exclude = '';
+  }
+}
+
+async function toggleSubscriptionRule(rule: SubscriptionRule): Promise<void> {
+  await persistSubscriptionRules(
+    subscriptionRules.value.map((entry) =>
+      entry.id === rule.id ? { ...entry, enabled: !entry.enabled } : entry,
+    ),
+  );
+}
+
+async function deleteSubscriptionRule(rule: SubscriptionRule): Promise<void> {
+  await persistSubscriptionRules(subscriptionRules.value.filter((entry) => entry.id !== rule.id));
 }
 
 async function saveXRunMode(): Promise<void> {

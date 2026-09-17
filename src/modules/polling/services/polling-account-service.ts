@@ -1,6 +1,7 @@
 import type { DeliveryTarget, WatchAccount, XPostRepository } from '../../storage';
 import type { DeliveryEventRepository } from '../../storage';
 import type { SourceDescriptor, SourceProviderRegistry, StandardizedPost } from '../types';
+import type { SubscriptionRuleMatcher } from './subscription-rule-matcher';
 
 export interface PollingAccountServiceOptions {
   deliveryEvents: DeliveryEventRepository;
@@ -8,6 +9,7 @@ export interface PollingAccountServiceOptions {
   excludeReposts?: boolean;
   fetchLimitPerAccount: number;
   sourceProviders: SourceProviderRegistry;
+  subscriptionRuleMatcher?: SubscriptionRuleMatcher;
   xPosts: XPostRepository;
 }
 
@@ -130,7 +132,7 @@ export class PollingAccountService {
 
     let eventsCreated = 0;
 
-    if (options.createEvents) {
+    if (options.createEvents && this.shouldDeliver(post)) {
       for (const deliveryTarget of deliveryTargets) {
         const deliveryEvent = await this.options.deliveryEvents.createIfAbsent({
           status: 'pending',
@@ -148,6 +150,16 @@ export class PollingAccountService {
       eventsCreated,
       isNewPost: true,
     };
+  }
+
+  private shouldDeliver(post: StandardizedPost): boolean {
+    const matcher = this.options.subscriptionRuleMatcher;
+
+    if (matcher === undefined || !matcher.hasEnabledRules) {
+      return true;
+    }
+
+    return matcher.matches(post.textContent);
   }
 }
 

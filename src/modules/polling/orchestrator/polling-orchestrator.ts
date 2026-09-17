@@ -2,7 +2,7 @@ import type { AppLogger } from '../../../lib/logger';
 import { createTimestamp } from '../../storage/database';
 import type { StorageContext, WatchAccount } from '../../storage';
 import type { SourceProviderRegistry } from '../types';
-import { PollingAccountService } from '../services';
+import { PollingAccountService, type SubscriptionRuleMatcher } from '../services';
 
 export interface PollingOrchestratorOptions {
   logger?: AppLogger;
@@ -16,6 +16,7 @@ export interface PollingOrchestratorOptions {
     StorageContext,
     'deliveryEvents' | 'deliveryTargets' | 'pollRuns' | 'watchAccounts' | 'xPosts'
   >;
+  subscriptionRuleMatcher?: SubscriptionRuleMatcher;
 }
 
 export interface PollingAccountRunResult {
@@ -50,6 +51,7 @@ export class PollingOrchestrator {
       excludeReposts: options.polling.excludeReposts,
       fetchLimitPerAccount: options.polling.fetchLimitPerAccount,
       sourceProviders: options.sourceProviders,
+      subscriptionRuleMatcher: options.subscriptionRuleMatcher,
       xPosts: options.storage.xPosts,
     });
     this.logger = options.logger?.child({ module: 'polling-orchestrator' });

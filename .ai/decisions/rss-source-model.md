@@ -10,3 +10,5 @@
 - 默认推荐源仅在“监听源表为空且 `app_settings.sources.defaultsImportedAt` 标记不存在”时导入一次，导入不做网络校验（由后续轮询暴露错误），删除后不会恢复。
 - GitHub 分三种形态：热门仓库使用独立 `source_type='github'`（服务端解析 Trending 页面，仓库去重键为 `github:trending:<owner/repo>`）；仓库发布与用户动态使用 GitHub 原生 Atom（`releases.atom` / `<user>.atom`）按 `rss` 类型接入。GitHub 页面抓取复用“RSS 源”页签的代理配置。
 - GitHub 热门仓库采用“首次全量基线”：首次轮询把当前榜单整体入库但不创建投递事件（避免一次推送几十条），之后只有新进入榜单的仓库才产生投递事件；`SourceProvider.firstRunBaseline='all'` 是通用机制，其他榜单类源可复用。
+- HF Daily Papers 通过官方 JSON API 接入，独立 `source_type='hf_papers'`，复用 `firstRunBaseline='all'`（首次全量基线不投递）。
+- 订阅规则只控制投递：存储于 app_settings `subscription.rules`，命中任一启用规则才创建投递事件，无启用规则时保持全量投递；排除词优先，包含词支持 any/all（共现）两种模式；帖子始终入库。

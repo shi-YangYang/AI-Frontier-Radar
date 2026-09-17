@@ -14,6 +14,15 @@ export {
   DEFAULT_WATCH_SOURCES,
   importDefaultWatchSources,
 } from './default-watch-sources';
+export {
+  createSubscriptionRuleService,
+  SubscriptionRuleService,
+  SubscriptionRuleValidationError,
+} from './subscription-rule-service';
+export type {
+  SubscriptionRule,
+  SubscriptionRuleMode,
+} from './subscription-rule-service';
 export type {
   DefaultWatchSource,
   ImportDefaultWatchSourcesResult,

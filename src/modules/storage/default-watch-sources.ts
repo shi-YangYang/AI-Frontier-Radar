@@ -22,6 +22,7 @@ export const DEFAULT_WATCH_SOURCES: readonly DefaultWatchSource[] = [
   { sourceType: 'rss', sourceUrl: 'https://deepmind.google/blog/rss.xml' },
   { sourceType: 'rss', sourceUrl: 'https://www.qbitai.com/feed' },
   { sourceType: 'github', sourceUrl: 'https://github.com/trending?since=daily' },
+  { sourceType: 'hf_papers', sourceUrl: 'https://huggingface.co/api/daily_papers?limit=50' },
 ];
 
 const DEFAULT_SOURCES_MARKER_KEY = 'sources.defaultsImportedAt';

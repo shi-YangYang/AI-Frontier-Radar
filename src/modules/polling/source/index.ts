@@ -15,6 +15,11 @@ export {
   GithubTrendingSourceProvider,
 } from './github-trending-source-provider';
 export type { GithubTrendingSourceProviderOptions } from './github-trending-source-provider';
+export {
+  createHfDailyPapersSourceProvider,
+  HfDailyPapersSourceProvider,
+} from './hf-daily-papers-source-provider';
+export type { HfDailyPapersSourceProviderOptions } from './hf-daily-papers-source-provider';
 export { createSourceProviderRegistry } from './source-provider-registry';
 export { createFetchWithProxy } from './fetch-with-proxy';
 export type { FetchImplementation } from './fetch-with-proxy';

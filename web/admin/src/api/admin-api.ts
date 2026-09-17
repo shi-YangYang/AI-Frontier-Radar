@@ -13,7 +13,7 @@ export interface AdminErrorResponse {
 }
 
 export type WatchAccountPollStatus = 'failed' | 'pending' | 'success';
-export type WatchAccountSourceType = 'github' | 'rss' | 'x';
+export type WatchAccountSourceType = 'github' | 'hf_papers' | 'rss' | 'x';
 export type PollRunStatus = 'failed' | 'partial_failed' | 'running' | 'success';
 export type DeliveryEventStatus = 'dead' | 'failed' | 'pending' | 'retry_wait' | 'sending' | 'sent';
 export type PostBooleanFilter = 'all' | 'false' | 'true';
@@ -405,6 +405,34 @@ export interface ResolvedYoutubeChannel {
   label?: string;
 }
 
+export type SubscriptionRuleMode = 'all' | 'any';
+
+export interface SubscriptionRule {
+  enabled: boolean;
+  exclude: string[];
+  id: string;
+  include: string[];
+  mode: SubscriptionRuleMode;
+  name: string;
+}
+
+export async function getSubscriptionRules(): Promise<SubscriptionRule[]> {
+  const data = await requestJson<{ rules: SubscriptionRule[] }>('/admin/api/subscription-rules');
+
+  return data.rules;
+}
+
+export async function updateSubscriptionRules(
+  rules: SubscriptionRule[],
+): Promise<SubscriptionRule[]> {
+  const data = await requestJson<{ rules: SubscriptionRule[] }>('/admin/api/subscription-rules', {
+    body: JSON.stringify({ rules }),
+    method: 'PUT',
+  });
+
+  return data.rules;
+}
+
 export async function resolveYoutubeChannel(input: string): Promise<ResolvedYoutubeChannel> {
   return requestJson<ResolvedYoutubeChannel>('/admin/api/source-presets/youtube/resolve', {
     body: JSON.stringify({ input }),
@@ -523,6 +551,7 @@ export async function listWatchAccounts(query?: WatchAccountPageQuery): Promise<
 
 export type CreateWatchAccountInput =
   | { sourceType: 'github'; sourceUrl: string }
+  | { sourceType: 'hf_papers'; sourceUrl: string }
   | { sourceType: 'rss'; sourceUrl: string }
   | { sourceType: 'x'; xUsername: string };
 

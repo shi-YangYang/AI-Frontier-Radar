@@ -94,6 +94,9 @@
               :placeholder="t('accounts.githubUserPlaceholder')"
             />
           </template>
+          <template v-else-if="sourceKind === 'hf'">
+            <span class="muted source-add-inline-hint">{{ t('accounts.hfPapersHint') }}</span>
+          </template>
           <span v-else class="muted source-add-inline-hint">
             {{ t('accounts.producthuntHint') }}
           </span>
@@ -211,7 +214,8 @@ type SourceKind =
   | 'arxiv'
   | 'hackernews'
   | 'producthunt'
-  | 'github';
+  | 'github'
+  | 'hf';
 type RedditSort = 'hot' | 'new' | 'top';
 type HackerNewsPreset = 'frontpage' | 'newest' | 'points100' | 'points300';
 type GithubMode = 'trending' | 'releases' | 'activity';
@@ -265,6 +269,7 @@ const sourceKindOptions = computed<{ label: string; value: SourceKind }[]>(() =>
   { label: t('accounts.sourceKind.hackernews'), value: 'hackernews' },
   { label: t('accounts.sourceKind.producthunt'), value: 'producthunt' },
   { label: t('accounts.sourceKind.github'), value: 'github' },
+  { label: t('accounts.sourceKind.hfPapers'), value: 'hf' },
 ]);
 const redditSortOptions = computed<{ label: string; value: RedditSort }[]>(() => [
   { label: t('accounts.redditSort.hot'), value: 'hot' },
@@ -318,6 +323,8 @@ const pendingFeedUrl = computed<string | null>(() => {
       return 'https://www.producthunt.com/feed';
     case 'github':
       return buildGithubSourceUrl();
+    case 'hf':
+      return 'https://huggingface.co/api/daily_papers?limit=50';
     default:
       return null;
   }
@@ -395,6 +402,7 @@ async function toCreateInput(): Promise<
   | { sourceType: 'x'; xUsername: string }
   | { sourceType: 'rss'; sourceUrl: string }
   | { sourceType: 'github'; sourceUrl: string }
+  | { sourceType: 'hf_papers'; sourceUrl: string }
 > {
   switch (sourceKind.value) {
     case 'x':
@@ -432,6 +440,11 @@ async function toCreateInput(): Promise<
       return { sourceType: 'rss', sourceUrl: HN_PRESET_URLS[hnPreset.value] };
     case 'producthunt':
       return { sourceType: 'rss', sourceUrl: 'https://www.producthunt.com/feed' };
+    case 'hf':
+      return {
+        sourceType: 'hf_papers',
+        sourceUrl: 'https://huggingface.co/api/daily_papers?limit=50',
+      };
     case 'github': {
       if (githubMode.value === 'trending') {
         const language = normalizeGithubLanguage(githubLanguage.value);
@@ -621,10 +634,18 @@ function sourceBadge(account: WatchAccount): string {
     return 'GitHub';
   }
 
+  if (account.sourceType === 'hf_papers') {
+    return 'HF';
+  }
+
   const url = account.sourceUrl ?? '';
 
   if (url.includes('github.com')) {
     return 'GitHub';
+  }
+
+  if (url.includes('huggingface.co')) {
+    return 'HF';
   }
 
   if (url.includes('youtube.com')) {

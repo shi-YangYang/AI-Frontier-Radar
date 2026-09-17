@@ -3,9 +3,11 @@ export {
   createBrowserXSourceProvider,
   createFetchWithProxy,
   createGithubTrendingSourceProvider,
+  createHfDailyPapersSourceProvider,
   createRssSourceProvider,
   createSourceProviderRegistry,
   GithubTrendingSourceProvider,
+  HfDailyPapersSourceProvider,
   parseXTimelineFromPage,
   resolveYoutubeChannel,
   RssSourceProvider,
@@ -19,6 +21,7 @@ export type {
   BrowserXSourceProviderOptions,
   FetchImplementation,
   GithubTrendingSourceProviderOptions,
+  HfDailyPapersSourceProviderOptions,
   ResolvedYoutubeChannel,
   RssSourceProviderOptions,
   XResolvedAccount,
@@ -40,7 +43,8 @@ export type {
   SourceType,
   StandardizedPost,
 } from './types/index';
-export { PollingAccountService } from './services/index';
+export { PollingAccountService, createSubscriptionRuleMatcher } from './services/index';
+export type { SubscriptionRuleMatcher } from './services/index';
 export type { PollingAccountResult, PollingAccountServiceOptions } from './services/index';
 export { PollingOrchestrator } from './orchestrator/index';
 export type {

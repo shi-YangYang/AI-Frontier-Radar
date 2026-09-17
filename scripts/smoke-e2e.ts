@@ -8,7 +8,7 @@ import { toPrismaSqliteDatabaseUrl } from '../src/shared/config';
 import { loadAppConfig } from '../src/config';
 import { createLogger } from '../src/lib/logger';
 import { createApp } from '../src/app/create-app';
-import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createGithubTrendingSourceProvider, createRssSourceProvider, createSourceProviderRegistry, createXSourceProvider, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
+import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createGithubTrendingSourceProvider, createHfDailyPapersSourceProvider, createRssSourceProvider, createSourceProviderRegistry, createSubscriptionRuleMatcher, createXSourceProvider, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
 import { runDeliveryWorkerJob } from '../src/modules/delivery';
 import { createRuntimeSourceProviders } from '../src/modules/scheduler';
 import { createPrismaClient, createStorage, DEFAULT_WATCH_SOURCES, importDefaultWatchSources } from '../src/modules/storage';
@@ -92,8 +92,12 @@ async function main(): Promise<void> {
   const githubProvider = createGithubTrendingSourceProvider({
     timeoutMs: 5_000,
   });
+  const hfPapersProvider = createHfDailyPapersSourceProvider({
+    timeoutMs: 5_000,
+  });
   const sourceProviders = createSourceProviderRegistry({
     github: githubProvider,
+    hf_papers: hfPapersProvider,
     rss: rssProvider,
     x: sourceProvider,
   });
@@ -113,6 +117,15 @@ async function main(): Promise<void> {
           return githubProvider.validateSource({
             source: {
               sourceType: 'github',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
+        if (input.sourceType === 'hf_papers') {
+          return hfPapersProvider.validateSource({
+            source: {
+              sourceType: 'hf_papers',
               sourceUrl: input.sourceUrl,
             },
           });
@@ -872,6 +885,210 @@ async function main(): Promise<void> {
       `repeat github poll should not store duplicates, got ${githubPostsAfterThirdPoll}`,
     );
     checks.push({ name: 'GitHub Trending 重复轮询不重复入库' });
+
+    const hfApiPath = '/hf-api';
+    const hfApiUrl = `${rssApi.url}${hfApiPath}`;
+    rssApi.setFeed(hfApiPath, {
+      body: JSON.stringify([
+        {
+          paper: {
+            authors: [{ name: 'Alice' }, { name: 'Bob' }],
+            id: '2609.00001',
+            publishedAt: '2026-09-15T00:00:00.000Z',
+            submittedOnDailyAt: '2026-09-16T00:00:00.000Z',
+            summary: 'Summary one.',
+            title: 'Paper One',
+            upvotes: 12,
+          },
+        },
+        {
+          paper: {
+            id: '2609.00002',
+            summary: 'Summary two.',
+            title: 'Paper Two',
+            upvotes: 3,
+          },
+        },
+      ]),
+      contentType: 'application/json; charset=utf-8',
+      statusCode: 200,
+    });
+
+    const directPapers = await hfPapersProvider.fetchPosts({
+      limit: 10,
+      source: { sourceType: 'hf_papers', sourceUrl: hfApiUrl },
+    });
+    assert(
+      directPapers.posts.length === 2,
+      `hf provider should parse 2 papers, got ${directPapers.posts.length}`,
+    );
+    assert(
+      directPapers.posts[0]?.textContent.includes('Paper One') &&
+        directPapers.posts[0]?.textContent.includes('👍 12'),
+      'hf paper post should contain the title and upvotes',
+    );
+    assert(
+      directPapers.posts[0]?.dedupeKey === 'hf:papers:2609.00001',
+      `hf paper dedupe key mismatch: ${directPapers.posts[0]?.dedupeKey}`,
+    );
+    checks.push({ name: 'HF Daily Papers 解析（标题/摘要/点赞）' });
+
+    const createHfResponse = await app.inject({
+      method: 'POST',
+      payload: { sourceType: 'hf_papers', sourceUrl: hfApiUrl },
+      url: '/admin/api/watch-accounts',
+    });
+    assert(
+      createHfResponse.statusCode === 200,
+      `hf source create returned ${createHfResponse.statusCode}`,
+    );
+    const hfAccount = await storage.watchAccounts.findBySource({
+      sourceType: 'hf_papers',
+      sourceUrl: hfApiUrl,
+    });
+    assert(hfAccount !== null, 'hf watch account was not stored');
+
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const hfAccountAfterPoll = await storage.watchAccounts.findById(hfAccount.id);
+    const hfAuthorId = hfAccountAfterPoll?.xUserId ?? '';
+    const hfPostsAfterFirst = await prisma.xPostRaw.count({ where: { authorUserId: hfAuthorId } });
+    assert(hfPostsAfterFirst === 2, `first hf poll should store both papers, got ${hfPostsAfterFirst}`);
+    const hfBaselinePost = await storage.xPosts.findByDedupeKey('hf:papers:2609.00001');
+    assert(hfBaselinePost !== null, 'hf baseline paper was not stored');
+    const hfBaselineEvent = await storage.deliveryEvents.findByPostAndTarget(
+      hfBaselinePost.xPostId,
+      TARGET_KEY,
+    );
+    assert(hfBaselineEvent === null, 'hf baseline papers must not create delivery events');
+    checks.push({ name: 'HF Daily Papers 首次基线全量入库且不投递' });
+
+    rssApi.setFeed(hfApiPath, {
+      body: JSON.stringify([
+        { paper: { id: '2609.00003', summary: 'Summary three.', title: 'Paper Three', upvotes: 9 } },
+        { paper: { id: '2609.00001', summary: 'Summary one.', title: 'Paper One', upvotes: 12 } },
+      ]),
+      contentType: 'application/json; charset=utf-8',
+      statusCode: 200,
+    });
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const hfNewPost = await storage.xPosts.findByDedupeKey('hf:papers:2609.00003');
+    assert(hfNewPost !== null, 'newly listed hf paper was not stored');
+    const hfNewEvent = await storage.deliveryEvents.findByPostAndTarget(
+      hfNewPost.xPostId,
+      TARGET_KEY,
+    );
+    assert(hfNewEvent !== null, 'newly listed hf paper should create a delivery event');
+    checks.push({ name: 'HF Daily Papers 新论文增量入库并投递' });
+
+    const matcherWithoutRules = createSubscriptionRuleMatcher([]);
+    assert(!matcherWithoutRules.hasEnabledRules, 'empty rules should not enable filtering');
+
+    const anyMatcher = createSubscriptionRuleMatcher([
+      { enabled: true, exclude: [], id: 'r1', include: ['llama.cpp'], mode: 'any', name: 'any' },
+    ]);
+    assert(anyMatcher.hasEnabledRules, 'enabled rule should activate filtering');
+    assert(anyMatcher.matches('About llama.cpp updates'), 'any matcher should match included term');
+    assert(!anyMatcher.matches('Unrelated text'), 'any matcher should not match missing term');
+
+    const allMatcher = createSubscriptionRuleMatcher([
+      { enabled: true, exclude: [], id: 'r2', include: ['NeurIPS', 'ICML'], mode: 'all', name: 'all' },
+    ]);
+    assert(
+      allMatcher.matches('NeurIPS and ICML papers'),
+      'all matcher should match when all terms appear',
+    );
+    assert(!allMatcher.matches('Only NeurIPS here'), 'all matcher should require every term');
+
+    const excludeMatcher = createSubscriptionRuleMatcher([
+      {
+        enabled: true,
+        exclude: ['workshop'],
+        id: 'r3',
+        include: ['NeurIPS'],
+        mode: 'any',
+        name: 'exclude',
+      },
+    ]);
+    assert(!excludeMatcher.matches('NeurIPS workshop paper'), 'exclude term should suppress delivery');
+
+    const disabledMatcher = createSubscriptionRuleMatcher([
+      { enabled: false, exclude: [], id: 'r4', include: ['llama.cpp'], mode: 'any', name: 'disabled' },
+    ]);
+    assert(!disabledMatcher.hasEnabledRules, 'disabled rules should be ignored');
+    checks.push({ name: '订阅规则匹配（任一/全部/排除/停用）' });
+
+    const saveRulesResponse = await app.inject({
+      method: 'PUT',
+      payload: {
+        rules: [
+          { enabled: true, exclude: [], include: ['llama.cpp'], mode: 'any', name: 'llama only' },
+        ],
+      },
+      url: '/admin/api/subscription-rules',
+    });
+    assert(saveRulesResponse.statusCode === 200, `save rules returned ${saveRulesResponse.statusCode}`);
+
+    rssApi.setFeed(trendingPath, {
+      body: createTrendingHtml([
+        { name: 'llama.cpp', owner: 'ggml-org', stars: '80,000', starsToday: '900' },
+        { name: 'plain-repo', owner: 'acme', stars: '10', starsToday: '1' },
+      ]),
+      contentType: 'text/html; charset=utf-8',
+      statusCode: 200,
+    });
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const unmatchedPost = await storage.xPosts.findByDedupeKey('github:trending:acme/plain-repo');
+    assert(unmatchedPost !== null, 'unmatched repo should still be stored');
+    const unmatchedEvent = await storage.deliveryEvents.findByPostAndTarget(
+      unmatchedPost.xPostId,
+      TARGET_KEY,
+    );
+    assert(unmatchedEvent === null, 'unmatched post must not create a delivery event');
+    checks.push({ name: '订阅规则：未命中入库但不投递' });
+
+    rssApi.setFeed(trendingPath, {
+      body: createTrendingHtml([
+        { name: 'llama.cpp', owner: 'ggml-org', stars: '80,000', starsToday: '900' },
+        { name: 'plain-repo', owner: 'acme', stars: '10', starsToday: '1' },
+        { name: 'llama.cpp-tools', owner: 'acme', stars: '5', starsToday: '1' },
+      ]),
+      contentType: 'text/html; charset=utf-8',
+      statusCode: 200,
+    });
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const matchedPost = await storage.xPosts.findByDedupeKey('github:trending:acme/llama.cpp-tools');
+    assert(matchedPost !== null, 'matched repo was not stored');
+    const matchedEvent = await storage.deliveryEvents.findByPostAndTarget(
+      matchedPost.xPostId,
+      TARGET_KEY,
+    );
+    assert(matchedEvent !== null, 'matched post should create a delivery event');
+    checks.push({ name: '订阅规则：命中才投递' });
+
+    await app.inject({
+      method: 'PUT',
+      payload: { rules: [] },
+      url: '/admin/api/subscription-rules',
+    });
+    rssApi.setFeed(trendingPath, {
+      body: createTrendingHtml([
+        { name: 'llama.cpp', owner: 'ggml-org', stars: '80,000', starsToday: '900' },
+        { name: 'plain-repo', owner: 'acme', stars: '10', starsToday: '1' },
+        { name: 'llama.cpp-tools', owner: 'acme', stars: '5', starsToday: '1' },
+        { name: 'another-repo', owner: 'acme', stars: '3', starsToday: '1' },
+      ]),
+      contentType: 'text/html; charset=utf-8',
+      statusCode: 200,
+    });
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const noRulePost = await storage.xPosts.findByDedupeKey('github:trending:acme/another-repo');
+    assert(noRulePost !== null, 'no-rule repo was not stored');
+    const noRuleEvent = await storage.deliveryEvents.findByPostAndTarget(
+      noRulePost.xPostId,
+      TARGET_KEY,
+    );
+    assert(noRuleEvent !== null, 'with no enabled rules every new post should be delivered');
+    checks.push({ name: '订阅规则：清空规则后恢复全量投递' });
 
     const youtubeHtml = [
       '<!doctype html><html><head>',

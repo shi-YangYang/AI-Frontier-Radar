@@ -30,6 +30,7 @@ import {
   type StorageContext,
   type WatchAccount,
 } from '../../storage';
+import { SubscriptionRuleValidationError, createSubscriptionRuleService } from '../../storage';
 import type {
   RuntimeRssSettings,
   RuntimeXSourceSettings,
@@ -41,6 +42,7 @@ import { normalizeXUsername } from '../../storage/watch-account-repository';
 
 export type AdminWatchAccountValidationInput =
   | { sourceType: 'github'; sourceUrl: string }
+  | { sourceType: 'hf_papers'; sourceUrl: string }
   | { sourceType: 'rss'; sourceUrl: string }
   | { sourceType: 'x'; xUsername: string };
 
@@ -166,7 +168,7 @@ export async function createAdminWatchAccount(
   const input = readCreateWatchAccountBody(body);
   const account = await validateWatchSource(input, options);
 
-  if (input.sourceType === 'rss' || input.sourceType === 'github') {
+  if (input.sourceType === 'rss' || input.sourceType === 'github' || input.sourceType === 'hf_papers') {
     const { created, watchAccount } = await options.storage.watchAccounts.createIfAbsentBySource({
       displayName: account.displayName ?? null,
       enabled: true,
@@ -484,6 +486,44 @@ export async function updateAdminRssSettings(
     ok: true,
     data: settings,
   };
+}
+
+export async function getAdminSubscriptionRules(
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { rules: unknown[] } }> {
+  const service = createSubscriptionRuleService({ appSettings: options.storage.appSettings });
+  const rules = await service.getRules();
+
+  return {
+    ok: true,
+    data: { rules },
+  };
+}
+
+export async function updateAdminSubscriptionRules(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { rules: unknown[] } }> {
+  if (!isRecord(body) || !Array.isArray(body.rules)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'rules 必须是数组。');
+  }
+
+  const service = createSubscriptionRuleService({ appSettings: options.storage.appSettings });
+
+  try {
+    const rules = await service.saveRules(body.rules);
+
+    return {
+      ok: true,
+      data: { rules },
+    };
+  } catch (error) {
+    if (error instanceof SubscriptionRuleValidationError) {
+      throw new AdminApiError(400, 'INVALID_REQUEST', error.message);
+    }
+
+    throw error;
+  }
 }
 
 export async function resolveAdminYoutubeChannel(
@@ -1883,14 +1923,15 @@ function readCreateWatchAccountBody(body: unknown): AdminWatchAccountValidationI
     body.sourceType !== undefined &&
     body.sourceType !== 'x' &&
     body.sourceType !== 'rss' &&
-    body.sourceType !== 'github'
+    body.sourceType !== 'github' &&
+    body.sourceType !== 'hf_papers'
   ) {
-    throw new AdminApiError(400, 'INVALID_REQUEST', 'sourceType 必须是 x、rss 或 github。');
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'sourceType 必须是 x、rss、github 或 hf_papers。');
   }
 
   const sourceType = body.sourceType ?? 'x';
 
-  if (sourceType === 'rss' || sourceType === 'github') {
+  if (sourceType === 'rss' || sourceType === 'github' || sourceType === 'hf_papers') {
     return {
       sourceType,
       sourceUrl: readRssSourceUrl(body.sourceUrl),

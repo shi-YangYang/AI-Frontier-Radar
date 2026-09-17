@@ -1935,3 +1935,63 @@ tr:last-child td {
     padding-right: 14px;
   }
 }
+
+.rule-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(0, 2fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.rule-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.rule-summary code {
+  overflow-wrap: anywhere;
+}
+
+.rule-add-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(0, 2fr) minmax(0, 2fr) minmax(150px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  border-top: 1px dashed var(--border);
+  padding-top: 16px;
+}
+
+.rule-add-form label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text);
+  font-weight: 650;
+}
+
+.rule-add-form input {
+  width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 920px) {
+  .rule-row {
+    grid-template-columns: 1fr;
+  }
+
+  .rule-add-form {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .rule-add-form {
+    grid-template-columns: 1fr;
+  }
+}

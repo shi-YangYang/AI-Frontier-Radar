@@ -49,6 +49,15 @@ export async function startServer(options: StartServerOptions): Promise<void> {
           });
         }
 
+        if (input.sourceType === 'hf_papers') {
+          return sourceProviders.hf_papers.validateSource({
+            source: {
+              sourceType: 'hf_papers',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
         return sourceProviders.x.validateSource({
           source: {
             sourceType: 'x',

@@ -21,6 +21,7 @@ import {
   checkAdminXSourceLogin,
   getAdminRssSettings,
   getAdminSettings,
+  getAdminSubscriptionRules,
   getAdminSummary,
   getAdminXSourceSettings,
   listAdminDeliveryEvents,
@@ -40,6 +41,7 @@ import {
   updateAdminDeliveryTargetEnabled,
   updateAdminFeishuSettings,
   updateAdminRssSettings,
+  updateAdminSubscriptionRules,
   updateAdminXBrowserSettings,
   updateAdminPollingSettings,
 } from '../controllers/admin-controller';
@@ -151,6 +153,27 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     },
     async (request, reply) =>
       sendAdminResponse(reply, () => updateAdminRssSettings(request.body, options)),
+  );
+
+  app.get(
+    '/admin/api/subscription-rules',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => getAdminSubscriptionRules(options)),
+  );
+
+  app.put(
+    '/admin/api/subscription-rules',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => updateAdminSubscriptionRules(request.body, options)),
   );
 
   app.post(

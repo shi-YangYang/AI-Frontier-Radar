@@ -4,6 +4,7 @@ import { runDeliveryWorkerJob, type DeliveryWorkerRunOnceResult } from '../deliv
 import {
   createBrowserXSourceProvider,
   createGithubTrendingSourceProvider,
+  createHfDailyPapersSourceProvider,
   createRssSourceProvider,
   createSourceProviderRegistry,
   createXSourceProvider,
@@ -53,6 +54,7 @@ export function createRuntimeScheduler(options: RuntimeSchedulerOptions): Runtim
 
 export interface RuntimeSourceProviders {
   github: SourceProvider;
+  hf_papers: SourceProvider;
   rss: SourceProvider;
   x: SourceProvider;
 }
@@ -63,6 +65,7 @@ export function createRuntimeSourceProviders(config: AppConfig): RuntimeSourcePr
 
   return {
     github: createGithubTrendingSourceProvider(proxyOptions),
+    hf_papers: createHfDailyPapersSourceProvider(proxyOptions),
     rss: createRssSourceProvider(proxyOptions),
     x: createRuntimeXSourceProvider(config),
   };
