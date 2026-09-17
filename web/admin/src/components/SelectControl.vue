@@ -19,7 +19,9 @@ const emit = defineEmits<{
 
 const isOpen = ref(false);
 const rootRef = ref<HTMLElement | null>(null);
+const menuRef = ref<HTMLElement | null>(null);
 const activeIndex = ref(0);
+const menuStyle = ref<Record<string, string>>({});
 
 const selectedOption = computed(
   () => props.options.find((option) => option.value === props.modelValue) ?? props.options[0],
@@ -31,16 +33,46 @@ watch(isOpen, (open) => {
       0,
       props.options.findIndex((option) => option.value === props.modelValue),
     );
+    updateMenuPosition();
     document.addEventListener('mousedown', handleDocumentMouseDown);
+    window.addEventListener('resize', updateMenuPosition);
+    window.addEventListener('scroll', updateMenuPosition, true);
     return;
   }
 
   document.removeEventListener('mousedown', handleDocumentMouseDown);
+  window.removeEventListener('resize', updateMenuPosition);
+  window.removeEventListener('scroll', updateMenuPosition, true);
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousedown', handleDocumentMouseDown);
+  window.removeEventListener('resize', updateMenuPosition);
+  window.removeEventListener('scroll', updateMenuPosition, true);
 });
+
+function updateMenuPosition(): void {
+  const trigger = rootRef.value?.querySelector('.select-trigger');
+
+  if (!(trigger instanceof HTMLElement)) {
+    return;
+  }
+
+  const rect = trigger.getBoundingClientRect();
+  const menuMaxHeight = 280;
+  const availableBelow = window.innerHeight - rect.bottom - 12;
+  const openAbove = availableBelow < 160 && rect.top > availableBelow;
+  const width = Math.max(rect.width, 180);
+  const left = Math.min(rect.left, window.innerWidth - width - 8);
+
+  menuStyle.value = {
+    left: `${Math.max(8, left)}px`,
+    maxHeight: `${Math.max(120, Math.min(menuMaxHeight, openAbove ? rect.top - 12 : availableBelow))}px`,
+    top: openAbove ? 'auto' : `${rect.bottom + 6}px`,
+    ...(openAbove ? { bottom: `${window.innerHeight - rect.top + 6}px` } : {}),
+    width: `${width}px`,
+  };
+}
 
 function toggleOpen(): void {
   if (props.disabled) {
@@ -56,9 +88,13 @@ function selectOption(option: SelectOption<T>): void {
 }
 
 function handleDocumentMouseDown(event: MouseEvent): void {
-  if (rootRef.value !== null && !rootRef.value.contains(event.target as Node)) {
-    isOpen.value = false;
+  const target = event.target as Node;
+
+  if (rootRef.value?.contains(target) || menuRef.value?.contains(target)) {
+    return;
   }
+
+  isOpen.value = false;
 }
 
 function handleTriggerKeydown(event: KeyboardEvent): void {
@@ -131,7 +167,14 @@ function handleTriggerKeydown(event: KeyboardEvent): void {
         <path d="m6 9 6 6 6-6" />
       </svg>
     </button>
-    <ul v-if="isOpen" class="select-menu" role="listbox">
+    <Teleport to="body">
+      <ul
+        v-if="isOpen"
+        ref="menuRef"
+        class="select-menu select-menu-floating"
+        role="listbox"
+        :style="menuStyle"
+      >
       <li v-for="(option, index) in options" :key="option.value">
         <button
           type="button"
@@ -143,7 +186,8 @@ function handleTriggerKeydown(event: KeyboardEvent): void {
         >
           {{ option.label }}
         </button>
-      </li>
-    </ul>
+        </li>
+      </ul>
+    </Teleport>
   </div>
 </template>

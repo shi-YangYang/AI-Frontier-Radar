@@ -1066,6 +1066,12 @@ tr:last-child td {
   box-shadow: var(--shadow-lg);
 }
 
+.select-menu-floating {
+  position: fixed;
+  right: auto;
+  left: auto;
+}
+
 .select-option {
   display: block;
   width: 100%;
