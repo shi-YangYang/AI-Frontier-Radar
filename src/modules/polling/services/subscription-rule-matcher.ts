@@ -3,6 +3,7 @@ import type { SubscriptionRule } from '../../storage/subscription-rule-service';
 export interface SubscriptionRuleMatcher {
   hasEnabledRules: boolean;
   matches(text: string): boolean;
+  resolveTargetKeys(text: string, allTargetKeys: string[]): Set<string>;
 }
 
 export function createSubscriptionRuleMatcher(rules: SubscriptionRule[]): SubscriptionRuleMatcher {
@@ -16,6 +17,30 @@ export function createSubscriptionRuleMatcher(rules: SubscriptionRule[]): Subscr
       const haystack = text.toLowerCase();
 
       return activeRules.some((rule) => matchesRule(rule, haystack));
+    },
+    resolveTargetKeys(text: string, allTargetKeys: string[]): Set<string> {
+      if (activeRules.length === 0) {
+        return new Set(allTargetKeys);
+      }
+
+      const haystack = text.toLowerCase();
+      const resolved = new Set<string>();
+
+      for (const rule of activeRules) {
+        if (!matchesRule(rule, haystack)) {
+          continue;
+        }
+
+        if (rule.targetKeys.length === 0) {
+          return new Set(allTargetKeys);
+        }
+
+        for (const targetKey of rule.targetKeys) {
+          resolved.add(targetKey);
+        }
+      }
+
+      return resolved;
     },
   };
 }

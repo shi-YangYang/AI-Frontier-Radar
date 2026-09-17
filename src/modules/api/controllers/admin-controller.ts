@@ -3,6 +3,10 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import type { AppConfig } from '../../../shared/config/types';
+import {
+  createDefaultDeliveryChannelRegistry,
+  type DeliveryChannelSendResult,
+} from '../../delivery';
 import { createFeishuWebhookClient, type FeishuWebhookFailureResult } from '../../delivery';
 import {
   SourceProviderError,
@@ -779,6 +783,18 @@ export async function updateAdminSubscriptionRules(
   }
 
   const service = createSubscriptionRuleService({ appSettings: options.storage.appSettings });
+  const knownTargetKeys = new Set(
+    (await options.storage.deliveryTargets.listAll()).map((target) => target.targetKey),
+  );
+  const unknownTargetKeys = collectUnknownRuleTargetKeys(body.rules, knownTargetKeys);
+
+  if (unknownTargetKeys.length > 0) {
+    throw new AdminApiError(
+      400,
+      'INVALID_REQUEST',
+      `规则引用了不存在的通道：${unknownTargetKeys.join('、')}。`,
+    );
+  }
 
   try {
     const rules = await service.saveRules(body.rules);
@@ -940,7 +956,8 @@ export async function createAdminDeliveryTarget(
   const input = readCreateDeliveryTargetBody(body);
   await assertWebhookUrlNotDuplicated(input.webhookUrl, options);
   const deliveryTarget = await options.storage.deliveryTargets.create({
-    channelType: 'feishu_webhook',
+    channelType: input.channelType,
+    config: input.config,
     displayName: input.displayName,
     enabled: input.enabled,
     targetKey: await createUniqueDeliveryTargetKey(options),
@@ -968,10 +985,18 @@ export async function updateAdminDeliveryTarget(
     await assertWebhookUrlNotDuplicated(input.webhookUrl, options, existingTarget.id);
   }
 
-  const updatedTarget = await options.storage.deliveryTargets.update(existingTarget.id, input);
+  const updatedTarget = await options.storage.deliveryTargets.update(existingTarget.id, {
+    ...input,
+    ...(input.secret === undefined
+      ? {}
+      : { config: { ...(input.secret.length === 0 ? {} : { secret: input.secret }) } }),
+    ...(input.secret === undefined || input.secret.length > 0
+      ? {}
+      : { config: {} }),
+  });
 
-  if (updatedTarget === null || updatedTarget.webhookUrl.trim().length === 0) {
-    throw new AdminApiError(404, 'NOT_FOUND', '未找到飞书 webhook。');
+  if (updatedTarget === null) {
+    throw new AdminApiError(404, 'NOT_FOUND', '未找到投递通道。');
   }
 
   return {
@@ -994,8 +1019,8 @@ export async function updateAdminDeliveryTargetEnabled(
     enabled,
   });
 
-  if (updatedTarget === null || updatedTarget.webhookUrl.trim().length === 0) {
-    throw new AdminApiError(404, 'NOT_FOUND', '未找到飞书 webhook。');
+  if (updatedTarget === null) {
+    throw new AdminApiError(404, 'NOT_FOUND', '未找到投递通道。');
   }
 
   return {
@@ -1015,7 +1040,7 @@ export async function deleteAdminDeliveryTarget(
   const deleteResult = await options.storage.deliveryTargets.delete(id);
 
   if (!deleteResult.deleted) {
-    throw new AdminApiError(404, 'NOT_FOUND', '未找到飞书 webhook。');
+    throw new AdminApiError(404, 'NOT_FOUND', '未找到投递通道。');
   }
 
   return {
@@ -1034,7 +1059,7 @@ export async function testAdminDeliveryTarget(
   ok: true;
   data: {
     ok: true;
-    providerCode: number;
+    providerCode?: number;
     providerMessage?: string;
     targetKey: string;
     webhookPreview: string;
@@ -1042,22 +1067,41 @@ export async function testAdminDeliveryTarget(
 }> {
   const id = readIdParam(params);
   const target = await findVisibleDeliveryTarget(id, options);
+  const channels = createDefaultDeliveryChannelRegistry();
+  const channelSender = channels.get(target.channelType);
 
-  const result = await createFeishuWebhookClient().sendTextMessage({
+  if (channelSender === undefined) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', `不支持的渠道类型 ${target.channelType}。`);
+  }
+
+  const testText = `AI 前沿消息本地配置测试：${target.displayName} 通道可用。`;
+  const result = await channelSender.send({
+    config: target.config,
+    message: {
+      author: 'AI 前沿雷达',
+      postedAt: new Date().toISOString(),
+      text: testText,
+      title: `【AI前沿消息】配置测试：${target.displayName}`,
+      url: 'http://127.0.0.1:3000',
+    },
     targetKey: target.targetKey,
-    text: `AI 前沿消息本地配置测试：${target.displayName} webhook 可用。`,
     webhookUrl: target.webhookUrl,
   });
 
   if (!result.ok) {
-    throw toFeishuTestSendError(result, target.webhookUrl);
+    throw new AdminApiError(502, result.error.code, result.error.message, {
+      diagnostics: result.error.diagnostics,
+      retryable: result.error.retryable,
+      targetKey: target.targetKey,
+      webhookPreview: previewSecretUrl(target.webhookUrl),
+    });
   }
 
   return {
     ok: true,
     data: {
       ok: true,
-      providerCode: result.providerCode,
+      ...(result.providerCode === undefined ? {} : { providerCode: result.providerCode }),
       ...(result.providerMessage === undefined ? {} : { providerMessage: result.providerMessage }),
       targetKey: result.targetKey,
       webhookPreview: previewSecretUrl(target.webhookUrl),
@@ -1159,6 +1203,7 @@ interface AdminDeliveryTarget {
   displayName: string;
   enabled: boolean;
   id: string;
+  secretConfigured: boolean;
   targetKey: string;
   updatedAt: string;
   webhookPreview: string;
@@ -1709,6 +1754,7 @@ function toAdminDeliveryTarget(target: DeliveryTarget): AdminDeliveryTarget {
     displayName: target.displayName,
     enabled: target.enabled,
     id: target.id,
+    secretConfigured: (target.config.secret?.length ?? 0) > 0,
     targetKey: target.targetKey,
     updatedAt: target.updatedAt,
     webhookPreview: previewSecretUrl(target.webhookUrl),
@@ -1849,7 +1895,37 @@ async function assertWebhookUrlNotDuplicated(
   }
 }
 
+function collectUnknownRuleTargetKeys(rules: unknown[], knownTargetKeys: Set<string>): string[] {
+  const unknownKeys: string[] = [];
+
+  for (const rule of rules) {
+    if (!isRecord(rule) || !Array.isArray(rule.targetKeys)) {
+      continue;
+    }
+
+    for (const entry of rule.targetKeys) {
+      if (typeof entry !== 'string') {
+        continue;
+      }
+
+      const targetKey = entry.trim();
+
+      if (
+        targetKey.length > 0 &&
+        !knownTargetKeys.has(targetKey) &&
+        !unknownKeys.includes(targetKey)
+      ) {
+        unknownKeys.push(targetKey);
+      }
+    }
+  }
+
+  return unknownKeys;
+}
+
 function readCreateDeliveryTargetBody(body: unknown): {
+  channelType: DeliveryTarget['channelType'];
+  config: { secret?: string };
   displayName: string;
   enabled: boolean;
   webhookUrl: string;
@@ -1858,15 +1934,20 @@ function readCreateDeliveryTargetBody(body: unknown): {
     throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
   }
 
+  const channelType = readDeliveryChannelType(body.channelType);
+
   return {
+    channelType,
+    config: readDeliveryTargetConfig(body),
     displayName: readDeliveryTargetDisplayName(body.displayName),
     enabled: readOptionalBooleanBodyValue(body.enabled, 'enabled') ?? true,
-    webhookUrl: readFeishuWebhookUrl(body),
+    webhookUrl: readDeliveryTargetWebhookUrl(body, channelType),
   };
 }
 
 function readUpdateDeliveryTargetBody(body: unknown): {
   displayName?: string;
+  secret?: string;
   webhookUrl?: string;
 } {
   if (!isRecord(body)) {
@@ -1875,6 +1956,7 @@ function readUpdateDeliveryTargetBody(body: unknown): {
 
   const input: {
     displayName?: string;
+    secret?: string;
     webhookUrl?: string;
   } = {};
 
@@ -1883,14 +1965,114 @@ function readUpdateDeliveryTargetBody(body: unknown): {
   }
 
   if (body.webhookUrl !== undefined) {
-    input.webhookUrl = readFeishuWebhookUrl(body);
+    input.webhookUrl = readDeliveryTargetWebhookUrl(body, readDeliveryChannelType(body.channelType));
+  }
+
+  if (body.secret !== undefined) {
+    input.secret = readDeliveryTargetSecret(body.secret);
   }
 
   if (Object.keys(input).length === 0) {
-    throw new AdminApiError(400, 'INVALID_REQUEST', '至少需要提供 displayName 或 webhookUrl。');
+    throw new AdminApiError(
+      400,
+      'INVALID_REQUEST',
+      '至少需要提供 displayName、webhookUrl 或 secret。',
+    );
   }
 
   return input;
+}
+
+function readDeliveryChannelType(value: unknown): DeliveryTarget['channelType'] {
+  if (value === undefined) {
+    return 'feishu_webhook';
+  }
+
+  if (
+    value !== 'bark' &&
+    value !== 'dingtalk_webhook' &&
+    value !== 'feishu_webhook' &&
+    value !== 'generic_webhook' &&
+    value !== 'wecom_webhook'
+  ) {
+    throw new AdminApiError(
+      400,
+      'INVALID_REQUEST',
+      'channelType 必须是 feishu_webhook、wecom_webhook、dingtalk_webhook、bark 或 generic_webhook。',
+    );
+  }
+
+  return value;
+}
+
+function readDeliveryTargetConfig(body: Record<string, unknown>): { secret?: string } {
+  if (body.secret === undefined) {
+    return {};
+  }
+
+  const secret = readDeliveryTargetSecret(body.secret);
+
+  return secret.length === 0 ? {} : { secret };
+}
+
+function readDeliveryTargetSecret(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'secret 必须是字符串。');
+  }
+
+  const secret = value.trim();
+
+  if (secret.length > 256) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'secret 不能超过 256 个字符。');
+  }
+
+  return secret;
+}
+
+function readDeliveryTargetWebhookUrl(
+  body: unknown,
+  channelType: DeliveryTarget['channelType'],
+): string {
+  if (!isRecord(body)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
+  }
+
+  if (typeof body.webhookUrl !== 'string') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'webhookUrl 必须是字符串。');
+  }
+
+  const webhookUrl = body.webhookUrl.trim();
+
+  if (webhookUrl.length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'webhookUrl 不能为空。');
+  }
+
+  try {
+    const parsedUrl = new URL(webhookUrl);
+
+    if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'webhookUrl 必须使用 http 或 https。');
+    }
+
+    if (
+      channelType === 'bark' &&
+      (parsedUrl.pathname === '/' || parsedUrl.pathname.length === 0)
+    ) {
+      throw new AdminApiError(
+        400,
+        'INVALID_REQUEST',
+        'Bark 推送地址需要包含设备 Key，例如 https://api.day.app/<deviceKey>。',
+      );
+    }
+
+    return parsedUrl.toString();
+  } catch (error) {
+    if (error instanceof AdminApiError) {
+      throw error;
+    }
+
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'webhookUrl 必须是有效 URL。');
+  }
 }
 
 function readDeliveryTargetEnabledBody(body: unknown): boolean {

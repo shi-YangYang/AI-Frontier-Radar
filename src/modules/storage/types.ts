@@ -11,7 +11,12 @@ export type WatchAccountSourceType =
   | 'x'
   | 'xai_news';
 
-export type DeliveryChannelType = 'feishu_webhook';
+export type DeliveryChannelType =
+  | 'bark'
+  | 'dingtalk_webhook'
+  | 'feishu_webhook'
+  | 'generic_webhook'
+  | 'wecom_webhook';
 
 export type DeliveryEventStatus = 'dead' | 'failed' | 'pending' | 'retry_wait' | 'sending' | 'sent';
 
@@ -114,7 +119,12 @@ export interface CreateXPostRawInput {
   detectedAt?: string;
 }
 
+export interface DeliveryTargetConfig {
+  secret?: string;
+}
+
 export interface DeliveryTarget {
+  config: DeliveryTargetConfig;
   id: string;
   targetKey: string;
   channelType: DeliveryChannelType;
@@ -126,6 +136,7 @@ export interface DeliveryTarget {
 }
 
 export interface CreateDeliveryTargetInput {
+  config?: DeliveryTargetConfig;
   id?: string;
   targetKey: string;
   channelType?: DeliveryChannelType;
@@ -136,6 +147,7 @@ export interface CreateDeliveryTargetInput {
 
 export interface UpdateDeliveryTargetInput {
   channelType?: DeliveryChannelType;
+  config?: DeliveryTargetConfig;
   displayName?: string;
   webhookUrl?: string;
   enabled?: boolean;

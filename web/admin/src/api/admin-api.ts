@@ -325,12 +325,20 @@ export interface FeishuTestResult {
   targetKey: string;
 }
 
+export type DeliveryChannelType =
+  | 'bark'
+  | 'dingtalk_webhook'
+  | 'feishu_webhook'
+  | 'generic_webhook'
+  | 'wecom_webhook';
+
 export interface DeliveryTarget {
-  channelType: 'feishu_webhook';
+  channelType: DeliveryChannelType;
   createdAt: string;
   displayName: string;
   enabled: boolean;
   id: string;
+  secretConfigured: boolean;
   targetKey: string;
   updatedAt: string;
   webhookPreview: string;
@@ -342,13 +350,16 @@ export interface DeliveryTargetSummary {
 }
 
 export interface CreateDeliveryTargetInput {
+  channelType: DeliveryChannelType;
   displayName: string;
   enabled: boolean;
+  secret?: string;
   webhookUrl: string;
 }
 
 export interface UpdateDeliveryTargetInput {
   displayName: string;
+  secret?: string;
   webhookUrl?: string;
 }
 
@@ -571,6 +582,7 @@ export interface SubscriptionRule {
   include: string[];
   mode: SubscriptionRuleMode;
   name: string;
+  targetKeys: string[];
 }
 
 export async function getSubscriptionRules(): Promise<SubscriptionRule[]> {

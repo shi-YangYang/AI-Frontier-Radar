@@ -39,6 +39,15 @@
             </header>
 
             <form class="settings-form delivery-target-form" @submit.prevent="createTarget">
+              <div class="settings-field">
+                <span>{{ t('settings.feishu.channelTypeLabel') }}</span>
+                <SelectControl
+                  v-model="newTargetForm.channelType"
+                  :aria-label="t('settings.feishu.channelTypeLabel')"
+                  :disabled="busy"
+                  :options="channelTypeOptions"
+                />
+              </div>
               <label>
                 <span>{{ t('settings.feishu.displayNameLabel') }}</span>
                 <input
@@ -53,9 +62,18 @@
                 <input
                   v-model="newTargetForm.webhookUrl"
                   autocomplete="off"
-                  placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."
+                  :placeholder="newTargetUrlPlaceholder"
                   type="url"
                 />
+              </label>
+              <label v-if="newTargetForm.channelType === 'dingtalk_webhook'">
+                <span>{{ t('settings.feishu.secretLabel') }}</span>
+                <input
+                  v-model="newTargetForm.secret"
+                  autocomplete="off"
+                  :placeholder="t('settings.feishu.secretPlaceholder')"
+                />
+                <small>{{ t('settings.feishu.secretHelp') }}</small>
               </label>
               <label class="checkbox-row compact-checkbox">
                 <input v-model="newTargetForm.enabled" type="checkbox" />
@@ -87,6 +105,7 @@
               <table class="delivery-target-table">
                 <thead>
                   <tr>
+                    <th>{{ t('settings.feishu.table.channel') }}</th>
                     <th>{{ t('settings.feishu.displayNameLabel') }}</th>
                     <th>{{ t('settings.feishu.table.enabled') }}</th>
                     <th>{{ t('settings.feishu.table.preview') }}</th>
@@ -95,6 +114,9 @@
                 </thead>
                 <tbody>
                   <tr v-for="target in deliveryTargets" :key="target.id">
+                    <td>
+                      <span class="status-badge neutral">{{ channelTypeLabel(target.channelType) }}</span>
+                    </td>
                     <td>
                       <strong>{{ target.displayName }}</strong>
                     </td>
@@ -490,6 +512,7 @@
                   <code class="wrap">+ {{ rule.include.join(' / ') || '-' }}</code>
                   <code v-if="rule.exclude.length > 0" class="wrap">- {{ rule.exclude.join(' / ') }}</code>
                 </div>
+                <span class="status-badge neutral">{{ ruleChannelsLabel(rule) }}</span>
                 <button class="danger" type="button" :disabled="busy" @click="deleteSubscriptionRule(rule)">
                   {{ t('actions.delete') }}
                 </button>
@@ -531,6 +554,19 @@
                     :disabled="busy"
                     :options="ruleModeOptions"
                   />
+                </div>
+                <div class="settings-field">
+                  <span>{{ t('settings.rules.channelsLabel') }}</span>
+                  <div class="rule-channel-options">
+                    <label v-for="target in deliveryTargets" :key="target.targetKey" class="checkbox-row compact-checkbox">
+                      <input v-model="ruleForm.targetKeys" :disabled="busy" :value="target.targetKey" type="checkbox" />
+                      <span>{{ target.displayName }}</span>
+                    </label>
+                    <small v-if="deliveryTargets.length === 0" class="muted">
+                      {{ t('settings.rules.channelsEmpty') }}
+                    </small>
+                  </div>
+                  <small>{{ t('settings.rules.channelsHint') }}</small>
                 </div>
                 <div class="form-actions">
                   <button class="primary" type="submit" :disabled="busy">
@@ -747,11 +783,30 @@
                   />
                   <small>{{ t('settings.edit.saveHelp') }}</small>
                 </label>
+                <label v-if="editingTarget.channelType === 'dingtalk_webhook'">
+                  <span>{{ t('settings.edit.newSecretLabel') }}</span>
+                  <input
+                    v-model="editTargetForm.secret"
+                    autocomplete="off"
+                    :placeholder="t('settings.edit.newSecretPlaceholder')"
+                  />
+                  <small>
+                    {{
+                      editingTarget.secretConfigured
+                        ? t('settings.edit.secretKeepHelp')
+                        : t('settings.edit.secretUnsetHelp')
+                    }}
+                  </small>
+                </label>
               </div>
 
               <section class="target-preview-panel" :aria-label="t('settings.edit.currentInfoAria')">
                 <h3>{{ t('settings.edit.currentInfo') }}</h3>
                 <dl class="compact-detail-list">
+                  <div>
+                    <dt>{{ t('settings.feishu.table.channel') }}</dt>
+                    <dd>{{ channelTypeLabel(editingTarget.channelType) }}</dd>
+                  </div>
                   <div>
                     <dt>{{ t('settings.edit.currentPreview') }}</dt>
                     <dd><code class="wrap">{{ editingTarget.webhookPreview }}</code></dd>
@@ -813,6 +868,7 @@ import {
   updateXBrowserSettings,
   updatePollingSettings,
   type AdminPagination,
+  type DeliveryChannelType,
   type DeliveryTarget,
   type DeliveryTargetSummary,
   type RuntimeRssSettings,
@@ -1011,13 +1067,16 @@ const pollingForm = reactive({
 });
 
 const newTargetForm = reactive({
+  channelType: 'feishu_webhook' as DeliveryChannelType,
   displayName: '',
   enabled: true,
+  secret: '',
   webhookUrl: '',
 });
 
 const editTargetForm = reactive({
   displayName: '',
+  secret: '',
   webhookUrl: '',
 });
 
@@ -1038,12 +1097,60 @@ const ruleForm = reactive({
   include: '',
   mode: 'any' as SubscriptionRuleMode,
   name: '',
+  targetKeys: [] as string[],
 });
 
 const ruleModeOptions = computed<{ label: string; value: SubscriptionRuleMode }[]>(() => [
   { label: t('settings.rules.modeAny'), value: 'any' },
   { label: t('settings.rules.modeAll'), value: 'all' },
 ]);
+
+const channelTypeOptions = computed<{ label: string; value: DeliveryChannelType }[]>(() => [
+  { label: t('settings.feishu.channel.feishu'), value: 'feishu_webhook' },
+  { label: t('settings.feishu.channel.wecom'), value: 'wecom_webhook' },
+  { label: t('settings.feishu.channel.dingtalk'), value: 'dingtalk_webhook' },
+  { label: t('settings.feishu.channel.bark'), value: 'bark' },
+  { label: t('settings.feishu.channel.generic'), value: 'generic_webhook' },
+]);
+
+const channelUrlPlaceholders: Record<DeliveryChannelType, string> = {
+  bark: 'https://api.day.app/your-device-key',
+  dingtalk_webhook: 'https://oapi.dingtalk.com/robot/send?access_token=...',
+  feishu_webhook: 'https://open.feishu.cn/open-apis/bot/v2/hook/...',
+  generic_webhook: 'https://example.com/webhook',
+  wecom_webhook: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...',
+};
+
+const newTargetUrlPlaceholder = computed(() => channelUrlPlaceholders[newTargetForm.channelType]);
+
+function channelTypeLabel(channelType: DeliveryChannelType): string {
+  switch (channelType) {
+    case 'bark':
+      return t('settings.feishu.channel.bark');
+    case 'dingtalk_webhook':
+      return t('settings.feishu.channel.dingtalk');
+    case 'generic_webhook':
+      return t('settings.feishu.channel.generic');
+    case 'wecom_webhook':
+      return t('settings.feishu.channel.wecom');
+    default:
+      return t('settings.feishu.channel.feishu');
+  }
+}
+
+function ruleChannelsLabel(rule: SubscriptionRule): string {
+  if (rule.targetKeys.length === 0) {
+    return t('settings.rules.channelsAll');
+  }
+
+  return rule.targetKeys
+    .map((targetKey) => {
+      const target = deliveryTargets.value.find((entry) => entry.targetKey === targetKey);
+
+      return target?.displayName ?? targetKey;
+    })
+    .join(' / ');
+}
 
 const xRunModeForm = reactive({
   mode: 'headless' as 'headless' | 'headed',
@@ -1240,6 +1347,7 @@ async function addSubscriptionRule(): Promise<void> {
         ruleForm.name.trim().length > 0
           ? ruleForm.name.trim()
           : t('settings.rules.unnamed'),
+      targetKeys: [...ruleForm.targetKeys],
     },
   ];
 
@@ -1249,6 +1357,7 @@ async function addSubscriptionRule(): Promise<void> {
     ruleForm.name = '';
     ruleForm.include = '';
     ruleForm.exclude = '';
+    ruleForm.targetKeys = [];
   }
 }
 
@@ -1359,9 +1468,13 @@ async function createTarget(): Promise<void> {
   busy.value = true;
 
   try {
+    const secret = newTargetForm.secret.trim();
+
     await createDeliveryTarget({
+      channelType: newTargetForm.channelType,
       displayName: newTargetForm.displayName.trim(),
       enabled: newTargetForm.enabled,
+      ...(secret.length === 0 ? {} : { secret }),
       webhookUrl: newTargetForm.webhookUrl.trim(),
     });
     resetNewTargetForm();
@@ -1379,12 +1492,14 @@ async function createTarget(): Promise<void> {
 function openEditTarget(target: DeliveryTarget): void {
   editingTarget.value = target;
   editTargetForm.displayName = target.displayName;
+  editTargetForm.secret = '';
   editTargetForm.webhookUrl = '';
 }
 
 function closeEditTarget(): void {
   editingTarget.value = null;
   editTargetForm.displayName = '';
+  editTargetForm.secret = '';
   editTargetForm.webhookUrl = '';
 }
 
@@ -1406,8 +1521,10 @@ async function saveTargetEdit(): Promise<void> {
 
   try {
     const webhookUrl = editTargetForm.webhookUrl.trim();
+    const secret = editTargetForm.secret.trim();
     const result = await updateDeliveryTarget(editingTarget.value.id, {
       displayName: editTargetForm.displayName.trim(),
+      ...(secret.length === 0 ? {} : { secret }),
       ...(webhookUrl.length === 0 ? {} : { webhookUrl }),
     });
     replaceDeliveryTarget(result.deliveryTarget);

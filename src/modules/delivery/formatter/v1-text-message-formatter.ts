@@ -12,11 +12,13 @@ export interface V1TextMessageFormatterOptions {
 
 export interface FormattedTextMessage {
   text: string;
+  title: string;
   truncated: boolean;
   type: 'text';
 }
 
 const DEFAULT_BODY_MAX_LENGTH = 1_500;
+const TITLE_SNIPPET_MAX_LENGTH = 40;
 const EMPTY_CONTENT_PLACEHOLDER = '(no text content)';
 
 export class V1TextMessageFormatter {
@@ -31,12 +33,17 @@ export class V1TextMessageFormatter {
     const truncationResult = truncateText(normalizedContent, this.bodyMaxLength);
     const normalizedPermalink = input.permalinkUrl.trim();
     const postId = extractPostId(normalizedPermalink);
+    const authorLabel = formatAuthorLabel(input.authorUsername, input.authorDisplayName);
+    const titleSnippet = truncateText(
+      truncationResult.value.split('\n')[0]?.trim() ?? '',
+      TITLE_SNIPPET_MAX_LENGTH,
+    ).value;
 
     return {
       text: [
         '🚀【AI前沿消息】发现新帖',
         '',
-        `👤 作者：${formatAuthorLabel(input.authorUsername, input.authorDisplayName)}`,
+        `👤 作者：${authorLabel}`,
         `🕘 北京时间：${formatChinaTimestamp(input.postedAt)}`,
         `🌐 UTC 时间：${formatUtcTimestamp(input.postedAt)}`,
         postId === undefined ? undefined : `🆔 帖子 ID：${postId}`,
@@ -48,6 +55,7 @@ export class V1TextMessageFormatter {
         '🔗 原文链接：',
         normalizedPermalink,
       ].filter((line): line is string => line !== undefined).join('\n'),
+      title: `【AI前沿消息】${authorLabel}：${titleSnippet}`,
       truncated: truncationResult.truncated,
       type: 'text',
     };

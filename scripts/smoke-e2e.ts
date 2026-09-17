@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -70,14 +71,14 @@ async function main(): Promise<void> {
   const config = createSmokeConfig({
     databaseUrl,
     sqlitePath,
-    webhookUrl: webhook.url,
+    webhookUrl: webhook.urls.feishu,
     xApiBaseUrl: xApi.url,
   });
   const storage = createStorage({
     databaseUrl,
     defaultDeliveryTarget: {
       targetKey: TARGET_KEY,
-      webhookUrl: webhook.url,
+      webhookUrl: webhook.urls.feishu,
     },
     sqlitePath,
     watchAccountsSource: config.watchAccounts,
@@ -1410,6 +1411,237 @@ async function main(): Promise<void> {
     assert(noRuleEvent !== null, 'with no enabled rules every new post should be delivered');
     checks.push({ name: '订阅规则：清空规则后恢复全量投递' });
 
+    const channelDefinitions = [
+      { channelType: 'wecom_webhook', kind: 'wecom', name: 'Mock WeCom', url: webhook.urls.wecom },
+      {
+        channelType: 'dingtalk_webhook',
+        kind: 'dingtalk',
+        name: 'Mock DingTalk',
+        secret: 'SECsmokeSecret',
+        url: webhook.urls.dingtalk,
+      },
+      { channelType: 'bark', kind: 'bark', name: 'Mock Bark', url: webhook.urls.bark },
+      { channelType: 'generic_webhook', kind: 'generic', name: 'Mock Generic', url: webhook.urls.generic },
+    ] as const;
+    const channelTargetByKind = new Map<string, { id: string; targetKey: string }>();
+
+    for (const definition of channelDefinitions) {
+      const createChannelResponse = await app.inject({
+        method: 'POST',
+        payload: {
+          channelType: definition.channelType,
+          displayName: definition.name,
+          enabled: true,
+          webhookUrl: definition.url,
+          ...('secret' in definition ? { secret: definition.secret } : {}),
+        },
+        url: '/admin/api/settings/delivery-targets',
+      });
+      assert(
+        createChannelResponse.statusCode === 200,
+        `create channel ${definition.kind} returned ${createChannelResponse.statusCode}: ${createChannelResponse.body.slice(0, 200)}`,
+      );
+      const createdTarget = JSON.parse(createChannelResponse.body) as {
+        data: { deliveryTarget: { channelType: string; id: string; secretConfigured: boolean; targetKey: string } };
+      };
+      assert(
+        createdTarget.data.deliveryTarget.channelType === definition.channelType,
+        `channel type mismatch for ${definition.kind}`,
+      );
+      if (definition.kind === 'dingtalk') {
+        assert(
+          createdTarget.data.deliveryTarget.secretConfigured,
+          'dingtalk target should report secretConfigured',
+        );
+      }
+      channelTargetByKind.set(definition.kind, {
+        id: createdTarget.data.deliveryTarget.id,
+        targetKey: createdTarget.data.deliveryTarget.targetKey,
+      });
+    }
+    checks.push({ name: '创建企业微信/钉钉/Bark/通用 Webhook 通道' });
+
+    const invalidChannelResponse = await app.inject({
+      method: 'POST',
+      payload: {
+        channelType: 'telegram',
+        displayName: 'bad',
+        enabled: true,
+        webhookUrl: 'https://example.com/hook',
+      },
+      url: '/admin/api/settings/delivery-targets',
+    });
+    assert(invalidChannelResponse.statusCode === 400, 'unknown channel type should be rejected');
+    const invalidBarkResponse = await app.inject({
+      method: 'POST',
+      payload: {
+        channelType: 'bark',
+        displayName: 'bad bark',
+        enabled: true,
+        webhookUrl: 'https://api.day.app/',
+      },
+      url: '/admin/api/settings/delivery-targets',
+    });
+    assert(invalidBarkResponse.statusCode === 400, 'bark URL without device key should be rejected');
+    checks.push({ name: '渠道校验：未知类型与缺失 Bark Key 拒绝' });
+
+    const requestsBeforeChannelTests = webhook.requests.length;
+
+    for (const definition of channelDefinitions) {
+      const target = channelTargetByKind.get(definition.kind);
+      const testChannelResponse = await app.inject({
+        method: 'POST',
+        url: `/admin/api/settings/delivery-targets/${target?.id}/test`,
+      });
+      assert(
+        testChannelResponse.statusCode === 200,
+        `test send ${definition.kind} returned ${testChannelResponse.statusCode}: ${testChannelResponse.body.slice(0, 200)}`,
+      );
+    }
+
+    assert(
+      webhook.requests.length === requestsBeforeChannelTests + channelDefinitions.length,
+      `mock receiver should get ${channelDefinitions.length} channel test messages, got ${webhook.requests.length - requestsBeforeChannelTests}`,
+    );
+
+    const wecomRequest = webhook.requests.find((entry) => entry.url.startsWith('/mock-wecom'));
+    assert(
+      wecomRequest !== undefined &&
+        (wecomRequest.body as { msgtype?: string }).msgtype === 'markdown' &&
+        typeof (wecomRequest.body as { markdown?: { content?: string } }).markdown?.content === 'string',
+      `wecom payload mismatch: ${JSON.stringify(wecomRequest?.body)}`,
+    );
+
+    const dingtalkRequest = webhook.requests.find((entry) => entry.url.startsWith('/mock-dingtalk'));
+    const dingtalkBody = dingtalkRequest?.body as {
+      markdown?: { text?: string; title?: string };
+      msgtype?: string;
+    };
+    const dingtalkQuery = new URL(`http://127.0.0.1${dingtalkRequest?.url ?? ''}`).searchParams;
+    const dingtalkTimestamp = dingtalkQuery.get('timestamp') ?? '';
+    const expectedDingtalkSign = createHmac('sha256', 'SECsmokeSecret')
+      .update(`${dingtalkTimestamp}\nSECsmokeSecret`)
+      .digest('base64');
+    assert(
+      dingtalkBody?.msgtype === 'markdown' &&
+        typeof dingtalkBody.markdown?.text === 'string' &&
+        typeof dingtalkBody.markdown?.title === 'string' &&
+        dingtalkTimestamp.length > 0 &&
+        dingtalkQuery.get('sign') === expectedDingtalkSign,
+      `dingtalk payload/sign mismatch: ${JSON.stringify({ body: dingtalkBody, url: dingtalkRequest?.url })}`,
+    );
+
+    const barkRequest = webhook.requests.find((entry) => entry.url.startsWith('/mock-bark'));
+    const barkBody = barkRequest?.body as { body?: string; title?: string; url?: string };
+    assert(
+      typeof barkBody?.title === 'string' && typeof barkBody.body === 'string' && typeof barkBody.url === 'string',
+      `bark payload mismatch: ${JSON.stringify(barkBody)}`,
+    );
+
+    const genericRequest = webhook.requests.find((entry) => entry.url.startsWith('/mock-generic'));
+    const genericBody = genericRequest?.body as {
+      author?: string;
+      postedAt?: string;
+      text?: string;
+      title?: string;
+      url?: string;
+    };
+    assert(
+      typeof genericBody?.author === 'string' &&
+        typeof genericBody.postedAt === 'string' &&
+        typeof genericBody.text === 'string' &&
+        typeof genericBody.title === 'string' &&
+        typeof genericBody.url === 'string',
+      `generic payload mismatch: ${JSON.stringify(genericBody)}`,
+    );
+    checks.push({ name: '4 渠道测试发送：payload 正确且钉钉加签可校验' });
+
+    const barkTargetKey = channelTargetByKind.get('bark')?.targetKey ?? '';
+    const routingRulesResponse = await app.inject({
+      method: 'PUT',
+      payload: {
+        rules: [
+          {
+            enabled: true,
+            exclude: [],
+            include: ['routing-marker'],
+            mode: 'any',
+            name: 'routing',
+            targetKeys: [barkTargetKey],
+          },
+        ],
+      },
+      url: '/admin/api/subscription-rules',
+    });
+    assert(routingRulesResponse.statusCode === 200, 'routing rule should be saved');
+
+    const unknownKeyRulesResponse = await app.inject({
+      method: 'PUT',
+      payload: {
+        rules: [
+          {
+            enabled: true,
+            exclude: [],
+            include: ['anything'],
+            mode: 'any',
+            name: 'bad',
+            targetKeys: ['not-exist-target'],
+          },
+        ],
+      },
+      url: '/admin/api/subscription-rules',
+    });
+    assert(unknownKeyRulesResponse.statusCode === 400, 'rule with unknown target key should be rejected');
+
+    rssApi.setFeed(trendingPath, {
+      body: createTrendingHtml([
+        { name: 'llama.cpp', owner: 'ggml-org', stars: '80,000', starsToday: '900' },
+        { name: 'plain-repo', owner: 'acme', stars: '10', starsToday: '1' },
+        { name: 'llama.cpp-tools', owner: 'acme', stars: '5', starsToday: '1' },
+        { name: 'another-repo', owner: 'acme', stars: '3', starsToday: '1' },
+        { name: 'routing-marker-repo', owner: 'acme', stars: '7', starsToday: '2' },
+      ]),
+      contentType: 'text/html; charset=utf-8',
+      statusCode: 200,
+    });
+    await runPollingJob({ config, logger, sourceProviders, storage });
+
+    const routedPost = await storage.xPosts.findByDedupeKey('github:trending:acme/routing-marker-repo');
+    assert(routedPost !== null, 'routing marker repo should be stored');
+    const routedBarkEvent = await storage.deliveryEvents.findByPostAndTarget(
+      routedPost.xPostId,
+      barkTargetKey,
+    );
+    assert(routedBarkEvent !== null, 'routing rule should deliver to the bark target');
+    const routedFeishuEvent = await storage.deliveryEvents.findByPostAndTarget(
+      routedPost.xPostId,
+      TARGET_KEY,
+    );
+    assert(
+      routedFeishuEvent === null,
+      'routing rule must not deliver to channels outside its target list',
+    );
+    const routedGenericEvent = await storage.deliveryEvents.findByPostAndTarget(
+      routedPost.xPostId,
+      channelTargetByKind.get('generic')?.targetKey ?? '',
+    );
+    assert(routedGenericEvent === null, 'routing rule must not deliver to generic webhook');
+    checks.push({ name: '分渠道规则：命中帖子只投递到指定通道' });
+
+    const nonMatchingRepoPost = await storage.xPosts.findByDedupeKey('github:trending:acme/plain-repo');
+    const nonMatchingEvent = await storage.deliveryEvents.findByPostAndTarget(
+      nonMatchingRepoPost?.xPostId ?? '',
+      barkTargetKey,
+    );
+    assert(nonMatchingEvent === null, 'non-matching post must not create events for routed channels');
+
+    await app.inject({
+      method: 'PUT',
+      payload: { rules: [] },
+      url: '/admin/api/subscription-rules',
+    });
+    checks.push({ name: '分渠道规则：未命中不投递并正确清理规则' });
+
     const feedXmlResponse = await app.inject({ method: 'GET', url: '/feed.xml' });
     assert(feedXmlResponse.statusCode === 200, `feed.xml returned ${feedXmlResponse.statusCode}`);
     assert(
@@ -2156,19 +2388,58 @@ async function startMockFeedServer(): Promise<{
   };
 }
 
+interface MockWebhookRequest {
+  body: unknown;
+  headers: http.IncomingHttpHeaders;
+  url: string;
+}
+
 async function startMockWebhook(): Promise<{
   close(): Promise<void>;
-  requests: unknown[];
-  url: string;
+  requests: MockWebhookRequest[];
+  urls: { bark: string; dingtalk: string; feishu: string; generic: string; wecom: string };
 }> {
-  const requests: unknown[] = [];
+  const requests: MockWebhookRequest[] = [];
   const server = http.createServer(async (request, response) => {
-    if (request.method !== 'POST' || request.url !== '/mock-feishu-webhook-secret') {
+    if (request.method !== 'POST') {
       sendJson(response, { error: 'not found' }, 404);
       return;
     }
 
-    requests.push(await readJsonBody(request));
+    const requestUrl = request.url ?? '';
+
+    if (!requestUrl.startsWith('/mock-')) {
+      sendJson(response, { error: 'not found' }, 404);
+      return;
+    }
+
+    requests.push({
+      body: await readJsonBody(request),
+      headers: request.headers,
+      url: requestUrl,
+    });
+
+    if (requestUrl.startsWith('/mock-wecom') || requestUrl.startsWith('/mock-dingtalk')) {
+      sendJson(response, {
+        errcode: 0,
+        errmsg: 'ok',
+      });
+      return;
+    }
+
+    if (requestUrl.startsWith('/mock-bark')) {
+      sendJson(response, {
+        code: 200,
+        message: 'success',
+      });
+      return;
+    }
+
+    if (requestUrl.startsWith('/mock-generic')) {
+      sendJson(response, { ok: true });
+      return;
+    }
+
     sendJson(response, {
       code: 0,
       msg: 'success',
@@ -2179,7 +2450,13 @@ async function startMockWebhook(): Promise<{
   return {
     close: () => closeServer(server),
     requests,
-    url: `${baseUrl}/mock-feishu-webhook-secret`,
+    urls: {
+      bark: `${baseUrl}/mock-bark/device-key`,
+      dingtalk: `${baseUrl}/mock-dingtalk`,
+      feishu: `${baseUrl}/mock-feishu-webhook-secret`,
+      generic: `${baseUrl}/mock-generic`,
+      wecom: `${baseUrl}/mock-wecom`,
+    },
   };
 }
 
