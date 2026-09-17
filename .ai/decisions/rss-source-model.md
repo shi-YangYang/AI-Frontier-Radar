@@ -7,3 +7,4 @@
 - RSS 抓取代理通过 `undici` 的 `ProxyAgent` 实现（全局 fetch 与外部 undici 的 dispatcher 接口不兼容，代理路径必须走 undici 自带的 fetch）；配置为 `RSS_PROXY_URL`（.env 默认）与 Web 控制台 `source.rss.proxyUrl`（运行时优先），仅支持 http/https，不支持 socks5。
 - RSS 解析使用 `fast-xml-parser`（唯一新增依赖），仅支持 feed 提供的 title/description/content，不抓取全文。
 - 来源预设（YouTube / Reddit / arXiv / Hacker News / Product Hunt）统一在前端转换为标准 feed URL 后按 RSS 源入库，不新增 source_type；YouTube 频道解析在服务端完成，复用 RSS 代理配置；列表徽标由前端按 feed URL 推断。
+- 默认推荐源仅在“监听源表为空且 `app_settings.sources.defaultsImportedAt` 标记不存在”时导入一次，导入不做网络校验（由后续轮询暴露错误），删除后不会恢复。

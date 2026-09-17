@@ -11,7 +11,7 @@ import { createApp } from '../src/app/create-app';
 import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createRssSourceProvider, createSourceProviderRegistry, createXSourceProvider, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
 import { runDeliveryWorkerJob } from '../src/modules/delivery';
 import { createRuntimeSourceProviders } from '../src/modules/scheduler';
-import { createPrismaClient, createStorage } from '../src/modules/storage';
+import { createPrismaClient, createStorage, DEFAULT_WATCH_SOURCES, importDefaultWatchSources } from '../src/modules/storage';
 import { ConfigValidationError } from '../src/shared/env/config-validation-error';
 
 type SmokeCheck = {
@@ -129,6 +129,35 @@ async function main(): Promise<void> {
     assert(seededAccount !== null, 'seed watch account was not written');
     assert(seededAccount.enabled, 'seed watch account should be enabled');
     checks.push({ name: 'seed watch account 写入数据库' });
+
+    const defaultsSqlitePath = join(tempDir, 'defaults.sqlite');
+    const defaultsStorage = createStorage({
+      databaseUrl: toPrismaSqliteDatabaseUrl(defaultsSqlitePath),
+      sqlitePath: defaultsSqlitePath,
+      watchAccountsSource: { items: [], type: 'database' },
+    });
+
+    try {
+      await defaultsStorage.initialize();
+
+      const firstImport = await importDefaultWatchSources(defaultsStorage);
+      assert(
+        firstImport.importedCount === DEFAULT_WATCH_SOURCES.length,
+        `fresh database should import ${DEFAULT_WATCH_SOURCES.length} default sources, got ${firstImport.importedCount}`,
+      );
+
+      const secondImport = await importDefaultWatchSources(defaultsStorage);
+      assert(secondImport.skipped, 'second default-source import should be skipped by the marker');
+
+      const defaultsCount = await defaultsStorage.watchAccounts.countAll();
+      assert(
+        defaultsCount === DEFAULT_WATCH_SOURCES.length,
+        `default sources should not be duplicated, got ${defaultsCount}`,
+      );
+      checks.push({ name: '首次初始化导入默认源且只导入一次' });
+    } finally {
+      await defaultsStorage.close();
+    }
 
     const emptyPoll = await runPollingJob({
       config,

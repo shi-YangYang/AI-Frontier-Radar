@@ -10,6 +10,14 @@ export {
   RuntimeSettingsService,
 } from './runtime-settings-service';
 export { WatchAccountRepository } from './watch-account-repository';
+export {
+  DEFAULT_WATCH_SOURCES,
+  importDefaultWatchSources,
+} from './default-watch-sources';
+export type {
+  DefaultWatchSource,
+  ImportDefaultWatchSourcesResult,
+} from './default-watch-sources';
 export { XPostRepository } from './x-post-repository';
 export type {
   RuntimeFeishuSettings,

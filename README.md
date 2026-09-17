@@ -307,6 +307,8 @@ RSS 与 X 走同一条基线 / 增量 / 去重 / 入库 / 投递链路：首次�
 
 需要出网代理时，在 `/settings -> RSS 源` 保存代理（优先级：Web 控制台 > `.env` 的 `RSS_PROXY_URL`）。仅支持 `http://` 与 `https://`，不支持 `socks5://`。
 
+首次初始化（监听源表为空）时，服务会自动导入一组推荐源：arXiv cs.AI / cs.CL / cs.LG / cs.CV、Techmeme、Hacker News、Product Hunt、Reddit r/LocalLLaMA、OpenAI News、Google AI、Google DeepMind、量子位。默认源只导入一次，删除后不会恢复；导入发生在首次启动，不阻塞服务启动。
+
 ### 按来源添加（预设）
 
 `/accounts` 的“添加监听源”支持按来源类型直接添加，自动转换为标准 feed URL：
