@@ -690,10 +690,15 @@ async function confirmDelete(): Promise<void> {
   busy.value = true;
 
   try {
-    await deleteWatchAccount(deleteTarget.value.id);
+    const result = await deleteWatchAccount(deleteTarget.value.id);
     deleteTarget.value = null;
     await loadAccountsAfterDelete();
-    setNotice(t('notice.accountDeleted'));
+    setNotice(
+      t('notice.accountDeleted', {
+        events: result.deletedEvents,
+        posts: result.deletedPosts,
+      }),
+    );
   } catch (error) {
     setNotice(error instanceof Error ? error.message : String(error), true);
   } finally {

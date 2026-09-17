@@ -94,6 +94,7 @@ const navItems = [
   { icon: 'poll', label: 'nav.pollRuns', to: '/poll-runs' },
   { icon: 'posts', label: 'nav.posts', to: '/posts' },
   { icon: 'delivery', label: 'nav.deliveryEvents', to: '/delivery-events' },
+  { icon: 'logs', label: 'nav.logs', to: '/logs' },
   { icon: 'settings', label: 'nav.settings', to: '/settings' },
 ] as const;
 

@@ -33,6 +33,7 @@ export class DeliveryTargetRepository {
     const deliveryTarget = await this.prisma.deliveryTarget.create({
       data: {
         channelType: input.channelType ?? DEFAULT_CHANNEL_TYPE,
+        configJson: serializeDeliveryTargetConfig(input.config),
         createdAt: now,
         displayName: input.displayName,
         enabled: input.enabled ?? true,
@@ -279,6 +280,7 @@ function mapDeliveryTarget(
 ): DeliveryTarget {
   return {
     channelType: deliveryTarget.channelType as DeliveryTarget['channelType'],
+    config: parseDeliveryTargetConfig(deliveryTarget.configJson),
     createdAt: deliveryTarget.createdAt,
     displayName: deliveryTarget.displayName,
     enabled: deliveryTarget.enabled,
@@ -306,6 +308,32 @@ function toDeliveryTargetUpdateData(
   if (input.enabled !== undefined) {
     data.enabled = input.enabled;
   }
+  if (input.config !== undefined) {
+    data.configJson = serializeDeliveryTargetConfig(input.config);
+  }
 
   return data;
+}
+
+function parseDeliveryTargetConfig(rawConfigJson: string): DeliveryTarget['config'] {
+  try {
+    const parsed = JSON.parse(rawConfigJson) as unknown;
+
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return {};
+    }
+
+    const record = parsed as Record<string, unknown>;
+    const secret = typeof record.secret === 'string' ? record.secret.trim() : '';
+
+    return secret.length === 0 ? {} : { secret };
+  } catch {
+    return {};
+  }
+}
+
+function serializeDeliveryTargetConfig(config: DeliveryTarget['config'] | undefined): string {
+  const secret = config?.secret?.trim() ?? '';
+
+  return JSON.stringify(secret.length === 0 ? {} : { secret });
 }

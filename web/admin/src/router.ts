@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 
 import AccountsPage from './pages/AccountsPage.vue';
 import DeliveryEventsPage from './pages/DeliveryEventsPage.vue';
+import LogsPage from './pages/LogsPage.vue';
 import OverviewPage from './pages/OverviewPage.vue';
 import PollRunsPage from './pages/PollRunsPage.vue';
 import PostsPage from './pages/PostsPage.vue';
@@ -33,6 +34,14 @@ export const router = createRouter({
     {
       component: SettingsPage,
       path: '/settings',
+    },
+    {
+      component: LogsPage,
+      path: '/logs',
+    },
+    {
+      component: LogsPage,
+      path: '/logs',
     },
   ],
 });

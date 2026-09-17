@@ -1,6 +1,12 @@
 import { randomBytes } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 import type { AppConfig } from '../../../shared/config/types';
+import {
+  createDefaultDeliveryChannelRegistry,
+  type DeliveryChannelSendResult,
+} from '../../delivery';
 import { createFeishuWebhookClient, type FeishuWebhookFailureResult } from '../../delivery';
 import {
   SourceProviderError,
@@ -38,6 +44,14 @@ import type {
   SaveXBrowserSettingsInput,
 } from '../../storage/runtime-settings-service';
 import type { XPostPageQuery, XPostRawWithDeliveryEvents, XPostSummary } from '../../storage/types';
+import {
+  createBackupService,
+  createRetentionService,
+  type BackupEntry,
+  type RetentionCleanupResult,
+  type RetentionSettings,
+} from '../../maintenance';
+import { sharedLogBuffer, type LogBufferEntry } from '../../../lib/logger';
 import { SOURCE_GROUPS, findSourceGroup } from '../../../config/source-groups';
 import {
   applySourceGroup,
@@ -224,8 +238,22 @@ export async function createAdminWatchAccount(
 export async function deleteAdminWatchAccount(
   params: unknown,
   options: AdminControllerOptions,
-): Promise<{ ok: true; data: { deleted: true } }> {
+): Promise<{ ok: true; data: { deleted: true; deletedEvents: number; deletedPosts: number } }> {
   const id = readIdParam(params);
+  const account = await options.storage.watchAccounts.findById(id);
+
+  if (account === null) {
+    throw new AdminApiError(404, 'NOT_FOUND', '未找到监听账号。');
+  }
+
+  let deletedEvents = 0;
+  let deletedPosts = 0;
+
+  if (account.xUserId !== null && account.xUserId.length > 0) {
+    deletedEvents = await options.storage.deliveryEvents.deleteByAuthorUserId(account.xUserId);
+    deletedPosts = await options.storage.xPosts.deleteByAuthorUserId(account.xUserId);
+  }
+
   const deleted = await options.storage.watchAccounts.delete(id);
 
   if (!deleted) {
@@ -236,6 +264,8 @@ export async function deleteAdminWatchAccount(
     ok: true,
     data: {
       deleted: true,
+      deletedEvents,
+      deletedPosts,
     },
   };
 }
@@ -528,6 +558,176 @@ export async function clearAdminPostsHistory(
   };
 }
 
+export async function getAdminDataSettings(
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: RetentionSettings }> {
+  const settings = await createRetentionService({ storage: options.storage }).getSettings();
+
+  return { ok: true, data: settings };
+}
+
+export async function updateAdminDataSettings(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: RetentionSettings }> {
+  if (!isRecord(body) || !Number.isSafeInteger(body.retentionDays)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'retentionDays 必须是整数。');
+  }
+
+  try {
+    const settings = await createRetentionService({ storage: options.storage }).saveSettings({
+      retentionDays: body.retentionDays as number,
+    });
+
+    return { ok: true, data: settings };
+  } catch (error) {
+    throw new AdminApiError(
+      400,
+      'INVALID_REQUEST',
+      error instanceof Error ? error.message : 'retentionDays 无效。',
+    );
+  }
+}
+
+export async function runAdminRetentionCleanup(options: AdminControllerOptions): Promise<{
+  ok: true;
+  data: RetentionCleanupResult & { settings: RetentionSettings };
+}> {
+  const service = createRetentionService({ storage: options.storage });
+  const result = await service.cleanupNow();
+  const settings = await service.getSettings();
+
+  return { ok: true, data: { ...result, settings } };
+}
+
+export async function listAdminBackups(
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { backups: BackupEntry[] } }> {
+  const backups = await createBackupService(openBackupOptions(options)).list();
+
+  return { ok: true, data: { backups } };
+}
+
+export async function createAdminBackup(
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { backup: BackupEntry; backups: BackupEntry[] } }> {
+  const service = createBackupService(openBackupOptions(options));
+  const backup = await service.create();
+  const backups = await service.list();
+
+  return { ok: true, data: { backup, backups } };
+}
+
+export async function deleteAdminBackup(
+  params: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { deleted: boolean } }> {
+  const name = readBackupName(params);
+  const deleted = await createBackupService(openBackupOptions(options)).delete(name);
+
+  return { ok: true, data: { deleted } };
+}
+
+export async function downloadAdminBackup(
+  params: unknown,
+  options: AdminControllerOptions,
+): Promise<{ content: Buffer; fileName: string }> {
+  const name = readBackupName(params);
+  const service = createBackupService(openBackupOptions(options));
+
+  try {
+    const content = await readFile(service.resolvePath(name));
+
+    return { content, fileName: name };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new AdminApiError(404, 'NOT_FOUND', '备份文件不存在。');
+    }
+
+    throw error;
+  }
+}
+
+export async function exportAdminPosts(
+  query: unknown,
+  options: AdminControllerOptions,
+): Promise<{ body: string; contentType: string; fileName: string }> {
+  const { format, limit, filters } = readExportQuery(query);
+  const posts = await options.storage.xPosts.listForExport(filters, limit);
+  const records = posts.map((post) => ({
+    detectedAt: post.detectedAt,
+    dedupeKey: post.dedupeKey,
+    isReply: post.isReply,
+    isRepost: post.isRepost,
+    permalinkUrl: post.permalinkUrl,
+    postedAt: post.postedAt,
+    textContent: post.textContent,
+    xPostId: post.xPostId,
+    authorUsername: post.authorUsername,
+  }));
+  const timestamp = formatFileTimestamp(new Date());
+
+  if (format === 'json') {
+    return {
+      body: JSON.stringify(records, null, 2),
+      contentType: 'application/json; charset=utf-8',
+      fileName: `posts-${timestamp}.json`,
+    };
+  }
+
+  const header = [
+    'xPostId',
+    'authorUsername',
+    'postedAt',
+    'detectedAt',
+    'permalinkUrl',
+    'textContent',
+    'isReply',
+    'isRepost',
+    'dedupeKey',
+  ];
+  const lines = [header.join(',')];
+
+  for (const record of records) {
+    lines.push(
+      [
+        record.xPostId,
+        record.authorUsername,
+        record.postedAt,
+        record.detectedAt,
+        record.permalinkUrl,
+        record.textContent,
+        String(record.isReply),
+        String(record.isRepost),
+        record.dedupeKey ?? '',
+      ]
+        .map(toCsvField)
+        .join(','),
+    );
+  }
+
+  return {
+    body: `\ufeff${lines.join('\r\n')}\r\n`,
+    contentType: 'text/csv; charset=utf-8',
+    fileName: `posts-${timestamp}.csv`,
+  };
+}
+
+export function listAdminLogs(query: unknown): {
+  ok: true;
+  data: { capacity: number; entries: LogBufferEntry[]; size: number };
+} {
+  const record = isRecord(query) ? query : {};
+  const level = readLogLevelFilter(record.level);
+  const limit = readLogLimit(record.limit);
+  const entries = sharedLogBuffer.list({ ...(level === undefined ? {} : { level }), limit });
+
+  return {
+    ok: true,
+    data: { capacity: sharedLogBuffer.maxSize, entries, size: sharedLogBuffer.size },
+  };
+}
+
 export async function getAdminSourceGroups(
   options: AdminControllerOptions,
 ): Promise<{ ok: true; data: { groups: SourceGroupStatus[] } }> {
@@ -583,6 +783,18 @@ export async function updateAdminSubscriptionRules(
   }
 
   const service = createSubscriptionRuleService({ appSettings: options.storage.appSettings });
+  const knownTargetKeys = new Set(
+    (await options.storage.deliveryTargets.listAll()).map((target) => target.targetKey),
+  );
+  const unknownTargetKeys = collectUnknownRuleTargetKeys(body.rules, knownTargetKeys);
+
+  if (unknownTargetKeys.length > 0) {
+    throw new AdminApiError(
+      400,
+      'INVALID_REQUEST',
+      `规则引用了不存在的通道：${unknownTargetKeys.join('、')}。`,
+    );
+  }
 
   try {
     const rules = await service.saveRules(body.rules);
@@ -744,7 +956,8 @@ export async function createAdminDeliveryTarget(
   const input = readCreateDeliveryTargetBody(body);
   await assertWebhookUrlNotDuplicated(input.webhookUrl, options);
   const deliveryTarget = await options.storage.deliveryTargets.create({
-    channelType: 'feishu_webhook',
+    channelType: input.channelType,
+    config: input.config,
     displayName: input.displayName,
     enabled: input.enabled,
     targetKey: await createUniqueDeliveryTargetKey(options),
@@ -772,10 +985,18 @@ export async function updateAdminDeliveryTarget(
     await assertWebhookUrlNotDuplicated(input.webhookUrl, options, existingTarget.id);
   }
 
-  const updatedTarget = await options.storage.deliveryTargets.update(existingTarget.id, input);
+  const updatedTarget = await options.storage.deliveryTargets.update(existingTarget.id, {
+    ...input,
+    ...(input.secret === undefined
+      ? {}
+      : { config: { ...(input.secret.length === 0 ? {} : { secret: input.secret }) } }),
+    ...(input.secret === undefined || input.secret.length > 0
+      ? {}
+      : { config: {} }),
+  });
 
-  if (updatedTarget === null || updatedTarget.webhookUrl.trim().length === 0) {
-    throw new AdminApiError(404, 'NOT_FOUND', '未找到飞书 webhook。');
+  if (updatedTarget === null) {
+    throw new AdminApiError(404, 'NOT_FOUND', '未找到投递通道。');
   }
 
   return {
@@ -798,8 +1019,8 @@ export async function updateAdminDeliveryTargetEnabled(
     enabled,
   });
 
-  if (updatedTarget === null || updatedTarget.webhookUrl.trim().length === 0) {
-    throw new AdminApiError(404, 'NOT_FOUND', '未找到飞书 webhook。');
+  if (updatedTarget === null) {
+    throw new AdminApiError(404, 'NOT_FOUND', '未找到投递通道。');
   }
 
   return {
@@ -819,7 +1040,7 @@ export async function deleteAdminDeliveryTarget(
   const deleteResult = await options.storage.deliveryTargets.delete(id);
 
   if (!deleteResult.deleted) {
-    throw new AdminApiError(404, 'NOT_FOUND', '未找到飞书 webhook。');
+    throw new AdminApiError(404, 'NOT_FOUND', '未找到投递通道。');
   }
 
   return {
@@ -838,7 +1059,7 @@ export async function testAdminDeliveryTarget(
   ok: true;
   data: {
     ok: true;
-    providerCode: number;
+    providerCode?: number;
     providerMessage?: string;
     targetKey: string;
     webhookPreview: string;
@@ -846,22 +1067,41 @@ export async function testAdminDeliveryTarget(
 }> {
   const id = readIdParam(params);
   const target = await findVisibleDeliveryTarget(id, options);
+  const channels = createDefaultDeliveryChannelRegistry();
+  const channelSender = channels.get(target.channelType);
 
-  const result = await createFeishuWebhookClient().sendTextMessage({
+  if (channelSender === undefined) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', `不支持的渠道类型 ${target.channelType}。`);
+  }
+
+  const testText = `AI 前沿消息本地配置测试：${target.displayName} 通道可用。`;
+  const result = await channelSender.send({
+    config: target.config,
+    message: {
+      author: 'AI 前沿雷达',
+      postedAt: new Date().toISOString(),
+      text: testText,
+      title: `【AI前沿消息】配置测试：${target.displayName}`,
+      url: 'http://127.0.0.1:3000',
+    },
     targetKey: target.targetKey,
-    text: `AI 前沿消息本地配置测试：${target.displayName} webhook 可用。`,
     webhookUrl: target.webhookUrl,
   });
 
   if (!result.ok) {
-    throw toFeishuTestSendError(result, target.webhookUrl);
+    throw new AdminApiError(502, result.error.code, result.error.message, {
+      diagnostics: result.error.diagnostics,
+      retryable: result.error.retryable,
+      targetKey: target.targetKey,
+      webhookPreview: previewSecretUrl(target.webhookUrl),
+    });
   }
 
   return {
     ok: true,
     data: {
       ok: true,
-      providerCode: result.providerCode,
+      ...(result.providerCode === undefined ? {} : { providerCode: result.providerCode }),
       ...(result.providerMessage === undefined ? {} : { providerMessage: result.providerMessage }),
       targetKey: result.targetKey,
       webhookPreview: previewSecretUrl(target.webhookUrl),
@@ -963,6 +1203,7 @@ interface AdminDeliveryTarget {
   displayName: string;
   enabled: boolean;
   id: string;
+  secretConfigured: boolean;
   targetKey: string;
   updatedAt: string;
   webhookPreview: string;
@@ -1513,6 +1754,7 @@ function toAdminDeliveryTarget(target: DeliveryTarget): AdminDeliveryTarget {
     displayName: target.displayName,
     enabled: target.enabled,
     id: target.id,
+    secretConfigured: (target.config.secret?.length ?? 0) > 0,
     targetKey: target.targetKey,
     updatedAt: target.updatedAt,
     webhookPreview: previewSecretUrl(target.webhookUrl),
@@ -1653,7 +1895,37 @@ async function assertWebhookUrlNotDuplicated(
   }
 }
 
+function collectUnknownRuleTargetKeys(rules: unknown[], knownTargetKeys: Set<string>): string[] {
+  const unknownKeys: string[] = [];
+
+  for (const rule of rules) {
+    if (!isRecord(rule) || !Array.isArray(rule.targetKeys)) {
+      continue;
+    }
+
+    for (const entry of rule.targetKeys) {
+      if (typeof entry !== 'string') {
+        continue;
+      }
+
+      const targetKey = entry.trim();
+
+      if (
+        targetKey.length > 0 &&
+        !knownTargetKeys.has(targetKey) &&
+        !unknownKeys.includes(targetKey)
+      ) {
+        unknownKeys.push(targetKey);
+      }
+    }
+  }
+
+  return unknownKeys;
+}
+
 function readCreateDeliveryTargetBody(body: unknown): {
+  channelType: DeliveryTarget['channelType'];
+  config: { secret?: string };
   displayName: string;
   enabled: boolean;
   webhookUrl: string;
@@ -1662,15 +1934,20 @@ function readCreateDeliveryTargetBody(body: unknown): {
     throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
   }
 
+  const channelType = readDeliveryChannelType(body.channelType);
+
   return {
+    channelType,
+    config: readDeliveryTargetConfig(body),
     displayName: readDeliveryTargetDisplayName(body.displayName),
     enabled: readOptionalBooleanBodyValue(body.enabled, 'enabled') ?? true,
-    webhookUrl: readFeishuWebhookUrl(body),
+    webhookUrl: readDeliveryTargetWebhookUrl(body, channelType),
   };
 }
 
 function readUpdateDeliveryTargetBody(body: unknown): {
   displayName?: string;
+  secret?: string;
   webhookUrl?: string;
 } {
   if (!isRecord(body)) {
@@ -1679,6 +1956,7 @@ function readUpdateDeliveryTargetBody(body: unknown): {
 
   const input: {
     displayName?: string;
+    secret?: string;
     webhookUrl?: string;
   } = {};
 
@@ -1687,14 +1965,114 @@ function readUpdateDeliveryTargetBody(body: unknown): {
   }
 
   if (body.webhookUrl !== undefined) {
-    input.webhookUrl = readFeishuWebhookUrl(body);
+    input.webhookUrl = readDeliveryTargetWebhookUrl(body, readDeliveryChannelType(body.channelType));
+  }
+
+  if (body.secret !== undefined) {
+    input.secret = readDeliveryTargetSecret(body.secret);
   }
 
   if (Object.keys(input).length === 0) {
-    throw new AdminApiError(400, 'INVALID_REQUEST', '至少需要提供 displayName 或 webhookUrl。');
+    throw new AdminApiError(
+      400,
+      'INVALID_REQUEST',
+      '至少需要提供 displayName、webhookUrl 或 secret。',
+    );
   }
 
   return input;
+}
+
+function readDeliveryChannelType(value: unknown): DeliveryTarget['channelType'] {
+  if (value === undefined) {
+    return 'feishu_webhook';
+  }
+
+  if (
+    value !== 'bark' &&
+    value !== 'dingtalk_webhook' &&
+    value !== 'feishu_webhook' &&
+    value !== 'generic_webhook' &&
+    value !== 'wecom_webhook'
+  ) {
+    throw new AdminApiError(
+      400,
+      'INVALID_REQUEST',
+      'channelType 必须是 feishu_webhook、wecom_webhook、dingtalk_webhook、bark 或 generic_webhook。',
+    );
+  }
+
+  return value;
+}
+
+function readDeliveryTargetConfig(body: Record<string, unknown>): { secret?: string } {
+  if (body.secret === undefined) {
+    return {};
+  }
+
+  const secret = readDeliveryTargetSecret(body.secret);
+
+  return secret.length === 0 ? {} : { secret };
+}
+
+function readDeliveryTargetSecret(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'secret 必须是字符串。');
+  }
+
+  const secret = value.trim();
+
+  if (secret.length > 256) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'secret 不能超过 256 个字符。');
+  }
+
+  return secret;
+}
+
+function readDeliveryTargetWebhookUrl(
+  body: unknown,
+  channelType: DeliveryTarget['channelType'],
+): string {
+  if (!isRecord(body)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
+  }
+
+  if (typeof body.webhookUrl !== 'string') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'webhookUrl 必须是字符串。');
+  }
+
+  const webhookUrl = body.webhookUrl.trim();
+
+  if (webhookUrl.length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'webhookUrl 不能为空。');
+  }
+
+  try {
+    const parsedUrl = new URL(webhookUrl);
+
+    if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'webhookUrl 必须使用 http 或 https。');
+    }
+
+    if (
+      channelType === 'bark' &&
+      (parsedUrl.pathname === '/' || parsedUrl.pathname.length === 0)
+    ) {
+      throw new AdminApiError(
+        400,
+        'INVALID_REQUEST',
+        'Bark 推送地址需要包含设备 Key，例如 https://api.day.app/<deviceKey>。',
+      );
+    }
+
+    return parsedUrl.toString();
+  } catch (error) {
+    if (error instanceof AdminApiError) {
+      throw error;
+    }
+
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'webhookUrl 必须是有效 URL。');
+  }
 }
 
 function readDeliveryTargetEnabledBody(body: unknown): boolean {
@@ -1986,6 +2364,110 @@ function redactFeishuWebhookUrlsFromText(value: string): string {
     /https:\/\/open\.feishu\.cn\/open-apis\/bot\/v2\/hook\/[^\s"',\\<>)}\]]+/gu,
     (webhookUrl) => previewSecretUrl(webhookUrl),
   );
+}
+
+function openBackupOptions(options: AdminControllerOptions): {
+  backupsDir: string;
+  databaseUrl: string;
+} {
+  return {
+    backupsDir: join(dirname(options.config.storage.sqlite.path), 'backups'),
+    databaseUrl: options.config.storage.prisma.databaseUrl,
+  };
+}
+
+function readBackupName(params: unknown): string {
+  if (!isRecord(params) || typeof params.name !== 'string' || params.name.trim().length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '备份文件名无效。');
+  }
+
+  const name = params.name.trim();
+
+  if (!/^backup-\d{8}-\d{6}(?:-\d+)?\.sqlite$/u.test(name)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '备份文件名无效。');
+  }
+
+  return name;
+}
+
+function readExportQuery(query: unknown): {
+  filters: Partial<XPostPageQuery>;
+  format: 'csv' | 'json';
+  limit: number;
+} {
+  const record = isRecord(query) ? query : {};
+  const formatValue =
+    record.format === undefined
+      ? 'csv'
+      : readSingleOptionalStringQueryValue(record.format, 'format') ?? 'csv';
+
+  if (formatValue !== 'csv' && formatValue !== 'json') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'format 必须是 csv 或 json。');
+  }
+
+  const postedFrom = readOptionalIsoQueryValue(record.postedFrom, 'postedFrom');
+  const postedTo = readOptionalIsoQueryValue(record.postedTo, 'postedTo');
+  assertValidTimeRange(postedFrom, postedTo, '发布时间开始不能晚于结束时间。');
+
+  const requestedLimit = readPositiveIntegerQueryValue(record.limit, 'limit') ?? 20_000;
+
+  if (requestedLimit > 50_000) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'limit 必须在 1-50000 之间。');
+  }
+
+  return {
+    filters: {
+      ...readOptionalAuthorUsernameQuery(record.authorUsername),
+      ...readOptionalTextSearchQuery(record.query),
+      ...(postedFrom === undefined ? {} : { postedFrom }),
+      ...(postedTo === undefined ? {} : { postedTo }),
+      ...readPostBooleanQuery(record.isReply, 'isReply'),
+      ...readPostBooleanQuery(record.isRepost, 'isRepost'),
+    },
+    format: formatValue,
+    limit: requestedLimit,
+  };
+}
+
+function toCsvField(value: string): string {
+  return /[",\r\n]/u.test(value) ? `"${value.replace(/"/gu, '""')}"` : value;
+}
+
+function formatFileTimestamp(date: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, '0');
+
+  return (
+    `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}` +
+    `-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+  );
+}
+
+function readLogLevelFilter(value: unknown): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const level = readSingleOptionalStringQueryValue(value, 'level');
+
+  if (level === undefined || level.length === 0 || level === 'all') {
+    return undefined;
+  }
+
+  if (!['debug', 'info', 'warn', 'error'].includes(level)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'level 必须是 debug、info、warn 或 error。');
+  }
+
+  return level;
+}
+
+function readLogLimit(value: unknown): number {
+  const limit = readPositiveIntegerQueryValue(value, 'limit') ?? 200;
+
+  if (limit > 500) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'limit 必须在 1-500 之间。');
+  }
+
+  return limit;
 }
 
 function readCreateWatchAccountBody(body: unknown): AdminWatchAccountValidationInput {

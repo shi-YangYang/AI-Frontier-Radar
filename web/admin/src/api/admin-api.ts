@@ -27,6 +27,25 @@ export type PollRunStatus = 'failed' | 'partial_failed' | 'running' | 'success';
 export type DeliveryEventStatus = 'dead' | 'failed' | 'pending' | 'retry_wait' | 'sending' | 'sent';
 export type PostBooleanFilter = 'all' | 'false' | 'true';
 
+export interface RetentionSettings {
+  expiredEvents: number;
+  expiredPosts: number;
+  lastCleanupAt: string | null;
+  retentionDays: number;
+}
+
+export interface BackupEntry {
+  createdAt: string;
+  name: string;
+  sizeBytes: number;
+}
+
+export interface LogBufferEntry {
+  [key: string]: unknown;
+  level: string;
+  time: string;
+}
+
 export interface WatchAccount {
   id: string;
   sourceType: WatchAccountSourceType;
@@ -306,12 +325,20 @@ export interface FeishuTestResult {
   targetKey: string;
 }
 
+export type DeliveryChannelType =
+  | 'bark'
+  | 'dingtalk_webhook'
+  | 'feishu_webhook'
+  | 'generic_webhook'
+  | 'wecom_webhook';
+
 export interface DeliveryTarget {
-  channelType: 'feishu_webhook';
+  channelType: DeliveryChannelType;
   createdAt: string;
   displayName: string;
   enabled: boolean;
   id: string;
+  secretConfigured: boolean;
   targetKey: string;
   updatedAt: string;
   webhookPreview: string;
@@ -323,13 +350,16 @@ export interface DeliveryTargetSummary {
 }
 
 export interface CreateDeliveryTargetInput {
+  channelType: DeliveryChannelType;
   displayName: string;
   enabled: boolean;
+  secret?: string;
   webhookUrl: string;
 }
 
 export interface UpdateDeliveryTargetInput {
   displayName: string;
+  secret?: string;
   webhookUrl?: string;
 }
 
@@ -434,6 +464,100 @@ export interface SourceGroupStatus {
   sourceCount: number;
 }
 
+export async function getDataSettings(): Promise<RetentionSettings> {
+  return requestJson<RetentionSettings>('/admin/api/settings/data');
+}
+
+export async function updateDataSettings(retentionDays: number): Promise<RetentionSettings> {
+  return requestJson<RetentionSettings>('/admin/api/settings/data', {
+    body: JSON.stringify({ retentionDays }),
+    method: 'PUT',
+  });
+}
+
+export async function runRetentionCleanup(): Promise<{
+  deletedEvents: number;
+  deletedPosts: number;
+  settings: RetentionSettings;
+}> {
+  return requestJson<{
+    deletedEvents: number;
+    deletedPosts: number;
+    settings: RetentionSettings;
+  }>('/admin/api/actions/cleanup-now', { method: 'POST' });
+}
+
+export async function listBackups(): Promise<BackupEntry[]> {
+  const data = await requestJson<{ backups: BackupEntry[] }>('/admin/api/backups');
+
+  return data.backups;
+}
+
+export async function createBackup(): Promise<{
+  backup: BackupEntry;
+  backups: BackupEntry[];
+}> {
+  return requestJson<{ backup: BackupEntry; backups: BackupEntry[] }>(
+    '/admin/api/actions/backup',
+    { method: 'POST' },
+  );
+}
+
+export async function deleteBackup(name: string): Promise<boolean> {
+  const data = await requestJson<{ deleted: boolean }>(
+    `/admin/api/backups/${encodeURIComponent(name)}`,
+    { method: 'DELETE' },
+  );
+
+  return data.deleted;
+}
+
+export function backupDownloadUrl(name: string): string {
+  return `/admin/api/backups/${encodeURIComponent(name)}/download`;
+}
+
+export function postsExportUrl(
+  query: Omit<PostPageQuery, 'page' | 'pageSize'>,
+  format: 'csv' | 'json',
+): string {
+  const params = new URLSearchParams();
+  params.set('format', format);
+  setOptionalStringQuery(params, 'authorUsername', query.authorUsername);
+  setOptionalStringQuery(params, 'query', query.query);
+  setOptionalDateTimeQuery(params, 'postedFrom', query.postedFrom);
+  setOptionalDateTimeQuery(params, 'postedTo', query.postedTo);
+
+  if (query.isReply !== undefined) {
+    params.set('isReply', query.isReply);
+  }
+
+  if (query.isRepost !== undefined) {
+    params.set('isRepost', query.isRepost);
+  }
+
+  return `/admin/api/posts/export?${params.toString()}`;
+}
+
+export async function listLogs(
+  query: { level?: string; limit?: number } = {},
+): Promise<{ capacity: number; entries: LogBufferEntry[]; size: number }> {
+  const params = new URLSearchParams();
+
+  if (query.level !== undefined && query.level.length > 0) {
+    params.set('level', query.level);
+  }
+
+  if (query.limit !== undefined) {
+    params.set('limit', String(query.limit));
+  }
+
+  const suffix = params.toString();
+
+  return requestJson<{ capacity: number; entries: LogBufferEntry[]; size: number }>(
+    `/admin/api/logs${suffix.length === 0 ? '' : `?${suffix}`}`,
+  );
+}
+
 export async function getSourceGroups(): Promise<SourceGroupStatus[]> {
   const data = await requestJson<{ groups: SourceGroupStatus[] }>('/admin/api/source-groups');
 
@@ -458,6 +582,7 @@ export interface SubscriptionRule {
   include: string[];
   mode: SubscriptionRuleMode;
   name: string;
+  targetKeys: string[];
 }
 
 export async function getSubscriptionRules(): Promise<SubscriptionRule[]> {
@@ -613,10 +738,15 @@ export async function createWatchAccount(
   });
 }
 
-export async function deleteWatchAccount(id: string): Promise<{ deleted: true }> {
-  return requestJson<{ deleted: true }>('/admin/api/watch-accounts/' + encodeURIComponent(id), {
-    method: 'DELETE',
-  });
+export async function deleteWatchAccount(
+  id: string,
+): Promise<{ deleted: true; deletedEvents: number; deletedPosts: number }> {
+  return requestJson<{ deleted: true; deletedEvents: number; deletedPosts: number }>(
+    '/admin/api/watch-accounts/' + encodeURIComponent(id),
+    {
+      method: 'DELETE',
+    },
+  );
 }
 
 export async function listPollRuns(query: PageQuery): Promise<{

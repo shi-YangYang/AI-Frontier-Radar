@@ -3,6 +3,7 @@ import { format } from 'node:util';
 import type { FastifyBaseLogger } from 'fastify';
 
 import type { AppLogLevel } from '../../shared/config/types';
+import { sharedLogBuffer, type LogBufferEntry } from './log-buffer';
 
 interface CreateLoggerOptions {
   bindings?: Record<string, unknown>;
@@ -73,10 +74,15 @@ class JsonConsoleLogger implements AppLogger {
       }
 
       const entry = buildLogEntry(level, this.bindings, args);
-      const output = JSON.stringify(toSerializableLogValue(entry, undefined, new WeakSet<object>()));
+      const serializedEntry = toSerializableLogValue(entry, undefined, new WeakSet<object>());
+      const output = JSON.stringify(serializedEntry);
       const stream = level === 'warn' || level === 'error' || level === 'fatal' ? process.stderr : process.stdout;
 
       stream.write(`${output}\n`);
+
+      if (isLogBufferEntry(serializedEntry)) {
+        sharedLogBuffer.push(serializedEntry);
+      }
     };
   }
 
@@ -128,6 +134,14 @@ function buildLogEntry(
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function isLogBufferEntry(value: unknown): value is LogBufferEntry {
+  return (
+    isPlainObject(value) &&
+    typeof value.level === 'string' &&
+    typeof value.time === 'string'
+  );
 }
 
 function serializeError(error: Error): Record<string, unknown> {

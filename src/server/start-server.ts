@@ -2,6 +2,7 @@ import { toStartupConfigLogContext } from '../shared/config';
 import type { AppConfig } from '../shared/config/types';
 import { createApp } from '../app/create-app';
 import type { AppLogger } from '../lib/logger';
+import { createRetentionService } from '../modules/maintenance';
 import { createRuntimeScheduler, createRuntimeSourceProviders } from '../modules/scheduler';
 import { createRuntimeSettingsService, createStorageFromConfig } from '../modules/storage';
 
@@ -16,9 +17,14 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     config: options.config,
     storage,
   });
+  const retention = createRetentionService({
+    logger: options.logger,
+    storage,
+  });
   const scheduler = createRuntimeScheduler({
     config: options.config,
     logger: options.logger,
+    retention,
     runtimeSettings,
     storage,
   });

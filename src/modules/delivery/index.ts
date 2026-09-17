@@ -1,7 +1,22 @@
 export {
+  createBarkSender,
+  createDefaultDeliveryChannelRegistry,
+  createDeliveryChannelRegistry,
+  createDingtalkWebhookSender,
   createFeishuTextMessage,
   createFeishuWebhookClient,
+  createFeishuWebhookSender,
+  createGenericWebhookSender,
+  createWecomWebhookSender,
   FeishuWebhookClient,
+} from './channel/index';
+export type {
+  DeliveryChannelMessage,
+  DeliveryChannelRegistry,
+  DeliveryChannelRegistryOptions,
+  DeliveryChannelSendInput,
+  DeliveryChannelSendResult,
+  DeliveryChannelSender,
 } from './channel/index';
 export { runDeliveryWorkerJob } from './jobs/index';
 export type {

@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -70,14 +71,14 @@ async function main(): Promise<void> {
   const config = createSmokeConfig({
     databaseUrl,
     sqlitePath,
-    webhookUrl: webhook.url,
+    webhookUrl: webhook.urls.feishu,
     xApiBaseUrl: xApi.url,
   });
   const storage = createStorage({
     databaseUrl,
     defaultDeliveryTarget: {
       targetKey: TARGET_KEY,
-      webhookUrl: webhook.url,
+      webhookUrl: webhook.urls.feishu,
     },
     sqlitePath,
     watchAccountsSource: config.watchAccounts,
@@ -1109,14 +1110,27 @@ async function main(): Promise<void> {
     assert(anthropicAccount !== null, 'anthropic watch account was not stored');
 
     await runPollingJob({ config, logger, sourceProviders, storage });
+    const anthropicAccountAfterFirstPoll = await storage.watchAccounts.findById(anthropicAccount.id);
+    const anthropicPostsAfterFirstPoll = await prisma.xPostRaw.count({
+      where: { authorUserId: anthropicAccountAfterFirstPoll?.xUserId ?? '' },
+    });
+    assert(
+      anthropicPostsAfterFirstPoll === 1,
+      `first anthropic poll should store only the newest article, got ${anthropicPostsAfterFirstPoll}`,
+    );
     const anthropicBaselinePost = await storage.xPosts.findByDedupeKey('anthropic:news:article-two');
     assert(anthropicBaselinePost !== null, 'anthropic baseline article was not stored');
+    const anthropicSkippedPost = await storage.xPosts.findByDedupeKey('anthropic:news:article-one');
+    assert(anthropicSkippedPost === null, 'older anthropic article must not be ingested on first poll');
     const anthropicBaselineEvent = await storage.deliveryEvents.findByPostAndTarget(
       anthropicBaselinePost.xPostId,
       TARGET_KEY,
     );
-    assert(anthropicBaselineEvent === null, 'anthropic baseline must not create delivery events');
-    checks.push({ name: 'Anthropic 首次基线不投递' });
+    assert(
+      anthropicBaselineEvent !== null,
+      'anthropic baseline post should be delivered like the RSS baseline',
+    );
+    checks.push({ name: 'Anthropic 首轮仅锚定最新 1 条并投递' });
 
     rssApi.setFeed(anthropicPath, {
       body: createAnthropicHtml(true),
@@ -1138,8 +1152,8 @@ async function main(): Promise<void> {
       where: { authorUserId: anthropicAccountAfterPoll?.xUserId ?? '' },
     });
     assert(
-      anthropicPostsAfterRepeat === 3,
-      `repeat anthropic poll should keep 3 posts, got ${anthropicPostsAfterRepeat}`,
+      anthropicPostsAfterRepeat === 2,
+      `repeat anthropic poll should keep 2 posts, got ${anthropicPostsAfterRepeat}`,
     );
     checks.push({ name: 'Anthropic 增量入库并投递' });
 
@@ -1195,7 +1209,10 @@ async function main(): Promise<void> {
       ai2BaselinePost.xPostId,
       TARGET_KEY,
     );
-    assert(ai2BaselineEvent === null, 'ai2 baseline must not create delivery events');
+    assert(
+      ai2BaselineEvent !== null,
+      'ai2 baseline post should be delivered like the RSS baseline',
+    );
 
     rssApi.setFeed(ai2Path, {
       body: createAi2Html(true),
@@ -1216,8 +1233,10 @@ async function main(): Promise<void> {
     const ai2PostsAfterRepeat = await prisma.xPostRaw.count({
       where: { authorUserId: ai2AccountAfterPoll?.xUserId ?? '' },
     });
-    assert(ai2PostsAfterRepeat === 3, `repeat ai2 poll should keep 3 posts, got ${ai2PostsAfterRepeat}`);
-    checks.push({ name: 'AI2 首次基线不投递 + 增量入库并投递' });
+    assert(ai2PostsAfterRepeat === 2, `repeat ai2 poll should keep 2 posts, got ${ai2PostsAfterRepeat}`);
+    const ai2SkippedPost = await storage.xPosts.findByDedupeKey('ai2:blog:olmoearth-v1-1');
+    assert(ai2SkippedPost === null, 'older ai2 post must not be ingested after the baseline');
+    checks.push({ name: 'AI2 首轮仅锚定最新 1 条 + 增量入库并投递' });
 
     const moonshotHtml =
       '<html><body>' +
@@ -1392,6 +1411,237 @@ async function main(): Promise<void> {
     assert(noRuleEvent !== null, 'with no enabled rules every new post should be delivered');
     checks.push({ name: '订阅规则：清空规则后恢复全量投递' });
 
+    const channelDefinitions = [
+      { channelType: 'wecom_webhook', kind: 'wecom', name: 'Mock WeCom', url: webhook.urls.wecom },
+      {
+        channelType: 'dingtalk_webhook',
+        kind: 'dingtalk',
+        name: 'Mock DingTalk',
+        secret: 'SECsmokeSecret',
+        url: webhook.urls.dingtalk,
+      },
+      { channelType: 'bark', kind: 'bark', name: 'Mock Bark', url: webhook.urls.bark },
+      { channelType: 'generic_webhook', kind: 'generic', name: 'Mock Generic', url: webhook.urls.generic },
+    ] as const;
+    const channelTargetByKind = new Map<string, { id: string; targetKey: string }>();
+
+    for (const definition of channelDefinitions) {
+      const createChannelResponse = await app.inject({
+        method: 'POST',
+        payload: {
+          channelType: definition.channelType,
+          displayName: definition.name,
+          enabled: true,
+          webhookUrl: definition.url,
+          ...('secret' in definition ? { secret: definition.secret } : {}),
+        },
+        url: '/admin/api/settings/delivery-targets',
+      });
+      assert(
+        createChannelResponse.statusCode === 200,
+        `create channel ${definition.kind} returned ${createChannelResponse.statusCode}: ${createChannelResponse.body.slice(0, 200)}`,
+      );
+      const createdTarget = JSON.parse(createChannelResponse.body) as {
+        data: { deliveryTarget: { channelType: string; id: string; secretConfigured: boolean; targetKey: string } };
+      };
+      assert(
+        createdTarget.data.deliveryTarget.channelType === definition.channelType,
+        `channel type mismatch for ${definition.kind}`,
+      );
+      if (definition.kind === 'dingtalk') {
+        assert(
+          createdTarget.data.deliveryTarget.secretConfigured,
+          'dingtalk target should report secretConfigured',
+        );
+      }
+      channelTargetByKind.set(definition.kind, {
+        id: createdTarget.data.deliveryTarget.id,
+        targetKey: createdTarget.data.deliveryTarget.targetKey,
+      });
+    }
+    checks.push({ name: '创建企业微信/钉钉/Bark/通用 Webhook 通道' });
+
+    const invalidChannelResponse = await app.inject({
+      method: 'POST',
+      payload: {
+        channelType: 'telegram',
+        displayName: 'bad',
+        enabled: true,
+        webhookUrl: 'https://example.com/hook',
+      },
+      url: '/admin/api/settings/delivery-targets',
+    });
+    assert(invalidChannelResponse.statusCode === 400, 'unknown channel type should be rejected');
+    const invalidBarkResponse = await app.inject({
+      method: 'POST',
+      payload: {
+        channelType: 'bark',
+        displayName: 'bad bark',
+        enabled: true,
+        webhookUrl: 'https://api.day.app/',
+      },
+      url: '/admin/api/settings/delivery-targets',
+    });
+    assert(invalidBarkResponse.statusCode === 400, 'bark URL without device key should be rejected');
+    checks.push({ name: '渠道校验：未知类型与缺失 Bark Key 拒绝' });
+
+    const requestsBeforeChannelTests = webhook.requests.length;
+
+    for (const definition of channelDefinitions) {
+      const target = channelTargetByKind.get(definition.kind);
+      const testChannelResponse = await app.inject({
+        method: 'POST',
+        url: `/admin/api/settings/delivery-targets/${target?.id}/test`,
+      });
+      assert(
+        testChannelResponse.statusCode === 200,
+        `test send ${definition.kind} returned ${testChannelResponse.statusCode}: ${testChannelResponse.body.slice(0, 200)}`,
+      );
+    }
+
+    assert(
+      webhook.requests.length === requestsBeforeChannelTests + channelDefinitions.length,
+      `mock receiver should get ${channelDefinitions.length} channel test messages, got ${webhook.requests.length - requestsBeforeChannelTests}`,
+    );
+
+    const wecomRequest = webhook.requests.find((entry) => entry.url.startsWith('/mock-wecom'));
+    assert(
+      wecomRequest !== undefined &&
+        (wecomRequest.body as { msgtype?: string }).msgtype === 'markdown' &&
+        typeof (wecomRequest.body as { markdown?: { content?: string } }).markdown?.content === 'string',
+      `wecom payload mismatch: ${JSON.stringify(wecomRequest?.body)}`,
+    );
+
+    const dingtalkRequest = webhook.requests.find((entry) => entry.url.startsWith('/mock-dingtalk'));
+    const dingtalkBody = dingtalkRequest?.body as {
+      markdown?: { text?: string; title?: string };
+      msgtype?: string;
+    };
+    const dingtalkQuery = new URL(`http://127.0.0.1${dingtalkRequest?.url ?? ''}`).searchParams;
+    const dingtalkTimestamp = dingtalkQuery.get('timestamp') ?? '';
+    const expectedDingtalkSign = createHmac('sha256', 'SECsmokeSecret')
+      .update(`${dingtalkTimestamp}\nSECsmokeSecret`)
+      .digest('base64');
+    assert(
+      dingtalkBody?.msgtype === 'markdown' &&
+        typeof dingtalkBody.markdown?.text === 'string' &&
+        typeof dingtalkBody.markdown?.title === 'string' &&
+        dingtalkTimestamp.length > 0 &&
+        dingtalkQuery.get('sign') === expectedDingtalkSign,
+      `dingtalk payload/sign mismatch: ${JSON.stringify({ body: dingtalkBody, url: dingtalkRequest?.url })}`,
+    );
+
+    const barkRequest = webhook.requests.find((entry) => entry.url.startsWith('/mock-bark'));
+    const barkBody = barkRequest?.body as { body?: string; title?: string; url?: string };
+    assert(
+      typeof barkBody?.title === 'string' && typeof barkBody.body === 'string' && typeof barkBody.url === 'string',
+      `bark payload mismatch: ${JSON.stringify(barkBody)}`,
+    );
+
+    const genericRequest = webhook.requests.find((entry) => entry.url.startsWith('/mock-generic'));
+    const genericBody = genericRequest?.body as {
+      author?: string;
+      postedAt?: string;
+      text?: string;
+      title?: string;
+      url?: string;
+    };
+    assert(
+      typeof genericBody?.author === 'string' &&
+        typeof genericBody.postedAt === 'string' &&
+        typeof genericBody.text === 'string' &&
+        typeof genericBody.title === 'string' &&
+        typeof genericBody.url === 'string',
+      `generic payload mismatch: ${JSON.stringify(genericBody)}`,
+    );
+    checks.push({ name: '4 渠道测试发送：payload 正确且钉钉加签可校验' });
+
+    const barkTargetKey = channelTargetByKind.get('bark')?.targetKey ?? '';
+    const routingRulesResponse = await app.inject({
+      method: 'PUT',
+      payload: {
+        rules: [
+          {
+            enabled: true,
+            exclude: [],
+            include: ['routing-marker'],
+            mode: 'any',
+            name: 'routing',
+            targetKeys: [barkTargetKey],
+          },
+        ],
+      },
+      url: '/admin/api/subscription-rules',
+    });
+    assert(routingRulesResponse.statusCode === 200, 'routing rule should be saved');
+
+    const unknownKeyRulesResponse = await app.inject({
+      method: 'PUT',
+      payload: {
+        rules: [
+          {
+            enabled: true,
+            exclude: [],
+            include: ['anything'],
+            mode: 'any',
+            name: 'bad',
+            targetKeys: ['not-exist-target'],
+          },
+        ],
+      },
+      url: '/admin/api/subscription-rules',
+    });
+    assert(unknownKeyRulesResponse.statusCode === 400, 'rule with unknown target key should be rejected');
+
+    rssApi.setFeed(trendingPath, {
+      body: createTrendingHtml([
+        { name: 'llama.cpp', owner: 'ggml-org', stars: '80,000', starsToday: '900' },
+        { name: 'plain-repo', owner: 'acme', stars: '10', starsToday: '1' },
+        { name: 'llama.cpp-tools', owner: 'acme', stars: '5', starsToday: '1' },
+        { name: 'another-repo', owner: 'acme', stars: '3', starsToday: '1' },
+        { name: 'routing-marker-repo', owner: 'acme', stars: '7', starsToday: '2' },
+      ]),
+      contentType: 'text/html; charset=utf-8',
+      statusCode: 200,
+    });
+    await runPollingJob({ config, logger, sourceProviders, storage });
+
+    const routedPost = await storage.xPosts.findByDedupeKey('github:trending:acme/routing-marker-repo');
+    assert(routedPost !== null, 'routing marker repo should be stored');
+    const routedBarkEvent = await storage.deliveryEvents.findByPostAndTarget(
+      routedPost.xPostId,
+      barkTargetKey,
+    );
+    assert(routedBarkEvent !== null, 'routing rule should deliver to the bark target');
+    const routedFeishuEvent = await storage.deliveryEvents.findByPostAndTarget(
+      routedPost.xPostId,
+      TARGET_KEY,
+    );
+    assert(
+      routedFeishuEvent === null,
+      'routing rule must not deliver to channels outside its target list',
+    );
+    const routedGenericEvent = await storage.deliveryEvents.findByPostAndTarget(
+      routedPost.xPostId,
+      channelTargetByKind.get('generic')?.targetKey ?? '',
+    );
+    assert(routedGenericEvent === null, 'routing rule must not deliver to generic webhook');
+    checks.push({ name: '分渠道规则：命中帖子只投递到指定通道' });
+
+    const nonMatchingRepoPost = await storage.xPosts.findByDedupeKey('github:trending:acme/plain-repo');
+    const nonMatchingEvent = await storage.deliveryEvents.findByPostAndTarget(
+      nonMatchingRepoPost?.xPostId ?? '',
+      barkTargetKey,
+    );
+    assert(nonMatchingEvent === null, 'non-matching post must not create events for routed channels');
+
+    await app.inject({
+      method: 'PUT',
+      payload: { rules: [] },
+      url: '/admin/api/subscription-rules',
+    });
+    checks.push({ name: '分渠道规则：未命中不投递并正确清理规则' });
+
     const feedXmlResponse = await app.inject({ method: 'GET', url: '/feed.xml' });
     assert(feedXmlResponse.statusCode === 200, `feed.xml returned ${feedXmlResponse.statusCode}`);
     assert(
@@ -1552,6 +1802,209 @@ async function main(): Promise<void> {
       '/ready did not return DEPENDENCY_UNREADY',
     );
     checks.push({ name: '/ready 在 Redis 不可用时返回 503 DEPENDENCY_UNREADY' });
+
+    const exportCsvResponse = await app.inject({
+      method: 'GET',
+      url: '/admin/api/posts/export?format=csv',
+    });
+    assert(exportCsvResponse.statusCode === 200, `csv export returned ${exportCsvResponse.statusCode}`);
+    assert(
+      exportCsvResponse.headers['content-type']?.includes('text/csv') === true,
+      `csv export content-type mismatch: ${exportCsvResponse.headers['content-type']}`,
+    );
+    assert(
+      exportCsvResponse.body.startsWith('\ufeffxPostId,authorUsername,postedAt'),
+      'csv export should start with UTF-8 BOM and header row',
+    );
+    const csvLines = exportCsvResponse.body.trim().split('\r\n');
+    assert(csvLines.length >= 2, `csv export should contain data rows, got ${csvLines.length}`);
+    assert(
+      exportCsvResponse.headers['content-disposition']?.includes('posts-') === true,
+      'csv export should set a download file name',
+    );
+
+    const exportJsonResponse = await app.inject({
+      method: 'GET',
+      url: `/admin/api/posts/export?format=json&authorUsername=${encodeURIComponent(WATCH_USERNAME)}`,
+    });
+    assert(exportJsonResponse.statusCode === 200, `json export returned ${exportJsonResponse.statusCode}`);
+    const exportedPosts = JSON.parse(exportJsonResponse.body) as Array<{ authorUsername: string }>;
+    assert(
+      exportedPosts.length > 0 &&
+        exportedPosts.every((post) => post.authorUsername === WATCH_USERNAME),
+      `json export filter mismatch: ${exportedPosts.map((post) => post.authorUsername).join(',')}`,
+    );
+
+    const wildcardExportResponse = await app.inject({
+      method: 'GET',
+      url: '/admin/api/posts/export?format=json&authorUsername=%25',
+    });
+    const wildcardExportBody = JSON.parse(wildcardExportResponse.body) as unknown[];
+    assert(
+      wildcardExportBody.length === 0,
+      `author filter should treat % literally, got ${wildcardExportBody.length} posts`,
+    );
+
+    const accountSearchResponse = await app.inject({
+      method: 'GET',
+      url: '/admin/api/watch-accounts?page=1&pageSize=50&query=%25',
+    });
+    const accountSearchBody = JSON.parse(accountSearchResponse.body) as {
+      data: { pagination: { total: number } };
+    };
+    assert(
+      accountSearchBody.data.pagination.total === 0,
+      `watch account search should treat % literally, got ${accountSearchBody.data.pagination.total}`,
+    );
+    checks.push({ name: '帖子导出 CSV/JSON（BOM、表头、筛选、通配符转义）' });
+
+    const dataSettingsBefore = await app.inject({ method: 'GET', url: '/admin/api/settings/data' });
+    const dataSettingsBeforeBody = JSON.parse(dataSettingsBefore.body) as {
+      data: { expiredPosts: number; retentionDays: number };
+    };
+    assert(
+      dataSettingsBeforeBody.data.retentionDays === 0 && dataSettingsBeforeBody.data.expiredPosts === 0,
+      `default retention should be disabled: ${JSON.stringify(dataSettingsBeforeBody.data)}`,
+    );
+
+    const saveRetentionResponse = await app.inject({
+      method: 'PUT',
+      payload: { retentionDays: 30 },
+      url: '/admin/api/settings/data',
+    });
+    const saveRetentionBody = JSON.parse(saveRetentionResponse.body) as {
+      data: { expiredEvents: number; expiredPosts: number; retentionDays: number };
+    };
+    assert(
+      saveRetentionBody.data.retentionDays === 30 && saveRetentionBody.data.expiredPosts > 0,
+      `retention preview mismatch: ${JSON.stringify(saveRetentionBody.data)}`,
+    );
+
+    const cleanupResponse = await app.inject({
+      method: 'POST',
+      url: '/admin/api/actions/cleanup-now',
+    });
+    const cleanupBody = JSON.parse(cleanupResponse.body) as {
+      data: {
+        deletedEvents: number;
+        deletedPosts: number;
+        settings: { expiredPosts: number; lastCleanupAt: string | null };
+      };
+    };
+    assert(
+      cleanupBody.data.deletedPosts > 0 &&
+        cleanupBody.data.settings.expiredPosts === 0 &&
+        cleanupBody.data.settings.lastCleanupAt !== null,
+      `cleanup mismatch: ${JSON.stringify(cleanupBody.data)}`,
+    );
+    const recentPostAfterCleanup = await storage.xPosts.findByDedupeKey('anthropic:news:article-two');
+    assert(recentPostAfterCleanup !== null, 'recent posts should survive retention cleanup');
+    checks.push({ name: '数据保留策略（预览计数、立即清理、保留最近帖子）' });
+
+    const backupResponse = await app.inject({ method: 'POST', url: '/admin/api/actions/backup' });
+    assert(backupResponse.statusCode === 200, `backup returned ${backupResponse.statusCode}`);
+    const backupBody = JSON.parse(backupResponse.body) as {
+      data: { backup: { name: string; sizeBytes: number }; backups: unknown[] };
+    };
+    assert(
+      /^backup-\d{8}-\d{6}\.sqlite$/u.test(backupBody.data.backup.name) &&
+        backupBody.data.backup.sizeBytes > 0 &&
+        backupBody.data.backups.length === 1,
+      `backup payload mismatch: ${JSON.stringify(backupBody.data.backup)}`,
+    );
+
+    const backupListResponse = await app.inject({ method: 'GET', url: '/admin/api/backups' });
+    const backupListBody = JSON.parse(backupListResponse.body) as { data: { backups: unknown[] } };
+    assert(backupListBody.data.backups.length === 1, 'backup list should contain one entry');
+
+    const downloadResponse = await app.inject({
+      method: 'GET',
+      url: `/admin/api/backups/${backupBody.data.backup.name}/download`,
+    });
+    assert(downloadResponse.statusCode === 200, `backup download returned ${downloadResponse.statusCode}`);
+    assert(
+      downloadResponse.rawPayload.subarray(0, 15).toString('utf8') === 'SQLite format 3',
+      'downloaded backup should be a SQLite database',
+    );
+
+    const deleteBackupResponse = await app.inject({
+      method: 'DELETE',
+      url: `/admin/api/backups/${backupBody.data.backup.name}`,
+    });
+    const deleteBackupBody = JSON.parse(deleteBackupResponse.body) as { data: { deleted: boolean } };
+    assert(deleteBackupBody.data.deleted, 'backup delete should report deleted=true');
+    const backupListAfterDelete = await app.inject({ method: 'GET', url: '/admin/api/backups' });
+    const backupListAfterDeleteBody = JSON.parse(backupListAfterDelete.body) as {
+      data: { backups: unknown[] };
+    };
+    assert(backupListAfterDeleteBody.data.backups.length === 0, 'backup list should be empty after delete');
+    checks.push({ name: '数据库备份（创建、列表、下载、删除）' });
+
+    const logProbe = createLogger({ bindings: { module: 'smoke-probe' }, level: 'info' });
+    logProbe.info({ probe: true }, 'smoke log probe');
+    logProbe.error({ probe: true }, 'smoke error probe');
+
+    const logsResponse = await app.inject({ method: 'GET', url: '/admin/api/logs?limit=50' });
+    assert(logsResponse.statusCode === 200, `logs returned ${logsResponse.statusCode}: ${logsResponse.body.slice(0, 200)}`);
+    const logsBody = JSON.parse(logsResponse.body) as {
+      data: { capacity: number; entries: Array<{ level: string; time: string }>; size: number };
+    };
+    assert(
+      logsBody.data.capacity === 500 &&
+        logsBody.data.size >= 2 &&
+        logsBody.data.entries.length >= 2 &&
+        logsBody.data.entries.every((entry) => typeof entry.time === 'string'),
+      `logs payload mismatch: size=${logsBody.data.size}`,
+    );
+
+    const errorLogsResponse = await app.inject({ method: 'GET', url: '/admin/api/logs?level=error' });
+    const errorLogsBody = JSON.parse(errorLogsResponse.body) as {
+      data: { entries: Array<{ level: string }> };
+    };
+    assert(
+      errorLogsBody.data.entries.length >= 1 &&
+        errorLogsBody.data.entries.every((entry) => ['error', 'fatal'].includes(entry.level)),
+      'error level filter should only return error/fatal entries',
+    );
+    checks.push({ name: '运行日志接口（环形缓冲、级别过滤）' });
+
+    const anthropicAuthorId = anthropicAccountAfterPoll?.xUserId ?? '';
+    const postsBeforeCascade = await prisma.xPostRaw.count();
+    const eventsBeforeCascade = await prisma.deliveryEvent.count();
+    const anthropicPostsBeforeCascade = await prisma.xPostRaw.count({
+      where: { authorUserId: anthropicAuthorId },
+    });
+    assert(anthropicPostsBeforeCascade === 2, 'anthropic posts should exist before cascade delete');
+
+    const deleteAccountResponse = await app.inject({
+      method: 'DELETE',
+      url: `/admin/api/watch-accounts/${anthropicAccount.id}`,
+    });
+    const deleteAccountBody = JSON.parse(deleteAccountResponse.body) as {
+      data: { deleted: boolean; deletedEvents: number; deletedPosts: number };
+    };
+    assert(
+      deleteAccountResponse.statusCode === 200 &&
+        deleteAccountBody.data.deleted === true &&
+        deleteAccountBody.data.deletedPosts === anthropicPostsBeforeCascade &&
+        deleteAccountBody.data.deletedEvents > 0,
+      `cascade delete payload mismatch: ${JSON.stringify(deleteAccountBody.data)}`,
+    );
+
+    const anthropicPostsAfterCascade = await prisma.xPostRaw.count({
+      where: { authorUserId: anthropicAuthorId },
+    });
+    assert(anthropicPostsAfterCascade === 0, 'source posts should be removed with the account');
+    const postsAfterCascade = await prisma.xPostRaw.count();
+    const eventsAfterCascade = await prisma.deliveryEvent.count();
+    assert(
+      postsAfterCascade === postsBeforeCascade - anthropicPostsBeforeCascade &&
+        eventsAfterCascade === eventsBeforeCascade - deleteAccountBody.data.deletedEvents,
+      `cascade delete should not touch other sources: posts ${postsAfterCascade}/${postsBeforeCascade}, events ${eventsAfterCascade}/${eventsBeforeCascade}`,
+    );
+    const deletedAccount = await storage.watchAccounts.findById(anthropicAccount.id);
+    assert(deletedAccount === null, 'watch account should be deleted after cascade');
+    checks.push({ name: '删除监听源级联删除其消息与投递记录（其他源不受影响）' });
 
     const counts = await prisma.$transaction([
       prisma.watchAccount.count(),
@@ -1935,19 +2388,58 @@ async function startMockFeedServer(): Promise<{
   };
 }
 
+interface MockWebhookRequest {
+  body: unknown;
+  headers: http.IncomingHttpHeaders;
+  url: string;
+}
+
 async function startMockWebhook(): Promise<{
   close(): Promise<void>;
-  requests: unknown[];
-  url: string;
+  requests: MockWebhookRequest[];
+  urls: { bark: string; dingtalk: string; feishu: string; generic: string; wecom: string };
 }> {
-  const requests: unknown[] = [];
+  const requests: MockWebhookRequest[] = [];
   const server = http.createServer(async (request, response) => {
-    if (request.method !== 'POST' || request.url !== '/mock-feishu-webhook-secret') {
+    if (request.method !== 'POST') {
       sendJson(response, { error: 'not found' }, 404);
       return;
     }
 
-    requests.push(await readJsonBody(request));
+    const requestUrl = request.url ?? '';
+
+    if (!requestUrl.startsWith('/mock-')) {
+      sendJson(response, { error: 'not found' }, 404);
+      return;
+    }
+
+    requests.push({
+      body: await readJsonBody(request),
+      headers: request.headers,
+      url: requestUrl,
+    });
+
+    if (requestUrl.startsWith('/mock-wecom') || requestUrl.startsWith('/mock-dingtalk')) {
+      sendJson(response, {
+        errcode: 0,
+        errmsg: 'ok',
+      });
+      return;
+    }
+
+    if (requestUrl.startsWith('/mock-bark')) {
+      sendJson(response, {
+        code: 200,
+        message: 'success',
+      });
+      return;
+    }
+
+    if (requestUrl.startsWith('/mock-generic')) {
+      sendJson(response, { ok: true });
+      return;
+    }
+
     sendJson(response, {
       code: 0,
       msg: 'success',
@@ -1958,7 +2450,13 @@ async function startMockWebhook(): Promise<{
   return {
     close: () => closeServer(server),
     requests,
-    url: `${baseUrl}/mock-feishu-webhook-secret`,
+    urls: {
+      bark: `${baseUrl}/mock-bark/device-key`,
+      dingtalk: `${baseUrl}/mock-dingtalk`,
+      feishu: `${baseUrl}/mock-feishu-webhook-secret`,
+      generic: `${baseUrl}/mock-generic`,
+      wecom: `${baseUrl}/mock-wecom`,
+    },
   };
 }
 

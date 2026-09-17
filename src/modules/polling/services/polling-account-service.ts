@@ -132,8 +132,14 @@ export class PollingAccountService {
 
     let eventsCreated = 0;
 
-    if (options.createEvents && this.shouldDeliver(post)) {
+    if (options.createEvents) {
+      const allowedTargetKeys = this.resolveDeliveryTargets(post, deliveryTargets);
+
       for (const deliveryTarget of deliveryTargets) {
+        if (!allowedTargetKeys.has(deliveryTarget.targetKey)) {
+          continue;
+        }
+
         const deliveryEvent = await this.options.deliveryEvents.createIfAbsent({
           status: 'pending',
           targetKey: deliveryTarget.targetKey,
@@ -152,14 +158,17 @@ export class PollingAccountService {
     };
   }
 
-  private shouldDeliver(post: StandardizedPost): boolean {
+  private resolveDeliveryTargets(post: StandardizedPost, deliveryTargets: DeliveryTarget[]): Set<string> {
     const matcher = this.options.subscriptionRuleMatcher;
 
-    if (matcher === undefined || !matcher.hasEnabledRules) {
-      return true;
+    if (matcher === undefined) {
+      return new Set(deliveryTargets.map((target) => target.targetKey));
     }
 
-    return matcher.matches(post.textContent);
+    return matcher.resolveTargetKeys(
+      post.textContent,
+      deliveryTargets.map((target) => target.targetKey),
+    );
   }
 }
 

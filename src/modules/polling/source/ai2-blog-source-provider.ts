@@ -33,7 +33,6 @@ const MONTH_PATTERN =
 
 export class Ai2BlogSourceProvider implements SourceProvider {
   public readonly sourceType = 'ai2_blog' as const;
-  public readonly firstRunBaseline = 'all' as const;
   private readonly fetchImplementation: FetchImplementation;
   private readonly timeoutMs: number;
   private readonly userAgent: string;

@@ -7,6 +7,7 @@ import type {
   WatchAccount,
   WatchAccountSourceType,
 } from './types';
+import { escapeLikePattern } from './sqlite-like';
 
 interface WatchAccountSourceKey {
   sourceType: WatchAccountSourceType;
@@ -177,7 +178,7 @@ export class WatchAccountRepository {
       orderBy: { xUsername: 'asc' },
       skip: (input.page - 1) * input.pageSize,
       take: input.pageSize,
-      where: toWatchAccountWhereInput(input),
+      where: await this.buildWhereInput(input),
     });
 
     return watchAccounts.map(mapWatchAccount);
@@ -185,8 +186,26 @@ export class WatchAccountRepository {
 
   public async countAll(input: { query?: string } = {}): Promise<number> {
     return this.prisma.watchAccount.count({
-      where: toWatchAccountWhereInput(input),
+      where: await this.buildWhereInput(input),
     });
+  }
+
+  private async buildWhereInput(input: { query?: string }): Promise<Prisma.WatchAccountWhereInput> {
+    const query = normalizeWatchAccountQuery(input.query);
+
+    if (query === undefined) {
+      return {};
+    }
+
+    const matches = await findMatchingQueryValues(this.prisma, query);
+
+    return {
+      OR: [
+        { xUsername: { in: matches.usernames } },
+        { displayName: { in: matches.displayNames } },
+        { sourceUrl: { in: matches.sourceUrls } },
+      ],
+    };
   }
 
   public async listEnabled(): Promise<WatchAccount[]> {
@@ -332,31 +351,30 @@ function normalizeOptionalXUsername(xUsername: string | null | undefined): strin
   return normalizeXUsername(xUsername);
 }
 
-function toWatchAccountWhereInput(input: { query?: string }): Prisma.WatchAccountWhereInput {
-  const query = normalizeWatchAccountQuery(input.query);
-
-  if (query === undefined) {
-    return {};
-  }
+async function findMatchingQueryValues(
+  prisma: PrismaClient,
+  query: string,
+): Promise<{ displayNames: string[]; sourceUrls: string[]; usernames: string[] }> {
+  const pattern = `%${escapeLikePattern(query)}%`;
+  const [usernameRows, displayNameRows, sourceUrlRows] = await Promise.all([
+    prisma.$queryRaw<Array<{ x_username: string }>>`
+      SELECT DISTINCT x_username FROM watch_accounts
+      WHERE x_username LIKE ${pattern} ESCAPE '\\'
+    `,
+    prisma.$queryRaw<Array<{ display_name: string }>>`
+      SELECT DISTINCT display_name FROM watch_accounts
+      WHERE display_name LIKE ${pattern} ESCAPE '\\'
+    `,
+    prisma.$queryRaw<Array<{ source_url: string }>>`
+      SELECT DISTINCT source_url FROM watch_accounts
+      WHERE source_url LIKE ${pattern} ESCAPE '\\'
+    `,
+  ]);
 
   return {
-    OR: [
-      {
-        xUsername: {
-          contains: query,
-        },
-      },
-      {
-        displayName: {
-          contains: query,
-        },
-      },
-      {
-        sourceUrl: {
-          contains: query,
-        },
-      },
-    ],
+    displayNames: displayNameRows.map((row) => row.display_name),
+    sourceUrls: sourceUrlRows.map((row) => row.source_url),
+    usernames: usernameRows.map((row) => row.x_username),
   };
 }
 

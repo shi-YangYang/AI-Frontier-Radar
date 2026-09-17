@@ -9,12 +9,15 @@ export interface SubscriptionRule {
   include: string[];
   mode: SubscriptionRuleMode;
   name: string;
+  targetKeys: string[];
 }
 
 const SUBSCRIPTION_RULES_KEY = 'subscription.rules';
 const MAX_RULES = 50;
 const MAX_TERMS_PER_RULE = 50;
 const MAX_TERM_LENGTH = 100;
+const MAX_TARGET_KEYS_PER_RULE = 50;
+const MAX_TARGET_KEY_LENGTH = 100;
 const MAX_RULE_NAME_LENGTH = 100;
 
 export class SubscriptionRuleValidationError extends Error {
@@ -103,7 +106,44 @@ export function parseRule(value: unknown, index = 0): SubscriptionRule {
     include,
     mode,
     name,
+    targetKeys: readTargetKeys(record.targetKeys, index),
   };
+}
+
+function readTargetKeys(value: unknown, index: number): string[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new SubscriptionRuleValidationError(`rules[${index}].targetKeys 必须是字符串数组。`);
+  }
+
+  if (value.length > MAX_TARGET_KEYS_PER_RULE) {
+    throw new SubscriptionRuleValidationError(
+      `rules[${index}].targetKeys 不能超过 ${MAX_TARGET_KEYS_PER_RULE} 个。`,
+    );
+  }
+
+  const targetKeys: string[] = [];
+
+  for (const entry of value) {
+    if (typeof entry !== 'string') {
+      throw new SubscriptionRuleValidationError(`rules[${index}].targetKeys 只能包含字符串。`);
+    }
+
+    const targetKey = entry.trim();
+
+    if (targetKey.length === 0 || targetKey.length > MAX_TARGET_KEY_LENGTH) {
+      continue;
+    }
+
+    if (!targetKeys.includes(targetKey)) {
+      targetKeys.push(targetKey);
+    }
+  }
+
+  return targetKeys;
 }
 
 function readRuleName(value: unknown, index: number): string {

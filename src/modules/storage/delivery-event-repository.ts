@@ -76,6 +76,41 @@ export class DeliveryEventRepository {
     return result.count;
   }
 
+  public async countExpiredByPostCutoff(cutoffIso: string): Promise<number> {
+    return this.prisma.deliveryEvent.count({
+      where: {
+        xPost: {
+          postedAt: {
+            lt: cutoffIso,
+          },
+        },
+      },
+    });
+  }
+
+  public async deleteByAuthorUserId(authorUserId: string): Promise<number> {
+    return this.prisma.$executeRaw`
+      DELETE FROM delivery_events
+      WHERE x_post_id IN (SELECT x_post_id FROM x_posts_raw WHERE author_user_id = ${authorUserId})
+    `;
+  }
+
+  public async deleteByXPostIds(xPostIds: string[]): Promise<number> {
+    if (xPostIds.length === 0) {
+      return 0;
+    }
+
+    const result = await this.prisma.deliveryEvent.deleteMany({
+      where: {
+        xPostId: {
+          in: xPostIds,
+        },
+      },
+    });
+
+    return result.count;
+  }
+
   public async deleteAll(): Promise<number> {
     const result = await this.prisma.deliveryEvent.deleteMany({});
 

@@ -32,8 +32,8 @@ const DEFAULT_USER_AGENT =
 const MAX_TRENDING_REPOS = 50;
 
 export class GithubTrendingSourceProvider implements SourceProvider {
-  public readonly sourceType = 'github' as const;
   public readonly firstRunBaseline = 'all' as const;
+  public readonly sourceType = 'github' as const;
   private readonly fetchImplementation: FetchImplementation;
   private readonly timeoutMs: number;
   private readonly userAgent: string;

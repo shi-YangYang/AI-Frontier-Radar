@@ -60,8 +60,8 @@ export interface SourceProviderFetchResult {
 }
 
 export interface SourceProvider {
-  readonly sourceType: SourceType;
   readonly firstRunBaseline?: 'all';
+  readonly sourceType: SourceType;
   fetchPosts(input: SourceProviderFetchInput): Promise<SourceProviderFetchResult>;
   validateSource(input: SourceProviderValidateSourceInput): Promise<SourceProviderAccount>;
 }

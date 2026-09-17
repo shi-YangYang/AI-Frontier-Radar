@@ -1,6 +1,6 @@
 <script setup lang="ts">
 defineProps<{
-  name: 'accounts' | 'delivery' | 'home' | 'poll' | 'posts' | 'settings';
+  name: 'accounts' | 'delivery' | 'home' | 'logs' | 'poll' | 'posts' | 'settings';
 }>();
 </script>
 
@@ -33,6 +33,12 @@ defineProps<{
     <template v-else-if="name === 'delivery'">
       <path d="M21.5 2.5 11 13" />
       <path d="M21.5 2.5 15 21l-4-8-8-4z" />
+    </template>
+    <template v-else-if="name === 'logs'">
+      <path d="M5 3.5h9.5L19 8v12.5H5z" />
+      <path d="M14 3.5V8h5" />
+      <path d="M8 12h8" />
+      <path d="M8 15.5h8" />
     </template>
     <template v-else>
       <line x1="4" y1="8" x2="20" y2="8" />

@@ -1,28 +1,38 @@
 <div align="center">
   <img src="./web/admin/public/brand/logo-mark.png" width="96" alt="AI Frontier Radar logo" />
   <h1>AI 前沿雷达</h1>
-  <p><strong>本地优先的 AI 公开消息监测工具：监听 X 账号与 RSS 订阅源新帖，沉淀到 SQLite，并同步推送到飞书群。</strong></p>
+  <p><strong>本地优先的 AI 公开消息监测工具：聚合 X 账号、官方博客与 RSS 订阅源，沉淀到 SQLite，并通过飞书 / 企业微信 / 钉钉 / Bark / 通用 Webhook 多渠道推送。</strong></p>
   <p>
     <a href="#快速开始">快速开始</a>
     · <a href="#功能">功能</a>
+    · <a href="#技术原理">技术原理</a>
     · <a href="#配置">配置</a>
     · <a href="#常见问题">常见问题</a>
-    · <a href="#开发">开发</a>
+    · <a href="#支持这个项目">支持</a>
   </p>
 </div>
 
 <div align="center">
 
+[![CI](https://github.com/shi-YangYang/AI-Frontier-Radar/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/shi-YangYang/AI-Frontier-Radar/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](./LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/shi-YangYang/AI-Frontier-Radar?style=flat-square)](https://github.com/shi-YangYang/AI-Frontier-Radar/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/shi-YangYang/AI-Frontier-Radar?style=flat-square)](https://github.com/shi-YangYang/AI-Frontier-Radar/forks)
+[![GitHub issues](https://img.shields.io/github/issues/shi-YangYang/AI-Frontier-Radar?style=flat-square)](https://github.com/shi-YangYang/AI-Frontier-Radar/issues)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](#支持这个项目)
+
 ![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-3C873A?style=flat-square)
 ![TypeScript 5.x](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square)
 ![SQLite Local](https://img.shields.io/badge/SQLite-local-044A64?style=flat-square)
 ![Vue 3](https://img.shields.io/badge/Vue-3-42B883?style=flat-square)
+![Playwright](https://img.shields.io/badge/Playwright-Chromium-2EAD33?style=flat-square)
+![Local-first](https://img.shields.io/badge/local--first-no%20cloud-4F46E5?style=flat-square)
 
 </div>
 
 ## English Summary
 
-AI Frontier Radar is a local-first monitor for public X posts and RSS/Atom feeds. It polls selected AI-related accounts and feeds, stores state in SQLite, sends new posts to Feishu webhooks, and provides a local Web dashboard for source, message, delivery, and runtime configuration management.
+AI Frontier Radar is a local-first monitor for public AI news sources. It polls X accounts, official blogs (Anthropic, AI2, Moonshot, Meta AI, xAI, ...) and RSS/Atom feeds, stores everything in SQLite, and pushes new posts to Feishu / WeCom / DingTalk / Bark / generic webhooks with per-channel subscription rules. A local Web dashboard manages sources, messages, delivery, data retention, backups and runtime logs.
 
 ## 这是什么
 
@@ -32,8 +42,8 @@ AI 领域的重要消息经常先出现在 X 上。这个项目的目标不是�
 | --- | --- |
 | 监听公开 X 账号 | 维护一个账号列表，定时检测新帖 |
 | 监听 RSS/Atom 订阅源 | 添加官方博客、媒体、Newsletter 等 feed URL，与 X 账号统一管理 |
-| 防止历史消息轰炸 | 首次接入来源时建立基线，不补发旧帖 |
-| 飞书群通知 | 支持多个飞书自定义机器人 Webhook |
+| 防止历史消息轰炸 | 新来源首轮只锚定最新 1 条，之后只收录新内容（榜单型源首轮全量不入推送） |
+| 多渠道通知 | 飞书 / 企业微信 / 钉钉 / Bark / 通用 Webhook，可配分渠道订阅规则 |
 | 本地 Web 控制台 | 管理订阅源、查看消息、查看轮询/发送历史、调整配置 |
 | SQLite 持久化 | 本地保存订阅源、帖子、投递事件、运行配置 |
 | 浏览器数据源 | 支持代理、匿名抓取测试、登录态检查 |
@@ -57,27 +67,38 @@ AI 领域的重要消息经常先出现在 X 上。这个项目的目标不是�
 | 模块 | 页面 | 功能 |
 | --- | --- | --- |
 | 总览 | `/` | 查看运行摘要、手动轮询、手动发送 |
-| 监听源 | `/accounts` | 查询、分页、新增、删除 X 账号与 RSS 源 |
+| 监听源 | `/accounts` | 查询、分页、新增、删除 X 账号、官方博客与 RSS 源；删除源级联清理其数据 |
 | 消息内容 | `/posts` | 查看已轮询到的帖子、筛选、详情抽屉、自动刷新、一键清空 |
 | 最近轮询 | `/poll-runs` | 查询、分页、删除、批量删除、清空历史、查看错误 |
 | 最近发送 | `/delivery-events` | 查询、分页、删除、批量删除、清空历史 |
-| 配置 | `/settings` | 飞书 Webhook、轮询参数、X 数据源、运行信息 |
+| 配置 | `/settings` | 投递通道、轮询参数、X 数据源、订阅规则、数据与备份、运行信息 |
+| 运行日志 | `/logs` | 最近 500 条运行日志，级别筛选与自动刷新 |
 
 ## 架构
 
 ```mermaid
 flowchart LR
-  X["X public pages / API"] --> Source["SourceProvider (x / rss)"]
+  X["X public pages / API"] --> Source["SourceProvider<br/>(x / rss / github / hf / async sites)"]
   RSS["RSS / Atom feeds"] --> Source
   Source --> Polling["Polling Orchestrator"]
   Polling --> SQLite["SQLite + Prisma"]
   SQLite --> Delivery["Delivery Worker"]
-  Delivery --> Feishu["Feishu Webhooks"]
+  Delivery --> Channels["Feishu / WeCom / DingTalk / Bark / Generic Webhook"]
   SQLite --> Web["Local Web Console"]
   Web --> SQLite
 ```
 
 默认运行方式是单机本地运行。SQLite 是状态中心，Web 控制台只允许本机访问。
+
+## 技术原理
+
+| 机制 | 说明 |
+| --- | --- |
+| 源适配器（SourceProvider） | 每个来源实现统一接口（抓取 → 解析 → 标准化 → 去重键），X / RSS / GitHub / HF / Anthropic / AI2 / Moonshot / Meta / xAI 共用同一轮询、投递与规则链路；新增来源只需实现一个 provider |
+| 基线 + 游标（watermark） | 新来源首轮只锚定最新 1 条入库，之后只收录比游标更新的条目——用"水位线"机制避免接入即被历史消息轰炸；榜单型来源（GitHub Trending / HF Daily Papers）例外：首轮全量入库但不推送 |
+| 稳定 ID + 去重键 | 每个条目生成稳定 ID（发布时间毫秒 + 内容指纹）与去重键，重复轮询幂等跳过，不产生重复消息与重复推送 |
+| 通道注册表 | 投递侧按 `channelType` 分发到飞书 / 企业微信 / 钉钉（HMAC 加签）/ Bark / 通用 Webhook；失败区分可重试性（网络与 5xx 重试，业务码错误不重试） |
+| 本地优先 | SQLite 是唯一事实来源，全程无云依赖；本地 Feed（RSS / JSON Feed）、导出、备份都从本地数据生成 |
 
 ## 环境要求
 
@@ -109,7 +130,7 @@ http://127.0.0.1:3000/
 
 | 步骤 | 位置 | 做什么 |
 | --- | --- | --- |
-| 1 | `/settings` -> 飞书配置 | 添加飞书群自定义机器人 Webhook |
+| 1 | `/settings` -> 投递通道 | 添加飞书 / 企业微信 / 钉钉 / Bark / 通用 Webhook 通道并测试发送 |
 | 2 | `/settings` -> X 数据源 | 配置代理或运行匿名抓取测试 |
 | 3 | `/accounts` | 添加监听源：X 账号（例如 `openai` 或 `@openai`）或 RSS 源（例如 `https://openai.com/blog/rss.xml`） |
 | 4 | `/` | 手动触发轮询和发送，确认链路可用 |
@@ -222,19 +243,11 @@ npm run dev
 
 ## 飞书 Webhook
 
-推荐在 Web 控制台管理：
+推荐在 Web 控制台管理（`/settings -> 投递通道`，支持飞书 / 企业微信 / 钉钉 / Bark / 通用 Webhook，详见 [投递通道](#投递通道)）：
 
-```text
-/settings -> 飞书配置
-```
-
-支持：
-
-- 新增多个 Webhook。
-- 启用 / 停用单个 Webhook。
-- 测试发送。
-- 删除 Webhook。
-- 只展示脱敏预览，不回显完整 URL。
+- 新增多个通道，启用 / 停用单个通道。
+- 对任意通道测试发送。
+- 删除通道；列表只展示脱敏预览，不回显完整 URL。
 
 `.env` 中的 `FEISHU_WEBHOOK_URL` 只是启动种子。如果 SQLite 中已经存在默认投递目标，不会被 `.env` 覆盖。
 
@@ -345,6 +358,12 @@ YouTube 解析与 GitHub 页面抓取遵循“RSS 源”页签里的代理配置
 
 初始化后监听源为空，不会自动添加任何源；首次轮询只建立基线，不推送历史内容。
 
+## 收录规则与删除
+
+- 新添加的源**首轮仅入库最新 1 条**（作为基准并投递），之后只收录比基准更新的内容——不会把历史旧文一次性灌入。
+- 例外：榜单型源（GitHub Trending、HF Daily Papers）首轮全量入库但不推送——它们本身就是当天榜单，不存在旧文问题。
+- **删除监听源会连同其全部消息与投递记录一并删除**（界面会二次确认），重新添加后按新源重新锚定基准。
+
 ## 本地 Feed 输出
 
 外部阅读工具可直接订阅本机数据（无需鉴权）：
@@ -356,9 +375,25 @@ YouTube 解析与 GitHub 页面抓取遵循“RSS 源”页签里的代理配置
 
 参数：`?limit=50`（默认 50，最大 200）；`?matched=1` 仅输出命中启用“订阅规则”的内容（没有启用规则时等同全量）。
 
+## 投递通道
+
+支持多通道并发投递，`/settings -> 投递通道` 添加与测试：
+
+| 渠道 | 说明 | 需要的配置 |
+| --- | --- | --- |
+| 飞书机器人 | 群自定义机器人 Webhook | Webhook URL |
+| 企业微信机器人 | 群机器人 Webhook（markdown） | Webhook URL |
+| 钉钉机器人 | 群机器人 Webhook（markdown） | Webhook URL；若安全设置选"加签"，需填加签密钥 |
+| Bark | iOS 推送 | 完整推送地址 `https://api.day.app/<deviceKey>` |
+| 通用 Webhook | 任意系统对接，POST JSON（author/title/url/postedAt/text） | Webhook URL |
+
+- 新消息会按订阅规则投递到所有匹配的启用通道；失败的投递按既有重试策略处理（网络/5xx 重试，业务码错误不重试）。
+
 ## 订阅规则（推送过滤）
 
 在 `/settings -> 订阅规则` 配置关键词规则：**只有命中任一启用规则的帖子才会推送**；帖子始终入库，可在 `/posts` 查看。未配置规则或全部停用时，保持全量推送。
+
+每条规则可选择「生效通道」：不勾选 = 对所有通道生效；勾选后该规则只推送到所选通道（例如 CCF-A 规则只发飞书、不打扰手机推送）。多条规则命中的通道取并集。
 
 | 字段 | 说明 |
 | --- | --- |
@@ -368,6 +403,34 @@ YouTube 解析与 GitHub 页面抓取遵循“RSS 源”页签里的代理配置
 
 示例：规则「CCF-A 顶会」包含 `NeurIPS, ICML, ICLR, CVPR, ACL`（任一命中），排除 `workshop`，即可近似实现按会议名过滤。
 
+## 数据管理
+
+### 帖子导出
+
+- 管理台「消息内容」右上角提供 **导出 CSV / 导出 JSON**，按当前筛选条件导出。
+- 接口：`GET /admin/api/posts/export?format=csv|json`，支持 `authorUsername`、`postedFrom`、`postedTo`、`query`、`isReply`、`isRepost`、`limit`（默认 20000，最大 50000）。
+- CSV 带 UTF-8 BOM，可直接用 Excel 打开。
+
+### 数据保留策略
+
+- `/settings -> 数据与备份`：保留天数（0 = 关闭，默认关闭），按发布时间清理旧帖子与投递事件。
+- 每日随轮询自动执行一次（间隔 ≥24 小时），也可「立即清理」，界面上会先显示将删除的条目数并二次确认。
+
+## 数据库备份与恢复
+
+- `/settings -> 数据与备份` 可「立即备份」、下载或删除备份；使用 SQLite `VACUUM INTO` 生成一致性快照，自动保留最近 10 份（`.data/backups/`）。
+- 恢复（需先停止服务）：
+
+```bash
+npm run db:restore -- .data/backups/backup-20260917-143646.sqlite
+```
+
+脚本会校验备份文件、检测服务是否仍在运行，并自动把当前数据库另存为 `pre-restore-<时间戳>.sqlite` 快照后再替换。加 `--check` 只做校验。
+
+## 运行日志
+
+`/logs` 页面展示当前进程最近 500 条日志（内存缓冲，重启后清空），支持级别筛选（info / warn / error）与自动刷新。日志接口为 `GET /admin/api/logs`，敏感字段沿用脱敏规则。
+
 ## CI
 
 向 `master`（或 `main`）发起 Pull Request 时会自动触发 GitHub Actions 校验：
@@ -376,7 +439,7 @@ YouTube 解析与 GitHub 页面抓取遵循“RSS 源”页签里的代理配置
 npm run prisma:generate → npm run typecheck → npm run build → npm run smoke:e2e
 ```
 
-工作流文件：`.github/workflows/ci.yml`。推送分支本身不触发；只有 PR 打开/更新时运行。
+工作流文件：`.github/workflows/ci.yml`。推送分支本身不触发；只有 PR 打开/更新时运行（上方 CI 徽章跟踪 `dev` 分支最近一次运行）。
 
 ## 常用命令
 
@@ -392,6 +455,7 @@ npm run prisma:generate → npm run typecheck → npm run build → npm run smok
 | `npm run prisma:generate` | 生成 Prisma Client |
 | `npm run prisma:migrate:deploy` | 执行数据库迁移 |
 | `npm run playwright:install` | 安装 Chromium |
+| `npm run db:restore -- <备份文件>` | 用备份恢复数据库（需先停服） |
 
 ## 常见问题
 
@@ -454,8 +518,8 @@ npm run playwright:install
 
 检查：
 
-- `/settings -> 飞书配置` 是否至少有一个启用 Webhook。
-- Webhook 测试发送是否成功。
+- `/settings -> 投递通道` 是否至少有一个启用通道。
+- 通道的「测试发送」是否成功。
 - `/delivery-events` 中对应记录的状态和错误信息。
 - 首次接入账号只建立基线，不补发历史消息。
 
@@ -493,6 +557,17 @@ web/admin               Vue 本地管理前端
 较大的功能迭代：先维护 `specs/spec-XXX-*/` 下的 `spec.md` 与 `plan.md`，关键决策确认后实施；实施完成后由独立验收产出 `acceptance.md`，未通过则进入返工流程，直到 PASS。
 
 任何 Agent 任务开始前，按 AGENTS.md 第 11 节顺序阅读固定必读与任务必读文档。项目行为变化时，同步更新本 README 与相关文档。
+
+## 支持这个项目
+
+如果这个项目对你有帮助，欢迎给一个 ⭐ **Star**，这能让更多需要「AI 前沿雷达」的人看到它。
+
+- ⭐ **Star**：[点个 Star](https://github.com/shi-YangYang/AI-Frontier-Radar/stargazers)，这是对项目最直接的支持
+- 🍴 **Fork**：[Fork 一份](https://github.com/shi-YangYang/AI-Frontier-Radar/forks)，改成你自己的雷达（换来源、换通道、换规则都很容易）
+- 🐛 **反馈**：Bug、建议、新来源需求，欢迎提 [Issue](https://github.com/shi-YangYang/AI-Frontier-Radar/issues)
+- 🔧 **贡献**：PR 一律欢迎；项目遵循 SDD 流程，较大的改动建议先开 Issue 对齐，并按 `specs/` 约定补充规格与验收
+
+[![Star History Chart](https://api.star-history.com/svg?repos=shi-YangYang/AI-Frontier-Radar&type=Date)](https://star-history.com/#shi-YangYang/AI-Frontier-Radar&Date)
 
 ## 许可证
 

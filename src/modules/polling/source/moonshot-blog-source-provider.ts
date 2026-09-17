@@ -31,7 +31,6 @@ const MAX_POSTS = 100;
 
 export class MoonshotBlogSourceProvider implements SourceProvider {
   public readonly sourceType = 'moonshot_blog' as const;
-  public readonly firstRunBaseline = 'all' as const;
   private readonly fetchImplementation: FetchImplementation;
   private readonly timeoutMs: number;
   private readonly userAgent: string;

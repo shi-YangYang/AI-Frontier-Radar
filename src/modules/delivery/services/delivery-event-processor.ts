@@ -1,6 +1,6 @@
 import type { AppLogger } from '../../../lib/logger';
 import type { DeliveryEventRepository, DeliveryTargetRepository, XPostRepository } from '../../storage';
-import type { FeishuWebhookClient, FeishuWebhookSendResult } from '../channel';
+import type { DeliveryChannelRegistry, DeliveryChannelSendResult } from '../channel';
 import type { V1TextMessageFormatter } from '../formatter';
 import { DeliveryRetryPolicy, createDeliveryRetryPolicy } from './delivery-retry-policy';
 
@@ -18,7 +18,7 @@ export interface DeliveryEventProcessResult {
 }
 
 export interface DeliveryEventProcessorOptions {
-  feishuClient: FeishuWebhookClient;
+  channels: DeliveryChannelRegistry;
   formatter: V1TextMessageFormatter;
   logger?: AppLogger;
   retryPolicy?: DeliveryRetryPolicy;
@@ -75,7 +75,9 @@ export class DeliveryEventProcessor {
         });
       }
 
-      if (target.channelType !== 'feishu_webhook') {
+      const channelSender = this.options.channels.get(target.channelType);
+
+      if (channelSender === undefined) {
         return this.recordFailure(claimedEvent, {
           message: `Unsupported delivery channel type ${target.channelType}.`,
           retryable: false,
@@ -88,9 +90,16 @@ export class DeliveryEventProcessor {
         postedAt: xPost.postedAt,
         textContent: xPost.textContent,
       });
-      const sendResult = await this.options.feishuClient.sendTextMessage({
+      const sendResult = await channelSender.send({
+        config: target.config,
+        message: {
+          author: xPost.authorUsername,
+          postedAt: xPost.postedAt,
+          text: message.text,
+          title: message.title,
+          url: xPost.permalinkUrl,
+        },
         targetKey: target.targetKey,
-        text: message.text,
         webhookUrl: target.webhookUrl,
       });
 
@@ -195,7 +204,7 @@ export function createDeliveryEventProcessor(
   return new DeliveryEventProcessor(options);
 }
 
-function formatSendFailure(result: Extract<FeishuWebhookSendResult, { ok: false }>): string {
+function formatSendFailure(result: Extract<DeliveryChannelSendResult, { ok: false }>): string {
   const diagnostics = JSON.stringify(result.error.diagnostics);
 
   return `${result.error.code}: ${result.error.message}; diagnostics=${diagnostics}`;

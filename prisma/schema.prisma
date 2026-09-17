@@ -54,6 +54,7 @@ model DeliveryTarget {
   channelType    String          @map("channel_type")
   displayName    String          @map("display_name")
   webhookUrl     String          @map("webhook_url")
+  configJson     String          @default("{}") @map("config_json")
   enabled        Boolean         @default(true)
   createdAt      String          @map("created_at")
   updatedAt      String          @map("updated_at")
