@@ -7,6 +7,7 @@ export interface SourceGroupSource {
 
 export interface SourceGroupDefinition {
   description: string;
+  details?: string;
   id: string;
   name: string;
   sources: readonly SourceGroupSource[];
@@ -14,8 +15,9 @@ export interface SourceGroupDefinition {
 
 export const SOURCE_GROUPS: readonly SourceGroupDefinition[] = [
   {
-    description:
-      '论文（arXiv cs.AI / cs.CL / cs.LG / cs.CV、HF Daily Papers）、科技新闻（Techmeme、Hacker News）、社区（Reddit r/LocalLLaMA）、产品发布（Product Hunt）、官方博客（OpenAI、Google AI、Google DeepMind）、中文媒体（量子位）与 GitHub 热门仓库。',
+    description: '人工智能前沿：论文、科技新闻、社区、产品发布、官方博客、中文媒体与 GitHub 热门仓库。',
+    details:
+      'arXiv cs.AI / cs.CL / cs.LG / cs.CV、HF Daily Papers、Techmeme、Hacker News、Reddit r/LocalLLaMA、Product Hunt、OpenAI News、Google AI、Google DeepMind、量子位、GitHub Trending（每日）。',
     id: 'ai-news',
     name: 'AI 消息',
     sources: [

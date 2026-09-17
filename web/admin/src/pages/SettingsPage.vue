@@ -78,36 +78,32 @@
               </span>
             </header>
 
-            <div class="table-wrap">
+            <EmptyState
+              v-if="deliveryTargets.length === 0"
+              :title="t('settings.feishu.emptyTitle')"
+              :description="t('settings.feishu.empty')"
+            />
+            <div v-else class="table-wrap">
               <table class="delivery-target-table">
                 <thead>
                   <tr>
                     <th>{{ t('settings.feishu.displayNameLabel') }}</th>
-                    <th>targetKey</th>
                     <th>{{ t('settings.feishu.table.enabled') }}</th>
                     <th>{{ t('settings.feishu.table.preview') }}</th>
-                    <th>{{ t('table.createdAt') }}</th>
-                    <th>{{ t('table.updatedAt') }}</th>
                     <th>{{ t('table.actions') }}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-if="deliveryTargets.length === 0">
-                    <td colspan="7" class="empty-cell">{{ t('settings.feishu.empty') }}</td>
-                  </tr>
                   <tr v-for="target in deliveryTargets" :key="target.id">
                     <td>
                       <strong>{{ target.displayName }}</strong>
                     </td>
-                    <td><code>{{ target.targetKey }}</code></td>
                     <td>
                       <span class="status-badge" :class="target.enabled ? 'good' : 'neutral'">
                         {{ target.enabled ? t('settings.status.enabled') : t('settings.status.disabled') }}
                       </span>
                     </td>
                     <td><code class="wrap">{{ target.webhookPreview }}</code></td>
-                    <td>{{ formatDateTime(target.createdAt) }}</td>
-                    <td>{{ formatDateTime(target.updatedAt) }}</td>
                     <td>
                       <div class="target-actions">
                         <button type="button" :disabled="busy" @click="openEditTarget(target)">{{ t('actions.edit') }}</button>
@@ -115,7 +111,7 @@
                           {{ target.enabled ? t('actions.disable') : t('actions.enable') }}
                         </button>
                         <button type="button" :disabled="busy" @click="testTarget(target)">{{ t('actions.testSend') }}</button>
-                        <button class="danger" type="button" :disabled="busy" @click="askDeleteTarget(target)">
+                        <button class="text-button danger-text" type="button" :disabled="busy" @click="askDeleteTarget(target)">
                           {{ t('actions.delete') }}
                         </button>
                       </div>
@@ -152,7 +148,6 @@
                   type="number"
                 />
                 <small>
-                  {{ t('settings.polling.rangeSeconds', { source: sourceLabel(settings.polling.sources.intervalSeconds) }) }}
                 </small>
               </label>
 
@@ -166,26 +161,22 @@
                   type="number"
                 />
                 <small>
-                  {{ t('settings.polling.rangeItems', { source: sourceLabel(settings.polling.sources.fetchLimitPerAccount) }) }}
                 </small>
               </label>
 
               <label class="checkbox-row">
                 <input v-model="pollingForm.excludeReplies" type="checkbox" />
                 <span>{{ t('settings.polling.excludeReplies') }}</span>
-                <small>
-                  {{ t('settings.polling.currentSource', { source: sourceLabel(settings.polling.sources.excludeReplies) }) }}
-                </small>
               </label>
 
               <label class="checkbox-row">
                 <input v-model="pollingForm.excludeReposts" type="checkbox" />
                 <span>{{ t('settings.polling.excludeReposts') }}</span>
-                <small>
-                  {{ t('settings.polling.currentSource', { source: sourceLabel(settings.polling.sources.excludeReposts) }) }}
-                </small>
               </label>
 
+              <p class="muted polling-source-note">
+                {{ t('settings.polling.sourceNote', { source: pollingSourceSummary }) }}
+              </p>
               <div class="form-actions">
                 <button class="primary" type="submit" :disabled="busy">{{ t('settings.polling.save') }}</button>
               </div>
@@ -715,6 +706,7 @@ import {
   type XSourceLoginCheckStatus,
 } from '../api/admin-api';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import EmptyState from '../components/EmptyState.vue';
 import PageHeader from '../components/PageHeader.vue';
 import PaginationBar from '../components/PaginationBar.vue';
 import SelectControl from '../components/SelectControl.vue';
@@ -1406,6 +1398,20 @@ function validateXProxyUrl(value: string): string | null {
 
   return null;
 }
+
+const pollingSourceSummary = computed(() => {
+  const polling = settings.value?.polling;
+
+  if (polling === undefined) {
+    return '-';
+  }
+
+  const sources = Object.values(polling.sources);
+
+  return sources.every((source) => source === 'env_default')
+    ? t('settings.source.envDefault')
+    : t('settings.source.databaseOverride');
+});
 
 function sourceLabel(source: RuntimeSettingSource): string {
   return source === 'database_override' ? t('settings.source.databaseOverride') : t('settings.source.envDefault');

@@ -3,6 +3,7 @@ import type { WatchAccountRepository } from './watch-account-repository';
 
 export interface SourceGroupStatus {
   description: string;
+  details?: string;
   id: string;
   installedCount: number;
   name: string;
@@ -33,6 +34,7 @@ export async function getSourceGroupStatuses(
 
     statuses.push({
       description: group.description,
+      ...(group.details === undefined ? {} : { details: group.details }),
       id: group.id,
       installedCount,
       name: group.name,

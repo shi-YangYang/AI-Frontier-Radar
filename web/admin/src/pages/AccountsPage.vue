@@ -129,6 +129,10 @@
               </span>
             </strong>
             <p class="muted">{{ group.description }}</p>
+            <details v-if="group.details !== undefined" class="source-group-details">
+              <summary>{{ t('accounts.groups.showSources') }}</summary>
+              <p class="muted">{{ group.details }}</p>
+            </details>
           </div>
           <button
             class="primary"
@@ -160,22 +164,22 @@
         <button class="primary" type="submit" :disabled="busy">{{ t('actions.query') }}</button>
         <button type="button" :disabled="busy" @click="clearQuery">{{ t('accounts.clearQuery') }}</button>
       </form>
-      <div class="table-wrap">
+      <EmptyState
+        v-if="accounts.length === 0"
+        :title="t('accounts.emptyTitle')"
+        :description="t('accounts.empty')"
+      />
+      <div v-else class="table-wrap">
         <table>
           <thead>
             <tr>
               <th>{{ t('table.source') }}</th>
               <th>{{ t('table.lastPolledAt') }}</th>
               <th>{{ t('table.lastPollStatus') }}</th>
-              <th>{{ t('table.baselinePost') }}</th>
-              <th>{{ t('table.latestPost') }}</th>
               <th>{{ t('table.actions') }}</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="accounts.length === 0">
-              <td colspan="6" class="empty-cell">{{ t('accounts.empty') }}</td>
-            </tr>
             <tr v-for="account in accounts" :key="account.id">
               <td>
                 <strong>
@@ -186,12 +190,12 @@
                 </strong>
                 <div class="muted">{{ account.displayName ?? '-' }}</div>
               </td>
-              <td>{{ formatDateTime(account.lastPolledAt) }}</td>
+              <td :title="formatDateTime(account.lastPolledAt)">
+                {{ formatRelativeTime(account.lastPolledAt) }}
+              </td>
               <td><StatusBadge :status="account.lastPollStatus" /></td>
-              <td><code>{{ dash(account.baselinePostId) }}</code></td>
-              <td><code>{{ dash(account.lastSeenPostId) }}</code></td>
-              <td>
-                <button class="danger" type="button" :disabled="busy" @click="askDelete(account)">
+              <td class="source-actions-cell">
+                <button class="text-button danger-text" type="button" :disabled="busy" @click="askDelete(account)">
                   {{ t('actions.delete') }}
                 </button>
               </td>
@@ -235,13 +239,14 @@ import {
   type WatchAccount,
 } from '../api/admin-api';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import EmptyState from '../components/EmptyState.vue';
 import PageHeader from '../components/PageHeader.vue';
 import PaginationBar from '../components/PaginationBar.vue';
 import SelectControl from '../components/SelectControl.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import ToastNotice from '../components/ToastNotice.vue';
 import { t } from '../i18n';
-import { DEFAULT_PAGE_SIZE, dash, formatDateTime } from '../utils';
+import { DEFAULT_PAGE_SIZE, formatDateTime, formatRelativeTime } from '../utils';
 
 type SourceKind =
   | 'x'

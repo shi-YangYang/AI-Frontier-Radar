@@ -407,6 +407,7 @@ export interface ResolvedYoutubeChannel {
 
 export interface SourceGroupStatus {
   description: string;
+  details?: string;
   id: string;
   installedCount: number;
   name: string;
