@@ -368,6 +368,34 @@ YouTube 解析与 GitHub 页面抓取遵循“RSS 源”页签里的代理配置
 
 示例：规则「CCF-A 顶会」包含 `NeurIPS, ICML, ICLR, CVPR, ACL`（任一命中），排除 `workshop`，即可近似实现按会议名过滤。
 
+## 数据管理
+
+### 帖子导出
+
+- 管理台「消息内容」右上角提供 **导出 CSV / 导出 JSON**，按当前筛选条件导出。
+- 接口：`GET /admin/api/posts/export?format=csv|json`，支持 `authorUsername`、`postedFrom`、`postedTo`、`query`、`isReply`、`isRepost`、`limit`（默认 20000，最大 50000）。
+- CSV 带 UTF-8 BOM，可直接用 Excel 打开。
+
+### 数据保留策略
+
+- `/settings -> 数据与备份`：保留天数（0 = 关闭，默认关闭），按发布时间清理旧帖子与投递事件。
+- 每日随轮询自动执行一次（间隔 ≥24 小时），也可「立即清理」，界面上会先显示将删除的条目数并二次确认。
+
+## 数据库备份与恢复
+
+- `/settings -> 数据与备份` 可「立即备份」、下载或删除备份；使用 SQLite `VACUUM INTO` 生成一致性快照，自动保留最近 10 份（`.data/backups/`）。
+- 恢复（需先停止服务）：
+
+```bash
+npm run db:restore -- .data/backups/backup-20260917-143646.sqlite
+```
+
+脚本会校验备份文件、检测服务是否仍在运行，并自动把当前数据库另存为 `pre-restore-<时间戳>.sqlite` 快照后再替换。加 `--check` 只做校验。
+
+## 运行日志
+
+`/logs` 页面展示当前进程最近 500 条日志（内存缓冲，重启后清空），支持级别筛选（info / warn / error）与自动刷新。日志接口为 `GET /admin/api/logs`，敏感字段沿用脱敏规则。
+
 ## CI
 
 向 `master`（或 `main`）发起 Pull Request 时会自动触发 GitHub Actions 校验：
@@ -392,6 +420,7 @@ npm run prisma:generate → npm run typecheck → npm run build → npm run smok
 | `npm run prisma:generate` | 生成 Prisma Client |
 | `npm run prisma:migrate:deploy` | 执行数据库迁移 |
 | `npm run playwright:install` | 安装 Chromium |
+| `npm run db:restore -- <备份文件>` | 用备份恢复数据库（需先停服） |
 
 ## 常见问题
 

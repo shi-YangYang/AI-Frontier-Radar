@@ -19,6 +19,20 @@
         >
           {{ t('posts.clearAll') }}
         </button>
+        <button
+          type="button"
+          :disabled="busy || summary.totalPosts === 0"
+          @click="exportPosts('csv')"
+        >
+          {{ t('posts.exportCsv') }}
+        </button>
+        <button
+          type="button"
+          :disabled="busy || summary.totalPosts === 0"
+          @click="exportPosts('json')"
+        >
+          {{ t('posts.exportJson') }}
+        </button>
       </div>
     </PageHeader>
 
@@ -320,6 +334,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   clearPostsHistory,
   listPosts,
+  postsExportUrl,
   type AdminPagination,
   type PostBooleanFilter,
   type PostPageQuery,
@@ -478,6 +493,20 @@ function toLocalDateTimeValue(date: Date): string {
     ':',
     pad(date.getMinutes()),
   ].join('');
+}
+
+function exportPosts(format: 'csv' | 'json'): void {
+  window.location.href = postsExportUrl(
+    {
+      authorUsername: filters.authorUsername,
+      isReply: filters.isReply,
+      isRepost: filters.isRepost,
+      postedFrom: filters.postedFrom,
+      postedTo: filters.postedTo,
+      query: filters.query,
+    },
+    format,
+  );
 }
 
 async function clearFilters(): Promise<void> {

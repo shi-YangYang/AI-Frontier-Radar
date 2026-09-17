@@ -544,6 +544,110 @@
           </article>
         </section>
 
+        <section v-else-if="activeSettingsTab === 'data'" class="settings-layout single-column">
+          <article class="panel settings-form-panel">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.data.retentionTitle') }}</h2>
+                <p>{{ t('settings.data.retentionDescription') }}</p>
+              </div>
+            </header>
+
+            <div v-if="dataSettings === null" class="empty-panel">{{ t('settings.loading') }}</div>
+            <form v-else class="settings-form" @submit.prevent="saveDataSettings">
+              <label>
+                <span>{{ t('settings.data.retentionDaysLabel') }}</span>
+                <input
+                  v-model.number="retentionDaysInput"
+                  :disabled="busy"
+                  min="0"
+                  max="3650"
+                  type="number"
+                />
+                <small class="muted">{{ t('settings.data.retentionDaysHint') }}</small>
+              </label>
+
+              <dl class="detail-list">
+                <div>
+                  <dt>{{ t('settings.data.expiredPosts') }}</dt>
+                  <dd>{{ dataSettings.expiredPosts }}</dd>
+                </div>
+                <div>
+                  <dt>{{ t('settings.data.expiredEvents') }}</dt>
+                  <dd>{{ dataSettings.expiredEvents }}</dd>
+                </div>
+                <div>
+                  <dt>{{ t('settings.data.lastCleanupAt') }}</dt>
+                  <dd>{{ dataSettings.lastCleanupAt ?? '-' }}</dd>
+                </div>
+              </dl>
+
+              <div class="settings-actions">
+                <button class="primary" type="submit" :disabled="busy">
+                  {{ t('actions.save') }}
+                </button>
+                <button
+                  class="danger"
+                  type="button"
+                  :disabled="busy || dataSettings.retentionDays === 0 || dataSettings.expiredPosts === 0"
+                  @click="cleanupOpen = true"
+                >
+                  {{ t('settings.data.cleanupNow') }}
+                </button>
+              </div>
+            </form>
+          </article>
+
+          <article class="panel settings-form-panel">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.data.backupTitle') }}</h2>
+                <p>{{ t('settings.data.backupDescription') }}</p>
+              </div>
+            </header>
+
+            <div class="settings-actions">
+              <button class="primary" type="button" :disabled="busy" @click="createBackupNow">
+                {{ t('settings.data.createBackup') }}
+              </button>
+            </div>
+
+            <div v-if="backups.length === 0" class="empty-panel">
+              {{ t('settings.data.backupEmpty') }}
+            </div>
+            <table v-else class="data-table">
+              <thead>
+                <tr>
+                  <th>{{ t('settings.data.backupName') }}</th>
+                  <th>{{ t('settings.data.backupSize') }}</th>
+                  <th>{{ t('settings.data.backupCreatedAt') }}</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="backup in backups" :key="backup.name">
+                  <td><code>{{ backup.name }}</code></td>
+                  <td>{{ formatBytes(backup.sizeBytes) }}</td>
+                  <td>{{ formatDateTime(backup.createdAt) }}</td>
+                  <td class="table-actions">
+                    <a :href="backupDownloadUrl(backup.name)">{{ t('actions.download') }}</a>
+                    <button
+                      class="link-danger"
+                      type="button"
+                      :disabled="busy"
+                      @click="deleteBackupFile(backup)"
+                    >
+                      {{ t('actions.delete') }}
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div class="inline-alert">{{ t('settings.data.restoreHint') }}</div>
+          </article>
+        </section>
+
         <section v-else class="settings-layout single-column">
           <article class="panel settings-form-panel">
             <header class="panel-header">
@@ -599,6 +703,17 @@
         </section>
       </div>
     </div>
+
+    <ConfirmModal
+      :body="t('settings.data.cleanupConfirmBody', {
+        events: dataSettings?.expiredEvents ?? 0,
+        posts: dataSettings?.expiredPosts ?? 0,
+      })"
+      :open="cleanupOpen"
+      :title="t('settings.data.cleanupConfirmTitle')"
+      @cancel="cleanupOpen = false"
+      @confirm="runCleanup"
+    />
 
     <Teleport to="body">
       <div v-if="editingTarget !== null" class="modal-backdrop" @click.self="closeEditTarget">
@@ -673,8 +788,15 @@ import { computed, onMounted, reactive, ref } from 'vue';
 
 import {
   AdminApiRequestError,
+  backupDownloadUrl,
   checkXSourceLogin,
+  createBackup,
   createDeliveryTarget,
+  deleteBackup,
+  getDataSettings,
+  listBackups,
+  runRetentionCleanup,
+  updateDataSettings,
   deleteDeliveryTarget,
   getRssSettings,
   getSettings,
@@ -697,6 +819,8 @@ import {
   type SubscriptionRule,
   type SubscriptionRuleMode,
   type RuntimeSettingSource,
+  type BackupEntry,
+  type RetentionSettings,
   type RuntimeSettingsSummary,
   type RuntimeXSourceSettings,
   type XSourceAnonymousCheckResult,
@@ -734,7 +858,111 @@ const xSourceSettings = ref<RuntimeXSourceSettings | null>(null);
 const anonymousCheckResult = ref<XSourceAnonymousCheckResult | null>(null);
 const loginCheckResult = ref<XSourceLoginCheckResult | null>(null);
 
-type SettingsTabKey = 'feishu' | 'polling' | 'rss' | 'rules' | 'xSource' | 'runtime';
+const backups = ref<BackupEntry[]>([]);
+const cleanupOpen = ref(false);
+const dataSettings = ref<RetentionSettings | null>(null);
+const retentionDaysInput = ref(0);
+
+async function loadDataSettings(): Promise<void> {
+  try {
+    dataSettings.value = await getDataSettings();
+    retentionDaysInput.value = dataSettings.value.retentionDays;
+  } catch (error) {
+    showSettingsError(error);
+  }
+}
+
+async function loadBackups(): Promise<void> {
+  try {
+    backups.value = await listBackups();
+  } catch (error) {
+    showSettingsError(error);
+  }
+}
+
+async function saveDataSettings(): Promise<void> {
+  busy.value = true;
+
+  try {
+    dataSettings.value = await updateDataSettings(retentionDaysInput.value);
+    retentionDaysInput.value = dataSettings.value.retentionDays;
+    notice.value = t('settings.data.saved');
+    noticeDanger.value = false;
+  } catch (error) {
+    showSettingsError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function runCleanup(): Promise<void> {
+  busy.value = true;
+  cleanupOpen.value = false;
+
+  try {
+    const result = await runRetentionCleanup();
+    dataSettings.value = result.settings;
+    retentionDaysInput.value = result.settings.retentionDays;
+    notice.value = t('settings.data.cleanupDone', {
+      events: result.deletedEvents,
+      posts: result.deletedPosts,
+    });
+    noticeDanger.value = false;
+  } catch (error) {
+    showSettingsError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function createBackupNow(): Promise<void> {
+  busy.value = true;
+
+  try {
+    const result = await createBackup();
+    backups.value = result.backups;
+    notice.value = t('settings.data.backupCreated', { name: result.backup.name });
+    noticeDanger.value = false;
+  } catch (error) {
+    showSettingsError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function deleteBackupFile(backup: BackupEntry): Promise<void> {
+  busy.value = true;
+
+  try {
+    await deleteBackup(backup.name);
+    backups.value = await listBackups();
+    notice.value = t('settings.data.backupDeleted', { name: backup.name });
+    noticeDanger.value = false;
+  } catch (error) {
+    showSettingsError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(value / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function showSettingsError(error: unknown): void {
+  notice.value = error instanceof Error ? error.message : String(error);
+  noticeDanger.value = true;
+}
+
+type SettingsTabKey = 'data' | 'feishu' | 'polling' | 'rss' | 'rules' | 'xSource' | 'runtime';
 
 const activeSettingsTab = ref<SettingsTabKey>('feishu');
 const settingsTabs: Array<{ descriptionKey: MessageKey; key: SettingsTabKey; labelKey: MessageKey }> = [
@@ -762,6 +990,11 @@ const settingsTabs: Array<{ descriptionKey: MessageKey; key: SettingsTabKey; lab
     descriptionKey: 'settings.tabs.rules.description',
     key: 'rules',
     labelKey: 'settings.tabs.rules.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.data.description',
+    key: 'data',
+    labelKey: 'settings.tabs.data.label',
   },
   {
     descriptionKey: 'settings.tabs.runtime.description',
@@ -825,6 +1058,8 @@ const xDiagnosticUsername = ref('openai');
 
 onMounted(() => {
   void loadSettings({ silent: true });
+  void loadDataSettings();
+  void loadBackups();
 });
 
 async function loadSettings(options: { silent?: boolean } = {}): Promise<void> {

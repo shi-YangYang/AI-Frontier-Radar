@@ -1,4 +1,6 @@
 import { randomBytes } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 import type { AppConfig } from '../../../shared/config/types';
 import { createFeishuWebhookClient, type FeishuWebhookFailureResult } from '../../delivery';
@@ -38,6 +40,14 @@ import type {
   SaveXBrowserSettingsInput,
 } from '../../storage/runtime-settings-service';
 import type { XPostPageQuery, XPostRawWithDeliveryEvents, XPostSummary } from '../../storage/types';
+import {
+  createBackupService,
+  createRetentionService,
+  type BackupEntry,
+  type RetentionCleanupResult,
+  type RetentionSettings,
+} from '../../maintenance';
+import { sharedLogBuffer, type LogBufferEntry } from '../../../lib/logger';
 import { SOURCE_GROUPS, findSourceGroup } from '../../../config/source-groups';
 import {
   applySourceGroup,
@@ -525,6 +535,176 @@ export async function clearAdminPostsHistory(
       deletedPosts,
       resetBoardSources,
     },
+  };
+}
+
+export async function getAdminDataSettings(
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: RetentionSettings }> {
+  const settings = await createRetentionService({ storage: options.storage }).getSettings();
+
+  return { ok: true, data: settings };
+}
+
+export async function updateAdminDataSettings(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: RetentionSettings }> {
+  if (!isRecord(body) || !Number.isSafeInteger(body.retentionDays)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'retentionDays 必须是整数。');
+  }
+
+  try {
+    const settings = await createRetentionService({ storage: options.storage }).saveSettings({
+      retentionDays: body.retentionDays as number,
+    });
+
+    return { ok: true, data: settings };
+  } catch (error) {
+    throw new AdminApiError(
+      400,
+      'INVALID_REQUEST',
+      error instanceof Error ? error.message : 'retentionDays 无效。',
+    );
+  }
+}
+
+export async function runAdminRetentionCleanup(options: AdminControllerOptions): Promise<{
+  ok: true;
+  data: RetentionCleanupResult & { settings: RetentionSettings };
+}> {
+  const service = createRetentionService({ storage: options.storage });
+  const result = await service.cleanupNow();
+  const settings = await service.getSettings();
+
+  return { ok: true, data: { ...result, settings } };
+}
+
+export async function listAdminBackups(
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { backups: BackupEntry[] } }> {
+  const backups = await createBackupService(openBackupOptions(options)).list();
+
+  return { ok: true, data: { backups } };
+}
+
+export async function createAdminBackup(
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { backup: BackupEntry; backups: BackupEntry[] } }> {
+  const service = createBackupService(openBackupOptions(options));
+  const backup = await service.create();
+  const backups = await service.list();
+
+  return { ok: true, data: { backup, backups } };
+}
+
+export async function deleteAdminBackup(
+  params: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { deleted: boolean } }> {
+  const name = readBackupName(params);
+  const deleted = await createBackupService(openBackupOptions(options)).delete(name);
+
+  return { ok: true, data: { deleted } };
+}
+
+export async function downloadAdminBackup(
+  params: unknown,
+  options: AdminControllerOptions,
+): Promise<{ content: Buffer; fileName: string }> {
+  const name = readBackupName(params);
+  const service = createBackupService(openBackupOptions(options));
+
+  try {
+    const content = await readFile(service.resolvePath(name));
+
+    return { content, fileName: name };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new AdminApiError(404, 'NOT_FOUND', '备份文件不存在。');
+    }
+
+    throw error;
+  }
+}
+
+export async function exportAdminPosts(
+  query: unknown,
+  options: AdminControllerOptions,
+): Promise<{ body: string; contentType: string; fileName: string }> {
+  const { format, limit, filters } = readExportQuery(query);
+  const posts = await options.storage.xPosts.listForExport(filters, limit);
+  const records = posts.map((post) => ({
+    detectedAt: post.detectedAt,
+    dedupeKey: post.dedupeKey,
+    isReply: post.isReply,
+    isRepost: post.isRepost,
+    permalinkUrl: post.permalinkUrl,
+    postedAt: post.postedAt,
+    textContent: post.textContent,
+    xPostId: post.xPostId,
+    authorUsername: post.authorUsername,
+  }));
+  const timestamp = formatFileTimestamp(new Date());
+
+  if (format === 'json') {
+    return {
+      body: JSON.stringify(records, null, 2),
+      contentType: 'application/json; charset=utf-8',
+      fileName: `posts-${timestamp}.json`,
+    };
+  }
+
+  const header = [
+    'xPostId',
+    'authorUsername',
+    'postedAt',
+    'detectedAt',
+    'permalinkUrl',
+    'textContent',
+    'isReply',
+    'isRepost',
+    'dedupeKey',
+  ];
+  const lines = [header.join(',')];
+
+  for (const record of records) {
+    lines.push(
+      [
+        record.xPostId,
+        record.authorUsername,
+        record.postedAt,
+        record.detectedAt,
+        record.permalinkUrl,
+        record.textContent,
+        String(record.isReply),
+        String(record.isRepost),
+        record.dedupeKey ?? '',
+      ]
+        .map(toCsvField)
+        .join(','),
+    );
+  }
+
+  return {
+    body: `\ufeff${lines.join('\r\n')}\r\n`,
+    contentType: 'text/csv; charset=utf-8',
+    fileName: `posts-${timestamp}.csv`,
+  };
+}
+
+export function listAdminLogs(query: unknown): {
+  ok: true;
+  data: { capacity: number; entries: LogBufferEntry[]; size: number };
+} {
+  const record = isRecord(query) ? query : {};
+  const level = readLogLevelFilter(record.level);
+  const limit = readLogLimit(record.limit);
+  const entries = sharedLogBuffer.list({ ...(level === undefined ? {} : { level }), limit });
+
+  return {
+    ok: true,
+    data: { capacity: sharedLogBuffer.maxSize, entries, size: sharedLogBuffer.size },
   };
 }
 
@@ -1986,6 +2166,110 @@ function redactFeishuWebhookUrlsFromText(value: string): string {
     /https:\/\/open\.feishu\.cn\/open-apis\/bot\/v2\/hook\/[^\s"',\\<>)}\]]+/gu,
     (webhookUrl) => previewSecretUrl(webhookUrl),
   );
+}
+
+function openBackupOptions(options: AdminControllerOptions): {
+  backupsDir: string;
+  databaseUrl: string;
+} {
+  return {
+    backupsDir: join(dirname(options.config.storage.sqlite.path), 'backups'),
+    databaseUrl: options.config.storage.prisma.databaseUrl,
+  };
+}
+
+function readBackupName(params: unknown): string {
+  if (!isRecord(params) || typeof params.name !== 'string' || params.name.trim().length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '备份文件名无效。');
+  }
+
+  const name = params.name.trim();
+
+  if (!/^backup-\d{8}-\d{6}(?:-\d+)?\.sqlite$/u.test(name)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '备份文件名无效。');
+  }
+
+  return name;
+}
+
+function readExportQuery(query: unknown): {
+  filters: Partial<XPostPageQuery>;
+  format: 'csv' | 'json';
+  limit: number;
+} {
+  const record = isRecord(query) ? query : {};
+  const formatValue =
+    record.format === undefined
+      ? 'csv'
+      : readSingleOptionalStringQueryValue(record.format, 'format') ?? 'csv';
+
+  if (formatValue !== 'csv' && formatValue !== 'json') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'format 必须是 csv 或 json。');
+  }
+
+  const postedFrom = readOptionalIsoQueryValue(record.postedFrom, 'postedFrom');
+  const postedTo = readOptionalIsoQueryValue(record.postedTo, 'postedTo');
+  assertValidTimeRange(postedFrom, postedTo, '发布时间开始不能晚于结束时间。');
+
+  const requestedLimit = readPositiveIntegerQueryValue(record.limit, 'limit') ?? 20_000;
+
+  if (requestedLimit > 50_000) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'limit 必须在 1-50000 之间。');
+  }
+
+  return {
+    filters: {
+      ...readOptionalAuthorUsernameQuery(record.authorUsername),
+      ...readOptionalTextSearchQuery(record.query),
+      ...(postedFrom === undefined ? {} : { postedFrom }),
+      ...(postedTo === undefined ? {} : { postedTo }),
+      ...readPostBooleanQuery(record.isReply, 'isReply'),
+      ...readPostBooleanQuery(record.isRepost, 'isRepost'),
+    },
+    format: formatValue,
+    limit: requestedLimit,
+  };
+}
+
+function toCsvField(value: string): string {
+  return /[",\r\n]/u.test(value) ? `"${value.replace(/"/gu, '""')}"` : value;
+}
+
+function formatFileTimestamp(date: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, '0');
+
+  return (
+    `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}` +
+    `-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+  );
+}
+
+function readLogLevelFilter(value: unknown): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const level = readSingleOptionalStringQueryValue(value, 'level');
+
+  if (level === undefined || level.length === 0 || level === 'all') {
+    return undefined;
+  }
+
+  if (!['debug', 'info', 'warn', 'error'].includes(level)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'level 必须是 debug、info、warn 或 error。');
+  }
+
+  return level;
+}
+
+function readLogLimit(value: unknown): number {
+  const limit = readPositiveIntegerQueryValue(value, 'limit') ?? 200;
+
+  if (limit > 500) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'limit 必须在 1-500 之间。');
+  }
+
+  return limit;
 }
 
 function readCreateWatchAccountBody(body: unknown): AdminWatchAccountValidationInput {

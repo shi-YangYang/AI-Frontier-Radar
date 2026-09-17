@@ -1553,6 +1553,171 @@ async function main(): Promise<void> {
     );
     checks.push({ name: '/ready 在 Redis 不可用时返回 503 DEPENDENCY_UNREADY' });
 
+    const exportCsvResponse = await app.inject({
+      method: 'GET',
+      url: '/admin/api/posts/export?format=csv',
+    });
+    assert(exportCsvResponse.statusCode === 200, `csv export returned ${exportCsvResponse.statusCode}`);
+    assert(
+      exportCsvResponse.headers['content-type']?.includes('text/csv') === true,
+      `csv export content-type mismatch: ${exportCsvResponse.headers['content-type']}`,
+    );
+    assert(
+      exportCsvResponse.body.startsWith('\ufeffxPostId,authorUsername,postedAt'),
+      'csv export should start with UTF-8 BOM and header row',
+    );
+    const csvLines = exportCsvResponse.body.trim().split('\r\n');
+    assert(csvLines.length >= 2, `csv export should contain data rows, got ${csvLines.length}`);
+    assert(
+      exportCsvResponse.headers['content-disposition']?.includes('posts-') === true,
+      'csv export should set a download file name',
+    );
+
+    const exportJsonResponse = await app.inject({
+      method: 'GET',
+      url: `/admin/api/posts/export?format=json&authorUsername=${encodeURIComponent(WATCH_USERNAME)}`,
+    });
+    assert(exportJsonResponse.statusCode === 200, `json export returned ${exportJsonResponse.statusCode}`);
+    const exportedPosts = JSON.parse(exportJsonResponse.body) as Array<{ authorUsername: string }>;
+    assert(
+      exportedPosts.length > 0 &&
+        exportedPosts.every((post) => post.authorUsername === WATCH_USERNAME),
+      `json export filter mismatch: ${exportedPosts.map((post) => post.authorUsername).join(',')}`,
+    );
+
+    const wildcardExportResponse = await app.inject({
+      method: 'GET',
+      url: '/admin/api/posts/export?format=json&authorUsername=%25',
+    });
+    const wildcardExportBody = JSON.parse(wildcardExportResponse.body) as unknown[];
+    assert(
+      wildcardExportBody.length === 0,
+      `author filter should treat % literally, got ${wildcardExportBody.length} posts`,
+    );
+
+    const accountSearchResponse = await app.inject({
+      method: 'GET',
+      url: '/admin/api/watch-accounts?page=1&pageSize=50&query=%25',
+    });
+    const accountSearchBody = JSON.parse(accountSearchResponse.body) as {
+      data: { pagination: { total: number } };
+    };
+    assert(
+      accountSearchBody.data.pagination.total === 0,
+      `watch account search should treat % literally, got ${accountSearchBody.data.pagination.total}`,
+    );
+    checks.push({ name: '帖子导出 CSV/JSON（BOM、表头、筛选、通配符转义）' });
+
+    const dataSettingsBefore = await app.inject({ method: 'GET', url: '/admin/api/settings/data' });
+    const dataSettingsBeforeBody = JSON.parse(dataSettingsBefore.body) as {
+      data: { expiredPosts: number; retentionDays: number };
+    };
+    assert(
+      dataSettingsBeforeBody.data.retentionDays === 0 && dataSettingsBeforeBody.data.expiredPosts === 0,
+      `default retention should be disabled: ${JSON.stringify(dataSettingsBeforeBody.data)}`,
+    );
+
+    const saveRetentionResponse = await app.inject({
+      method: 'PUT',
+      payload: { retentionDays: 30 },
+      url: '/admin/api/settings/data',
+    });
+    const saveRetentionBody = JSON.parse(saveRetentionResponse.body) as {
+      data: { expiredEvents: number; expiredPosts: number; retentionDays: number };
+    };
+    assert(
+      saveRetentionBody.data.retentionDays === 30 && saveRetentionBody.data.expiredPosts > 0,
+      `retention preview mismatch: ${JSON.stringify(saveRetentionBody.data)}`,
+    );
+
+    const cleanupResponse = await app.inject({
+      method: 'POST',
+      url: '/admin/api/actions/cleanup-now',
+    });
+    const cleanupBody = JSON.parse(cleanupResponse.body) as {
+      data: {
+        deletedEvents: number;
+        deletedPosts: number;
+        settings: { expiredPosts: number; lastCleanupAt: string | null };
+      };
+    };
+    assert(
+      cleanupBody.data.deletedPosts > 0 &&
+        cleanupBody.data.settings.expiredPosts === 0 &&
+        cleanupBody.data.settings.lastCleanupAt !== null,
+      `cleanup mismatch: ${JSON.stringify(cleanupBody.data)}`,
+    );
+    const recentPostAfterCleanup = await storage.xPosts.findByDedupeKey('anthropic:news:article-two');
+    assert(recentPostAfterCleanup !== null, 'recent posts should survive retention cleanup');
+    checks.push({ name: '数据保留策略（预览计数、立即清理、保留最近帖子）' });
+
+    const backupResponse = await app.inject({ method: 'POST', url: '/admin/api/actions/backup' });
+    assert(backupResponse.statusCode === 200, `backup returned ${backupResponse.statusCode}`);
+    const backupBody = JSON.parse(backupResponse.body) as {
+      data: { backup: { name: string; sizeBytes: number }; backups: unknown[] };
+    };
+    assert(
+      /^backup-\d{8}-\d{6}\.sqlite$/u.test(backupBody.data.backup.name) &&
+        backupBody.data.backup.sizeBytes > 0 &&
+        backupBody.data.backups.length === 1,
+      `backup payload mismatch: ${JSON.stringify(backupBody.data.backup)}`,
+    );
+
+    const backupListResponse = await app.inject({ method: 'GET', url: '/admin/api/backups' });
+    const backupListBody = JSON.parse(backupListResponse.body) as { data: { backups: unknown[] } };
+    assert(backupListBody.data.backups.length === 1, 'backup list should contain one entry');
+
+    const downloadResponse = await app.inject({
+      method: 'GET',
+      url: `/admin/api/backups/${backupBody.data.backup.name}/download`,
+    });
+    assert(downloadResponse.statusCode === 200, `backup download returned ${downloadResponse.statusCode}`);
+    assert(
+      downloadResponse.rawPayload.subarray(0, 15).toString('utf8') === 'SQLite format 3',
+      'downloaded backup should be a SQLite database',
+    );
+
+    const deleteBackupResponse = await app.inject({
+      method: 'DELETE',
+      url: `/admin/api/backups/${backupBody.data.backup.name}`,
+    });
+    const deleteBackupBody = JSON.parse(deleteBackupResponse.body) as { data: { deleted: boolean } };
+    assert(deleteBackupBody.data.deleted, 'backup delete should report deleted=true');
+    const backupListAfterDelete = await app.inject({ method: 'GET', url: '/admin/api/backups' });
+    const backupListAfterDeleteBody = JSON.parse(backupListAfterDelete.body) as {
+      data: { backups: unknown[] };
+    };
+    assert(backupListAfterDeleteBody.data.backups.length === 0, 'backup list should be empty after delete');
+    checks.push({ name: '数据库备份（创建、列表、下载、删除）' });
+
+    const logProbe = createLogger({ bindings: { module: 'smoke-probe' }, level: 'info' });
+    logProbe.info({ probe: true }, 'smoke log probe');
+    logProbe.error({ probe: true }, 'smoke error probe');
+
+    const logsResponse = await app.inject({ method: 'GET', url: '/admin/api/logs?limit=50' });
+    assert(logsResponse.statusCode === 200, `logs returned ${logsResponse.statusCode}: ${logsResponse.body.slice(0, 200)}`);
+    const logsBody = JSON.parse(logsResponse.body) as {
+      data: { capacity: number; entries: Array<{ level: string; time: string }>; size: number };
+    };
+    assert(
+      logsBody.data.capacity === 500 &&
+        logsBody.data.size >= 2 &&
+        logsBody.data.entries.length >= 2 &&
+        logsBody.data.entries.every((entry) => typeof entry.time === 'string'),
+      `logs payload mismatch: size=${logsBody.data.size}`,
+    );
+
+    const errorLogsResponse = await app.inject({ method: 'GET', url: '/admin/api/logs?level=error' });
+    const errorLogsBody = JSON.parse(errorLogsResponse.body) as {
+      data: { entries: Array<{ level: string }> };
+    };
+    assert(
+      errorLogsBody.data.entries.length >= 1 &&
+        errorLogsBody.data.entries.every((entry) => ['error', 'fatal'].includes(entry.level)),
+      'error level filter should only return error/fatal entries',
+    );
+    checks.push({ name: '运行日志接口（环形缓冲、级别过滤）' });
+
     const counts = await prisma.$transaction([
       prisma.watchAccount.count(),
       prisma.xPostRaw.count(),

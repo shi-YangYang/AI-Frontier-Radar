@@ -12,8 +12,10 @@ import {
   batchDeleteAdminPollRuns,
   clearAdminDeliveryEventsHistory,
   clearAdminPollRunsHistory,
+  createAdminBackup,
   createAdminDeliveryTarget,
   createAdminWatchAccount,
+  deleteAdminBackup,
   deleteAdminDeliveryTarget,
   deleteAdminDeliveryEvent,
   deleteAdminPollRun,
@@ -21,6 +23,9 @@ import {
   checkAdminXSourceLogin,
   applyAdminSourceGroup,
   clearAdminPostsHistory,
+  downloadAdminBackup,
+  exportAdminPosts,
+  getAdminDataSettings,
   getAdminRssSettings,
   getAdminSettings,
   getAdminSourceGroups,
@@ -29,6 +34,8 @@ import {
   getAdminXSourceSettings,
   listAdminDeliveryEvents,
   listAdminDeliveryTargets,
+  listAdminBackups,
+  listAdminLogs,
   listAdminPollRuns,
   listAdminPosts,
   listAdminWatchAccounts,
@@ -36,10 +43,12 @@ import {
   resolveAdminYoutubeChannel,
   runAdminDeliveryNow,
   runAdminPollingNow,
+  runAdminRetentionCleanup,
   testAdminDeliveryTarget,
   testAdminFeishuSettings,
   testAdminXSourceAnonymous,
   toAdminApiErrorPayload,
+  updateAdminDataSettings,
   updateAdminDeliveryTarget,
   updateAdminDeliveryTargetEnabled,
   updateAdminFeishuSettings,
@@ -91,7 +100,15 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     });
   }
 
-  for (const pageRoute of ['/', '/accounts', '/poll-runs', '/posts', '/delivery-events', '/settings']) {
+  for (const pageRoute of [
+    '/',
+    '/accounts',
+    '/poll-runs',
+    '/posts',
+    '/delivery-events',
+    '/settings',
+    '/logs',
+  ]) {
     app.get(pageRoute, async (_, reply) => sendAdminIndexHtml(reply, adminIndexHtmlPath));
   }
 
@@ -478,6 +495,111 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     },
     async (request, reply) => sendAdminResponse(reply, () => deleteAdminDeliveryEvent(request.params, options)),
   );
+
+  app.get(
+    '/admin/api/settings/data',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => getAdminDataSettings(options)),
+  );
+
+  app.put(
+    '/admin/api/settings/data',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => updateAdminDataSettings(request.body, options)),
+  );
+
+  app.post(
+    '/admin/api/actions/cleanup-now',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => runAdminRetentionCleanup(options)),
+  );
+
+  app.get(
+    '/admin/api/backups',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => listAdminBackups(options)),
+  );
+
+  app.post(
+    '/admin/api/actions/backup',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => createAdminBackup(options)),
+  );
+
+  app.get(
+    '/admin/api/backups/:name/download',
+    async (request, reply) => {
+      try {
+        const { content, fileName } = await downloadAdminBackup(request.params, options);
+
+        return reply
+          .header('Content-Disposition', `attachment; filename="${fileName}"`)
+          .type('application/octet-stream')
+          .send(content);
+      } catch (error) {
+        const { payload, statusCode } = toAdminApiErrorPayload(error);
+        reply.code(statusCode);
+        return payload;
+      }
+    },
+  );
+
+  app.delete(
+    '/admin/api/backups/:name',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => deleteAdminBackup(request.params, options)),
+  );
+
+  app.get(
+    '/admin/api/logs',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) => sendAdminResponse(reply, async () => listAdminLogs(request.query)),
+  );
+
+  app.get('/admin/api/posts/export', async (request, reply) => {
+    try {
+      const { body, contentType, fileName } = await exportAdminPosts(request.query, options);
+
+      return reply
+        .header('Content-Disposition', `attachment; filename="${fileName}"`)
+        .type(contentType)
+        .send(body);
+    } catch (error) {
+      const { payload, statusCode } = toAdminApiErrorPayload(error);
+      reply.code(statusCode);
+      return payload;
+    }
+  });
 
   app.post(
     '/admin/api/actions/poll-now',

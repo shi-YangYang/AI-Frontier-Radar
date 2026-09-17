@@ -27,9 +27,14 @@ export interface RuntimeSchedulerOptions {
   deliveryIntervalMs?: number;
   logger: AppLogger;
   pollingIntervalMs?: number;
+  retention?: RuntimeRetentionRunner;
   runtimeSettings?: RuntimeSettingsProvider;
   sourceProviders?: SourceProviderRegistry;
   storage: StorageContext;
+}
+
+export interface RuntimeRetentionRunner {
+  runIfDue(): Promise<unknown>;
 }
 
 export interface RuntimeSettingsProvider {
@@ -115,6 +120,7 @@ function createRuntimeXSourceProvider(config: AppConfig): SourceProvider {
 class IntervalRuntimeScheduler implements RuntimeScheduler {
   private readonly deliveryIntervalMs: number;
   private readonly logger: AppLogger;
+  private readonly retention?: RuntimeRetentionRunner;
   private readonly sourceProviders?: SourceProviderRegistry;
   private deliveryInterval: TimerHandle | null = null;
   private deliveryRunPromise: Promise<RuntimeSchedulerRunNowResult> | null = null;
@@ -128,6 +134,7 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
     this.pollingIntervalMs =
       options.pollingIntervalMs ?? options.config.polling.intervalSeconds * 1_000;
     this.deliveryIntervalMs = options.deliveryIntervalMs ?? DEFAULT_DELIVERY_INTERVAL_MS;
+    this.retention = options.retention;
     this.sourceProviders = options.sourceProviders;
   }
 
@@ -320,6 +327,7 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
       });
 
       this.logPollingCompleted(result, trigger);
+      await this.runRetentionIfDue();
       return {
         job: 'polling',
         status: 'completed',
@@ -387,6 +395,24 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
         status: 'failed',
         trigger: input.trigger,
       };
+    }
+  }
+
+  private async runRetentionIfDue(): Promise<void> {
+    if (this.retention === undefined) {
+      return;
+    }
+
+    try {
+      await this.retention.runIfDue();
+    } catch (error) {
+      this.logger.warn(
+        {
+          err: error,
+          job: 'retention',
+        },
+        'retention cleanup failed',
+      );
     }
   }
 
