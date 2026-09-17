@@ -34,7 +34,6 @@ const MAX_POSTS = 100;
 
 export class AnthropicNewsSourceProvider implements SourceProvider {
   public readonly sourceType = 'anthropic_news' as const;
-  public readonly firstRunBaseline = 'all' as const;
   private readonly fetchImplementation: FetchImplementation;
   private readonly timeoutMs: number;
   private readonly userAgent: string;

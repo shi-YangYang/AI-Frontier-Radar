@@ -21,6 +21,7 @@
 | spec-006 | Anthropic 官方新闻源（无 RSS 站点专用解析） |
 | spec-007 | 第二批官方源：AI2 / Moonshot / Meta AI / xAI（含无头浏览器源）与 Mistral / Stability / HF Blog（RSS） |
 | spec-008 | 数据管理 + 运维：帖子导出（CSV/JSON）、数据保留策略、数据库备份/恢复、运行日志页 |
+| spec-009 | 首轮仅锚定最新 1 条（榜单型源除外）+ 删除源级联清理消息与投递记录 |
 | 追加 | GitHub Trending / HF Daily Papers 源、关键词订阅规则、监听组合、无源跳过轮询、消息一键清空、轮询间隔分钟化 |
 | 已放弃 | 邮件通讯（自有邮箱 IMAP）不做 |
 

@@ -726,10 +726,15 @@ export async function createWatchAccount(
   });
 }
 
-export async function deleteWatchAccount(id: string): Promise<{ deleted: true }> {
-  return requestJson<{ deleted: true }>('/admin/api/watch-accounts/' + encodeURIComponent(id), {
-    method: 'DELETE',
-  });
+export async function deleteWatchAccount(
+  id: string,
+): Promise<{ deleted: true; deletedEvents: number; deletedPosts: number }> {
+  return requestJson<{ deleted: true; deletedEvents: number; deletedPosts: number }>(
+    '/admin/api/watch-accounts/' + encodeURIComponent(id),
+    {
+      method: 'DELETE',
+    },
+  );
 }
 
 export async function listPollRuns(query: PageQuery): Promise<{

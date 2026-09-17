@@ -34,7 +34,6 @@ const MAX_POSTS = 100;
 
 export class MetaAiBlogSourceProvider implements SourceProvider {
   public readonly sourceType = 'meta_ai_blog' as const;
-  public readonly firstRunBaseline = 'all' as const;
   private readonly navigationTimeoutMs: number;
   private readonly postLoadTimeoutMs: number;
   private readonly renderSettleTimeoutMs: number;

@@ -222,6 +222,16 @@ export class XPostRepository {
     return xPosts.map((xPost) => xPost.xPostId);
   }
 
+  public async deleteByAuthorUserId(authorUserId: string): Promise<number> {
+    const result = await this.prisma.xPostRaw.deleteMany({
+      where: {
+        authorUserId,
+      },
+    });
+
+    return result.count;
+  }
+
   public async deleteByXPostIds(xPostIds: string[]): Promise<number> {
     if (xPostIds.length === 0) {
       return 0;

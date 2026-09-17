@@ -234,8 +234,22 @@ export async function createAdminWatchAccount(
 export async function deleteAdminWatchAccount(
   params: unknown,
   options: AdminControllerOptions,
-): Promise<{ ok: true; data: { deleted: true } }> {
+): Promise<{ ok: true; data: { deleted: true; deletedEvents: number; deletedPosts: number } }> {
   const id = readIdParam(params);
+  const account = await options.storage.watchAccounts.findById(id);
+
+  if (account === null) {
+    throw new AdminApiError(404, 'NOT_FOUND', '未找到监听账号。');
+  }
+
+  let deletedEvents = 0;
+  let deletedPosts = 0;
+
+  if (account.xUserId !== null && account.xUserId.length > 0) {
+    deletedEvents = await options.storage.deliveryEvents.deleteByAuthorUserId(account.xUserId);
+    deletedPosts = await options.storage.xPosts.deleteByAuthorUserId(account.xUserId);
+  }
+
   const deleted = await options.storage.watchAccounts.delete(id);
 
   if (!deleted) {
@@ -246,6 +260,8 @@ export async function deleteAdminWatchAccount(
     ok: true,
     data: {
       deleted: true,
+      deletedEvents,
+      deletedPosts,
     },
   };
 }

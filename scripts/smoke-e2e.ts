@@ -1109,14 +1109,27 @@ async function main(): Promise<void> {
     assert(anthropicAccount !== null, 'anthropic watch account was not stored');
 
     await runPollingJob({ config, logger, sourceProviders, storage });
+    const anthropicAccountAfterFirstPoll = await storage.watchAccounts.findById(anthropicAccount.id);
+    const anthropicPostsAfterFirstPoll = await prisma.xPostRaw.count({
+      where: { authorUserId: anthropicAccountAfterFirstPoll?.xUserId ?? '' },
+    });
+    assert(
+      anthropicPostsAfterFirstPoll === 1,
+      `first anthropic poll should store only the newest article, got ${anthropicPostsAfterFirstPoll}`,
+    );
     const anthropicBaselinePost = await storage.xPosts.findByDedupeKey('anthropic:news:article-two');
     assert(anthropicBaselinePost !== null, 'anthropic baseline article was not stored');
+    const anthropicSkippedPost = await storage.xPosts.findByDedupeKey('anthropic:news:article-one');
+    assert(anthropicSkippedPost === null, 'older anthropic article must not be ingested on first poll');
     const anthropicBaselineEvent = await storage.deliveryEvents.findByPostAndTarget(
       anthropicBaselinePost.xPostId,
       TARGET_KEY,
     );
-    assert(anthropicBaselineEvent === null, 'anthropic baseline must not create delivery events');
-    checks.push({ name: 'Anthropic 首次基线不投递' });
+    assert(
+      anthropicBaselineEvent !== null,
+      'anthropic baseline post should be delivered like the RSS baseline',
+    );
+    checks.push({ name: 'Anthropic 首轮仅锚定最新 1 条并投递' });
 
     rssApi.setFeed(anthropicPath, {
       body: createAnthropicHtml(true),
@@ -1138,8 +1151,8 @@ async function main(): Promise<void> {
       where: { authorUserId: anthropicAccountAfterPoll?.xUserId ?? '' },
     });
     assert(
-      anthropicPostsAfterRepeat === 3,
-      `repeat anthropic poll should keep 3 posts, got ${anthropicPostsAfterRepeat}`,
+      anthropicPostsAfterRepeat === 2,
+      `repeat anthropic poll should keep 2 posts, got ${anthropicPostsAfterRepeat}`,
     );
     checks.push({ name: 'Anthropic 增量入库并投递' });
 
@@ -1195,7 +1208,10 @@ async function main(): Promise<void> {
       ai2BaselinePost.xPostId,
       TARGET_KEY,
     );
-    assert(ai2BaselineEvent === null, 'ai2 baseline must not create delivery events');
+    assert(
+      ai2BaselineEvent !== null,
+      'ai2 baseline post should be delivered like the RSS baseline',
+    );
 
     rssApi.setFeed(ai2Path, {
       body: createAi2Html(true),
@@ -1216,8 +1232,10 @@ async function main(): Promise<void> {
     const ai2PostsAfterRepeat = await prisma.xPostRaw.count({
       where: { authorUserId: ai2AccountAfterPoll?.xUserId ?? '' },
     });
-    assert(ai2PostsAfterRepeat === 3, `repeat ai2 poll should keep 3 posts, got ${ai2PostsAfterRepeat}`);
-    checks.push({ name: 'AI2 首次基线不投递 + 增量入库并投递' });
+    assert(ai2PostsAfterRepeat === 2, `repeat ai2 poll should keep 2 posts, got ${ai2PostsAfterRepeat}`);
+    const ai2SkippedPost = await storage.xPosts.findByDedupeKey('ai2:blog:olmoearth-v1-1');
+    assert(ai2SkippedPost === null, 'older ai2 post must not be ingested after the baseline');
+    checks.push({ name: 'AI2 首轮仅锚定最新 1 条 + 增量入库并投递' });
 
     const moonshotHtml =
       '<html><body>' +
@@ -1717,6 +1735,44 @@ async function main(): Promise<void> {
       'error level filter should only return error/fatal entries',
     );
     checks.push({ name: '运行日志接口（环形缓冲、级别过滤）' });
+
+    const anthropicAuthorId = anthropicAccountAfterPoll?.xUserId ?? '';
+    const postsBeforeCascade = await prisma.xPostRaw.count();
+    const eventsBeforeCascade = await prisma.deliveryEvent.count();
+    const anthropicPostsBeforeCascade = await prisma.xPostRaw.count({
+      where: { authorUserId: anthropicAuthorId },
+    });
+    assert(anthropicPostsBeforeCascade === 2, 'anthropic posts should exist before cascade delete');
+
+    const deleteAccountResponse = await app.inject({
+      method: 'DELETE',
+      url: `/admin/api/watch-accounts/${anthropicAccount.id}`,
+    });
+    const deleteAccountBody = JSON.parse(deleteAccountResponse.body) as {
+      data: { deleted: boolean; deletedEvents: number; deletedPosts: number };
+    };
+    assert(
+      deleteAccountResponse.statusCode === 200 &&
+        deleteAccountBody.data.deleted === true &&
+        deleteAccountBody.data.deletedPosts === anthropicPostsBeforeCascade &&
+        deleteAccountBody.data.deletedEvents > 0,
+      `cascade delete payload mismatch: ${JSON.stringify(deleteAccountBody.data)}`,
+    );
+
+    const anthropicPostsAfterCascade = await prisma.xPostRaw.count({
+      where: { authorUserId: anthropicAuthorId },
+    });
+    assert(anthropicPostsAfterCascade === 0, 'source posts should be removed with the account');
+    const postsAfterCascade = await prisma.xPostRaw.count();
+    const eventsAfterCascade = await prisma.deliveryEvent.count();
+    assert(
+      postsAfterCascade === postsBeforeCascade - anthropicPostsBeforeCascade &&
+        eventsAfterCascade === eventsBeforeCascade - deleteAccountBody.data.deletedEvents,
+      `cascade delete should not touch other sources: posts ${postsAfterCascade}/${postsBeforeCascade}, events ${eventsAfterCascade}/${eventsBeforeCascade}`,
+    );
+    const deletedAccount = await storage.watchAccounts.findById(anthropicAccount.id);
+    assert(deletedAccount === null, 'watch account should be deleted after cascade');
+    checks.push({ name: '删除监听源级联删除其消息与投递记录（其他源不受影响）' });
 
     const counts = await prisma.$transaction([
       prisma.watchAccount.count(),

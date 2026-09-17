@@ -8,7 +8,7 @@ const LANGUAGE_STORAGE_KEY = 'admin.language';
 const messages = {
   'zh-CN': {
     'accounts.add': '添加',
-    'accounts.deleteBody': '删除后该订阅源不再参与后续轮询，历史记录不会被删除。',
+    'accounts.deleteBody': '删除后该订阅源及其全部消息、投递记录都会被删除，且不可恢复。',
     'accounts.deleteTitle': '删除订阅源',
     'accounts.disabled': '已禁用',
     'accounts.empty': '可从上方“监听组合”一键添加，或手动添加单个源。',
@@ -163,7 +163,7 @@ const messages = {
     'notice.sourceGroupApplied': '已添加 {created} 个源，跳过 {existing} 个已存在。',
     'notice.sourceGroupFailed': '添加监听组合失败：{error}',
     'notice.accountCreateFailed': '添加监听账号失败：{error}',
-    'notice.accountDeleted': '已删除监听账号。',
+    'notice.accountDeleted': '已删除监听源，同时删除 {posts} 条消息与 {events} 条投递记录。',
     'notice.accountValidating': '正在校验 X 账号并保存...',
     'notice.actionResult': '{job}：{status}',
     'notice.deliveryEventDeleted': '已删除发送记录。',
@@ -567,7 +567,7 @@ const messages = {
   },
   'en-US': {
     'accounts.add': 'Add',
-    'accounts.deleteBody': 'This source will no longer be polled. Historical records are kept.',
+    'accounts.deleteBody': 'The source and all of its posts and delivery records will be permanently deleted.',
     'accounts.deleteTitle': 'Delete watch source',
     'accounts.disabled': 'Disabled',
     'accounts.empty': 'No watch sources. Use a source group above or add sources manually.',
@@ -722,7 +722,7 @@ const messages = {
     'notice.sourceGroupApplied': 'Added {created} sources, skipped {existing} existing ones.',
     'notice.sourceGroupFailed': 'Add source group failed: {error}',
     'notice.accountCreateFailed': 'Add watch account failed: {error}',
-    'notice.accountDeleted': 'Watch account deleted.',
+    'notice.accountDeleted': 'Source deleted, along with {posts} posts and {events} delivery records.',
     'notice.accountValidating': 'Validating the X account before saving...',
     'notice.actionResult': '{job}: {status}',
     'notice.deliveryEventDeleted': 'Delivery event deleted.',

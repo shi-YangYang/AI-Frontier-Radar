@@ -32,7 +32,6 @@ const DATE_PATTERN = /(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\
 
 export class XaiNewsSourceProvider implements SourceProvider {
   public readonly sourceType = 'xai_news' as const;
-  public readonly firstRunBaseline = 'all' as const;
   private readonly navigationTimeoutMs: number;
   private readonly postLoadTimeoutMs: number;
   private readonly renderSettleTimeoutMs: number;

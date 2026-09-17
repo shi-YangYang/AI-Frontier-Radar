@@ -88,6 +88,13 @@ export class DeliveryEventRepository {
     });
   }
 
+  public async deleteByAuthorUserId(authorUserId: string): Promise<number> {
+    return this.prisma.$executeRaw`
+      DELETE FROM delivery_events
+      WHERE x_post_id IN (SELECT x_post_id FROM x_posts_raw WHERE author_user_id = ${authorUserId})
+    `;
+  }
+
   public async deleteByXPostIds(xPostIds: string[]): Promise<number> {
     if (xPostIds.length === 0) {
       return 0;

@@ -38,8 +38,8 @@ const MAX_AUTHORS = 3;
 const MAX_PAPERS = 100;
 
 export class HfDailyPapersSourceProvider implements SourceProvider {
-  public readonly sourceType = 'hf_papers' as const;
   public readonly firstRunBaseline = 'all' as const;
+  public readonly sourceType = 'hf_papers' as const;
   private readonly fetchImplementation: FetchImplementation;
   private readonly timeoutMs: number;
   private readonly userAgent: string;
