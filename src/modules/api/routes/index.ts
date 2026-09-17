@@ -5,6 +5,7 @@ import type { RuntimeSettingsService, StorageContext } from '../../storage';
 import type { AdminActions } from '../controllers/admin-controller';
 import { registerAdminRoutes } from './admin-routes';
 import { registerConfigRoutes } from './config-routes';
+import { registerFeedRoutes } from './feed-routes';
 import { registerHealthRoutes } from './health-routes';
 
 export interface RegisterApiRoutesOptions {
@@ -26,6 +27,9 @@ export function registerApiRoutes(app: FastifyInstance, options: RegisterApiRout
   });
   registerConfigRoutes(app, {
     config: options.config,
+    storage: options.storage,
+  });
+  registerFeedRoutes(app, {
     storage: options.storage,
   });
 }

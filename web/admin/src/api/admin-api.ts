@@ -13,7 +13,7 @@ export interface AdminErrorResponse {
 }
 
 export type WatchAccountPollStatus = 'failed' | 'pending' | 'success';
-export type WatchAccountSourceType = 'github' | 'hf_papers' | 'rss' | 'x';
+export type WatchAccountSourceType = 'anthropic_news' | 'github' | 'hf_papers' | 'rss' | 'x';
 export type PollRunStatus = 'failed' | 'partial_failed' | 'running' | 'success';
 export type DeliveryEventStatus = 'dead' | 'failed' | 'pending' | 'retry_wait' | 'sending' | 'sent';
 export type PostBooleanFilter = 'all' | 'false' | 'true';
@@ -585,6 +585,7 @@ export async function listWatchAccounts(query?: WatchAccountPageQuery): Promise<
 }
 
 export type CreateWatchAccountInput =
+  | { sourceType: 'anthropic_news'; sourceUrl: string }
   | { sourceType: 'github'; sourceUrl: string }
   | { sourceType: 'hf_papers'; sourceUrl: string }
   | { sourceType: 'rss'; sourceUrl: string }

@@ -16,6 +16,11 @@ export {
 } from './github-trending-source-provider';
 export type { GithubTrendingSourceProviderOptions } from './github-trending-source-provider';
 export {
+  createAnthropicNewsSourceProvider,
+  AnthropicNewsSourceProvider,
+} from './anthropic-news-source-provider';
+export type { AnthropicNewsSourceProviderOptions } from './anthropic-news-source-provider';
+export {
   createHfDailyPapersSourceProvider,
   HfDailyPapersSourceProvider,
 } from './hf-daily-papers-source-provider';

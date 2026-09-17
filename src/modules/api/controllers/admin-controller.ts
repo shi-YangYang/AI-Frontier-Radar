@@ -47,6 +47,7 @@ import {
 import { normalizeXUsername } from '../../storage/watch-account-repository';
 
 export type AdminWatchAccountValidationInput =
+  | { sourceType: 'anthropic_news'; sourceUrl: string }
   | { sourceType: 'github'; sourceUrl: string }
   | { sourceType: 'hf_papers'; sourceUrl: string }
   | { sourceType: 'rss'; sourceUrl: string }
@@ -174,7 +175,12 @@ export async function createAdminWatchAccount(
   const input = readCreateWatchAccountBody(body);
   const account = await validateWatchSource(input, options);
 
-  if (input.sourceType === 'rss' || input.sourceType === 'github' || input.sourceType === 'hf_papers') {
+  if (
+    input.sourceType === 'rss' ||
+    input.sourceType === 'github' ||
+    input.sourceType === 'hf_papers' ||
+    input.sourceType === 'anthropic_news'
+  ) {
     const { created, watchAccount } = await options.storage.watchAccounts.createIfAbsentBySource({
       displayName: account.displayName ?? null,
       enabled: true,
@@ -1984,14 +1990,20 @@ function readCreateWatchAccountBody(body: unknown): AdminWatchAccountValidationI
     body.sourceType !== 'x' &&
     body.sourceType !== 'rss' &&
     body.sourceType !== 'github' &&
-    body.sourceType !== 'hf_papers'
+    body.sourceType !== 'hf_papers' &&
+    body.sourceType !== 'anthropic_news'
   ) {
-    throw new AdminApiError(400, 'INVALID_REQUEST', 'sourceType 必须是 x、rss、github 或 hf_papers。');
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'sourceType 必须是 x、rss、github、hf_papers 或 anthropic_news。');
   }
 
   const sourceType = body.sourceType ?? 'x';
 
-  if (sourceType === 'rss' || sourceType === 'github' || sourceType === 'hf_papers') {
+  if (
+    sourceType === 'rss' ||
+    sourceType === 'github' ||
+    sourceType === 'hf_papers' ||
+    sourceType === 'anthropic_news'
+  ) {
     return {
       sourceType,
       sourceUrl: readRssSourceUrl(body.sourceUrl),

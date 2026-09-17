@@ -15,9 +15,9 @@ export interface SourceGroupDefinition {
 
 export const SOURCE_GROUPS: readonly SourceGroupDefinition[] = [
   {
-    description: '人工智能前沿：论文、科技新闻、社区、产品发布、官方博客、中文媒体与 GitHub 热门仓库。',
+    description: '人工智能前沿：论文、科技新闻、社区、产品发布、官方博客（含 Anthropic）、中文媒体与 GitHub 热门仓库。',
     details:
-      'arXiv cs.AI / cs.CL / cs.LG / cs.CV、HF Daily Papers、Techmeme、Hacker News、Reddit r/LocalLLaMA、Product Hunt、OpenAI News、Google AI、Google DeepMind、量子位、GitHub Trending（每日）。',
+      'arXiv cs.AI / cs.CL / cs.LG / cs.CV、HF Daily Papers、Techmeme、Hacker News、Reddit r/LocalLLaMA、Product Hunt、OpenAI News、Google AI、Google DeepMind、Anthropic News、量子位、GitHub Trending（每日）。',
     id: 'ai-news',
     name: 'AI 消息',
     sources: [
@@ -33,6 +33,7 @@ export const SOURCE_GROUPS: readonly SourceGroupDefinition[] = [
       { sourceType: 'rss', sourceUrl: 'https://openai.com/news/rss.xml' },
       { sourceType: 'rss', sourceUrl: 'https://blog.google/technology/ai/rss/' },
       { sourceType: 'rss', sourceUrl: 'https://deepmind.google/blog/rss.xml' },
+      { sourceType: 'anthropic_news', sourceUrl: 'https://www.anthropic.com/news' },
       { sourceType: 'rss', sourceUrl: 'https://www.qbitai.com/feed' },
       { sourceType: 'github', sourceUrl: 'https://github.com/trending?since=daily' },
     ],

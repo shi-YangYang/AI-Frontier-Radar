@@ -1,5 +1,6 @@
 export {
   BrowserXSourceProvider,
+  createAnthropicNewsSourceProvider,
   createBrowserXSourceProvider,
   createFetchWithProxy,
   createGithubTrendingSourceProvider,
@@ -18,6 +19,7 @@ export {
   YoutubeChannelResolveError,
 } from './source/index';
 export type {
+  AnthropicNewsSourceProviderOptions,
   BrowserXSourceProviderOptions,
   FetchImplementation,
   GithubTrendingSourceProviderOptions,

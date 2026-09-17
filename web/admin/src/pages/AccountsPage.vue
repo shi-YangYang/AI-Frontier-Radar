@@ -97,6 +97,9 @@
           <template v-else-if="sourceKind === 'hf'">
             <span class="muted source-add-inline-hint">{{ t('accounts.hfPapersHint') }}</span>
           </template>
+          <template v-else-if="sourceKind === 'anthropic'">
+            <span class="muted source-add-inline-hint">{{ t('accounts.anthropicHint') }}</span>
+          </template>
           <span v-else class="muted source-add-inline-hint">
             {{ t('accounts.producthuntHint') }}
           </span>
@@ -257,7 +260,8 @@ type SourceKind =
   | 'hackernews'
   | 'producthunt'
   | 'github'
-  | 'hf';
+  | 'hf'
+  | 'anthropic';
 type RedditSort = 'hot' | 'new' | 'top';
 type HackerNewsPreset = 'frontpage' | 'newest' | 'points100' | 'points300';
 type GithubMode = 'trending' | 'releases' | 'activity';
@@ -313,6 +317,7 @@ const sourceKindOptions = computed<{ label: string; value: SourceKind }[]>(() =>
   { label: t('accounts.sourceKind.producthunt'), value: 'producthunt' },
   { label: t('accounts.sourceKind.github'), value: 'github' },
   { label: t('accounts.sourceKind.hfPapers'), value: 'hf' },
+  { label: t('accounts.sourceKind.anthropic'), value: 'anthropic' },
 ]);
 const redditSortOptions = computed<{ label: string; value: RedditSort }[]>(() => [
   { label: t('accounts.redditSort.hot'), value: 'hot' },
@@ -368,6 +373,8 @@ const pendingFeedUrl = computed<string | null>(() => {
       return buildGithubSourceUrl();
     case 'hf':
       return 'https://huggingface.co/api/daily_papers?limit=50';
+    case 'anthropic':
+      return 'https://www.anthropic.com/news';
     default:
       return null;
   }
@@ -447,6 +454,7 @@ async function toCreateInput(): Promise<
   | { sourceType: 'rss'; sourceUrl: string }
   | { sourceType: 'github'; sourceUrl: string }
   | { sourceType: 'hf_papers'; sourceUrl: string }
+  | { sourceType: 'anthropic_news'; sourceUrl: string }
 > {
   switch (sourceKind.value) {
     case 'x':
@@ -488,6 +496,11 @@ async function toCreateInput(): Promise<
       return {
         sourceType: 'hf_papers',
         sourceUrl: 'https://huggingface.co/api/daily_papers?limit=50',
+      };
+    case 'anthropic':
+      return {
+        sourceType: 'anthropic_news',
+        sourceUrl: 'https://www.anthropic.com/news',
       };
     case 'github': {
       if (githubMode.value === 'trending') {
@@ -715,6 +728,10 @@ function sourceBadge(account: WatchAccount): string {
     return 'HF';
   }
 
+  if (account.sourceType === 'anthropic_news') {
+    return 'Anthropic';
+  }
+
   const url = account.sourceUrl ?? '';
 
   if (url.includes('github.com')) {
@@ -723,6 +740,10 @@ function sourceBadge(account: WatchAccount): string {
 
   if (url.includes('huggingface.co')) {
     return 'HF';
+  }
+
+  if (url.includes('anthropic.com')) {
+    return 'Anthropic';
   }
 
   if (url.includes('youtube.com')) {

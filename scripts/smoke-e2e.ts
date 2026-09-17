@@ -8,7 +8,7 @@ import { toPrismaSqliteDatabaseUrl } from '../src/shared/config';
 import { loadAppConfig } from '../src/config';
 import { createLogger } from '../src/lib/logger';
 import { createApp } from '../src/app/create-app';
-import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createGithubTrendingSourceProvider, createHfDailyPapersSourceProvider, createRssSourceProvider, createSourceProviderRegistry, createSubscriptionRuleMatcher, createXSourceProvider, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
+import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createAnthropicNewsSourceProvider, createGithubTrendingSourceProvider, createHfDailyPapersSourceProvider, createRssSourceProvider, createSourceProviderRegistry, createSubscriptionRuleMatcher, createXSourceProvider, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
 import { runDeliveryWorkerJob } from '../src/modules/delivery';
 import { createRuntimeScheduler, createRuntimeSourceProviders } from '../src/modules/scheduler';
 import { applySourceGroup, createPrismaClient, createStorage, getSourceGroupStatuses } from '../src/modules/storage';
@@ -96,7 +96,11 @@ async function main(): Promise<void> {
   const hfPapersProvider = createHfDailyPapersSourceProvider({
     timeoutMs: 5_000,
   });
+  const anthropicProvider = createAnthropicNewsSourceProvider({
+    timeoutMs: 5_000,
+  });
   const sourceProviders = createSourceProviderRegistry({
+    anthropic_news: anthropicProvider,
     github: githubProvider,
     hf_papers: hfPapersProvider,
     rss: rssProvider,
@@ -118,6 +122,15 @@ async function main(): Promise<void> {
           return githubProvider.validateSource({
             source: {
               sourceType: 'github',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
+        if (input.sourceType === 'anthropic_news') {
+          return anthropicProvider.validateSource({
+            source: {
+              sourceType: 'anthropic_news',
               sourceUrl: input.sourceUrl,
             },
           });
@@ -1015,6 +1028,95 @@ async function main(): Promise<void> {
     assert(hfNewEvent !== null, 'newly listed hf paper should create a delivery event');
     checks.push({ name: 'HF Daily Papers 新论文增量入库并投递' });
 
+    const anthropicPath = '/anthropic-news';
+    const anthropicUrl = `${rssApi.url}${anthropicPath}`;
+    const createAnthropicHtml = (extraArticle: boolean): string => {
+      const articles = [
+        '<a href="/news/article-two"><div><span class="caption bold">Product</span><time class="date">Sep 12, 2026</time></div><h4 class="title">Article Two</h4><p class="body">Summary two.</p></a>',
+        '<a href="/news/article-one"><div><time class="date">Sep 10, 2026</time><span class="subject">Announcements</span></div><span class="title">Article One</span></a>',
+        ...(extraArticle
+          ? [
+              '<a href="/news/article-three"><div><span class="caption bold">Announcements</span><time class="date">Sep 14, 2026</time></div><h4 class="title">Article Three</h4><p class="body">Summary three.</p></a>',
+            ]
+          : []),
+      ];
+
+      return `<html><body>${articles.join('')}</body></html>`;
+    };
+
+    rssApi.setFeed(anthropicPath, {
+      body: createAnthropicHtml(false),
+      contentType: 'text/html; charset=utf-8',
+      statusCode: 200,
+    });
+
+    const directNews = await anthropicProvider.fetchPosts({
+      limit: 10,
+      source: { sourceType: 'anthropic_news', sourceUrl: anthropicUrl },
+    });
+    assert(directNews.posts.length === 2, `anthropic provider should parse 2 articles, got ${directNews.posts.length}`);
+    assert(
+      directNews.posts[0]?.textContent.includes('Article Two') &&
+        directNews.posts[0]?.textContent.includes('Summary two.') &&
+        directNews.posts[0]?.textContent.includes('Product'),
+      'anthropic post should contain title, summary and category',
+    );
+    assert(
+      directNews.posts[0]?.dedupeKey === 'anthropic:news:article-two',
+      `anthropic dedupe key mismatch: ${directNews.posts[0]?.dedupeKey}`,
+    );
+    checks.push({ name: 'Anthropic 新闻解析（标题/摘要/分类）' });
+
+    const createAnthropicResponse = await app.inject({
+      method: 'POST',
+      payload: { sourceType: 'anthropic_news', sourceUrl: anthropicUrl },
+      url: '/admin/api/watch-accounts',
+    });
+    assert(
+      createAnthropicResponse.statusCode === 200,
+      `anthropic source create returned ${createAnthropicResponse.statusCode}`,
+    );
+    const anthropicAccount = await storage.watchAccounts.findBySource({
+      sourceType: 'anthropic_news',
+      sourceUrl: anthropicUrl,
+    });
+    assert(anthropicAccount !== null, 'anthropic watch account was not stored');
+
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const anthropicBaselinePost = await storage.xPosts.findByDedupeKey('anthropic:news:article-two');
+    assert(anthropicBaselinePost !== null, 'anthropic baseline article was not stored');
+    const anthropicBaselineEvent = await storage.deliveryEvents.findByPostAndTarget(
+      anthropicBaselinePost.xPostId,
+      TARGET_KEY,
+    );
+    assert(anthropicBaselineEvent === null, 'anthropic baseline must not create delivery events');
+    checks.push({ name: 'Anthropic 首次基线不投递' });
+
+    rssApi.setFeed(anthropicPath, {
+      body: createAnthropicHtml(true),
+      contentType: 'text/html; charset=utf-8',
+      statusCode: 200,
+    });
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const anthropicNewPost = await storage.xPosts.findByDedupeKey('anthropic:news:article-three');
+    assert(anthropicNewPost !== null, 'new anthropic article was not stored');
+    const anthropicNewEvent = await storage.deliveryEvents.findByPostAndTarget(
+      anthropicNewPost.xPostId,
+      TARGET_KEY,
+    );
+    assert(anthropicNewEvent !== null, 'new anthropic article should create a delivery event');
+
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const anthropicAccountAfterPoll = await storage.watchAccounts.findById(anthropicAccount.id);
+    const anthropicPostsAfterRepeat = await prisma.xPostRaw.count({
+      where: { authorUserId: anthropicAccountAfterPoll?.xUserId ?? '' },
+    });
+    assert(
+      anthropicPostsAfterRepeat === 3,
+      `repeat anthropic poll should keep 3 posts, got ${anthropicPostsAfterRepeat}`,
+    );
+    checks.push({ name: 'Anthropic 增量入库并投递' });
+
     const matcherWithoutRules = createSubscriptionRuleMatcher([]);
     assert(!matcherWithoutRules.hasEnabledRules, 'empty rules should not enable filtering');
 
@@ -1124,6 +1226,52 @@ async function main(): Promise<void> {
     );
     assert(noRuleEvent !== null, 'with no enabled rules every new post should be delivered');
     checks.push({ name: '订阅规则：清空规则后恢复全量投递' });
+
+    const feedXmlResponse = await app.inject({ method: 'GET', url: '/feed.xml' });
+    assert(feedXmlResponse.statusCode === 200, `feed.xml returned ${feedXmlResponse.statusCode}`);
+    assert(
+      String(feedXmlResponse.headers['content-type'] ?? '').includes('rss+xml'),
+      `feed.xml content-type mismatch: ${feedXmlResponse.headers['content-type']}`,
+    );
+    assert(
+      feedXmlResponse.body.includes('<rss') && feedXmlResponse.body.includes('<item>'),
+      'feed.xml should contain items',
+    );
+    checks.push({ name: 'RSS feed 输出（/feed.xml）' });
+
+    const feedJsonResponse = await app.inject({ method: 'GET', url: '/feed.json?limit=5' });
+    assert(feedJsonResponse.statusCode === 200, `feed.json returned ${feedJsonResponse.statusCode}`);
+    const feedJson = JSON.parse(feedJsonResponse.body) as { items?: unknown[]; version?: string };
+    assert(
+      feedJson.version === 'https://jsonfeed.org/version/1.1',
+      `feed.json version mismatch: ${feedJson.version}`,
+    );
+    assert(
+      (feedJson.items?.length ?? 0) === 5,
+      `feed.json should honour limit=5, got ${feedJson.items?.length}`,
+    );
+    checks.push({ name: 'JSON feed 输出（/feed.json + limit）' });
+
+    await app.inject({
+      method: 'PUT',
+      payload: {
+        rules: [
+          { enabled: true, exclude: [], include: ['llama.cpp'], mode: 'any', name: 'feed filter' },
+        ],
+      },
+      url: '/admin/api/subscription-rules',
+    });
+    const matchedFeedResponse = await app.inject({ method: 'GET', url: '/feed.json?matched=1' });
+    const matchedFeed = JSON.parse(matchedFeedResponse.body) as {
+      items?: Array<{ content_text?: string }>;
+    };
+    assert((matchedFeed.items?.length ?? 0) >= 1, 'matched feed should return matching posts');
+    assert(
+      matchedFeed.items?.every((item) => (item.content_text ?? '').includes('llama.cpp')) ?? false,
+      'matched feed should only contain posts matching the enabled rule',
+    );
+    await app.inject({ method: 'PUT', payload: { rules: [] }, url: '/admin/api/subscription-rules' });
+    checks.push({ name: '订阅规则过滤 feed（?matched=1）' });
 
     const scheduler = createRuntimeScheduler({
       config,

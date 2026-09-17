@@ -1,4 +1,4 @@
-export type SourceType = 'github' | 'hf_papers' | 'rss' | 'x';
+export type SourceType = 'anthropic_news' | 'github' | 'hf_papers' | 'rss' | 'x';
 
 export interface SourceDescriptor {
   sourceType: SourceType;

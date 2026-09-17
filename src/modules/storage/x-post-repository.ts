@@ -88,6 +88,17 @@ export class XPostRepository {
     return xPosts.map(mapXPostRaw);
   }
 
+  public async listLatest(limit: number): Promise<XPostRaw[]> {
+    const xPosts = await this.prisma.xPostRaw.findMany({
+      orderBy: {
+        postedAt: 'desc',
+      },
+      take: limit,
+    });
+
+    return xPosts.map(mapXPostRaw);
+  }
+
   public async listPage(input: XPostPageQuery): Promise<XPostRawWithDeliveryEvents[]> {
     const xPosts = await this.prisma.xPostRaw.findMany({
       include: {

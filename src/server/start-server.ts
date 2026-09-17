@@ -49,6 +49,15 @@ export async function startServer(options: StartServerOptions): Promise<void> {
           });
         }
 
+        if (input.sourceType === 'anthropic_news') {
+          return sourceProviders.anthropic_news.validateSource({
+            source: {
+              sourceType: 'anthropic_news',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
         if (input.sourceType === 'hf_papers') {
           return sourceProviders.hf_papers.validateSource({
             source: {

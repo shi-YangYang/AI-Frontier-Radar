@@ -2,6 +2,7 @@ import type { AppLogger } from '../../lib/logger';
 import type { AppConfig } from '../../shared/config/types';
 import { runDeliveryWorkerJob, type DeliveryWorkerRunOnceResult } from '../delivery';
 import {
+  createAnthropicNewsSourceProvider,
   createBrowserXSourceProvider,
   createGithubTrendingSourceProvider,
   createHfDailyPapersSourceProvider,
@@ -53,6 +54,7 @@ export function createRuntimeScheduler(options: RuntimeSchedulerOptions): Runtim
 }
 
 export interface RuntimeSourceProviders {
+  anthropic_news: SourceProvider;
   github: SourceProvider;
   hf_papers: SourceProvider;
   rss: SourceProvider;
@@ -64,6 +66,7 @@ export function createRuntimeSourceProviders(config: AppConfig): RuntimeSourcePr
     config.source.rss?.proxyUrl === undefined ? {} : { proxyUrl: config.source.rss.proxyUrl };
 
   return {
+    anthropic_news: createAnthropicNewsSourceProvider(proxyOptions),
     github: createGithubTrendingSourceProvider(proxyOptions),
     hf_papers: createHfDailyPapersSourceProvider(proxyOptions),
     rss: createRssSourceProvider(proxyOptions),

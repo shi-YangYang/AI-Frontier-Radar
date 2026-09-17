@@ -324,6 +324,7 @@ RSS 与 X 走同一条基线 / 增量 / 去重 / 入库 / 投递链路：首次�
 | Hacker News | 首页 / 最新 / ≥100 分 / ≥300 分 | `hnrss.org/...` |
 | Product Hunt | 无需输入 | `producthunt.com/feed` |
 | HF Daily Papers | 无需输入 | `huggingface.co/api/daily_papers`（JSON API） |
+| Anthropic 新闻 | 无需输入 | `anthropic.com/news`（服务端解析页面） |
 | GitHub 热门仓库 | 周期（每日/每周/每月）+ 可选语言 | `github.com/trending[/<lang>]?since=...`（服务端解析页面） |
 | GitHub 仓库发布 | `owner/repo` | `github.com/<owner>/<repo>/releases.atom` |
 | GitHub 用户动态 | 用户名 | `github.com/<user>.atom` |
@@ -336,9 +337,20 @@ YouTube 解析与 GitHub 页面抓取遵循“RSS 源”页签里的代理配置
 
 | 组合 | 内容 |
 | --- | --- |
-| AI 消息 | arXiv cs.AI / cs.CL / cs.LG / cs.CV、HF Daily Papers、Techmeme、Hacker News、Reddit r/LocalLLaMA、Product Hunt、OpenAI News、Google AI、Google DeepMind、量子位、GitHub Trending（每日） |
+| AI 消息 | arXiv cs.AI / cs.CL / cs.LG / cs.CV、HF Daily Papers、Techmeme、Hacker News、Reddit r/LocalLLaMA、Product Hunt、OpenAI News、Google AI、Google DeepMind、Anthropic News、量子位、GitHub Trending（每日） |
 
 初始化后监听源为空，不会自动添加任何源；首次轮询只建立基线，不推送历史内容。
+
+## 本地 Feed 输出
+
+外部阅读工具可直接订阅本机数据（无需鉴权）：
+
+| 地址 | 格式 | 说明 |
+| --- | --- | --- |
+| `http://127.0.0.1:3000/feed.xml` | RSS 2.0 | 最新内容 |
+| `http://127.0.0.1:3000/feed.json` | JSON Feed 1.1 | 最新内容 |
+
+参数：`?limit=50`（默认 50，最大 200）；`?matched=1` 仅输出命中启用“订阅规则”的内容（没有启用规则时等同全量）。
 
 ## 订阅规则（推送过滤）
 
