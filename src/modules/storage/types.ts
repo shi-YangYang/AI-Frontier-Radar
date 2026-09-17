@@ -1,6 +1,15 @@
 export type WatchAccountPollStatus = 'failed' | 'pending' | 'success';
 
-export type WatchAccountSourceType = 'github' | 'hf_papers' | 'rss' | 'x';
+export type WatchAccountSourceType =
+  | 'ai2_blog'
+  | 'anthropic_news'
+  | 'github'
+  | 'hf_papers'
+  | 'meta_ai_blog'
+  | 'moonshot_blog'
+  | 'rss'
+  | 'x'
+  | 'xai_news';
 
 export type DeliveryChannelType = 'feishu_webhook';
 

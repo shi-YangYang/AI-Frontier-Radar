@@ -11,6 +11,14 @@
         >
           {{ autoRefreshEnabled ? t('posts.autoRefreshOn') : t('posts.autoRefreshOff') }}
         </button>
+        <button
+          class="danger"
+          type="button"
+          :disabled="busy || summary.totalPosts === 0"
+          @click="clearPostsOpen = true"
+        >
+          {{ t('posts.clearAll') }}
+        </button>
       </div>
     </PageHeader>
 
@@ -27,88 +35,91 @@
       </article>
       <article class="metric-card">
         <span>{{ t('posts.summary.latestDetectedAt') }}</span>
-        <strong class="metric-date">{{ formatBeijingTime(summary.latestDetectedAt) }}</strong>
-      </article>
-      <article class="metric-card">
-        <span>{{ t('posts.summary.autoRefresh') }}</span>
-        <strong class="metric-date">{{ autoRefreshEnabled ? t('posts.enabled') : t('posts.disabled') }}</strong>
+        <strong class="metric-date" :title="formatBeijingTime(summary.latestDetectedAt)">
+          {{ formatRelativeTime(summary.latestDetectedAt) }}
+        </strong>
       </article>
     </div>
 
     <div class="panel posts-filter-panel">
-      <button
-        class="posts-filter-toggle"
-        type="button"
-        :aria-expanded="filtersExpanded"
-        @click="filtersExpanded = !filtersExpanded"
-      >
-        {{ filtersExpanded ? t('posts.filters.hide') : t('posts.filters.show') }}
-      </button>
-      <form
-        class="posts-filter-form"
-        :class="{ expanded: filtersExpanded }"
-        @submit.prevent="applyFilters"
-      >
-        <label>
-          <span>{{ t('posts.filters.author') }}</span>
-          <input v-model="filters.authorUsername" :placeholder="t('posts.filters.authorPlaceholder')" />
-        </label>
-        <label>
-          <span>{{ t('posts.filters.query') }}</span>
-          <input v-model="filters.query" :placeholder="t('posts.filters.queryPlaceholder')" />
-        </label>
-        <label>
-          <span>{{ t('posts.filters.postedFrom') }}</span>
-          <input
-            v-model="filters.postedFrom"
-            type="datetime-local"
-            @input="activePostedPreset = null"
-          />
-        </label>
-        <label>
-          <span>{{ t('posts.filters.postedTo') }}</span>
-          <input
-            v-model="filters.postedTo"
-            type="datetime-local"
-            @input="activePostedPreset = null"
-          />
-        </label>
-        <div class="posts-filter-presets">
-          <span>{{ t('posts.filters.postedPreset') }}</span>
-          <div class="preset-chips">
-            <button
-              v-for="preset in postedPresets"
-              :key="preset.key"
-              type="button"
-              class="preset-chip"
-              :class="{ active: activePostedPreset === preset.key }"
-              @click="applyPostedPreset(preset.key)"
-            >
-              {{ t(preset.labelKey) }}
+      <form class="posts-filter-form" @submit.prevent="applyFilters">
+        <div class="posts-filter-primary">
+          <label class="filter-field">
+            <span>{{ t('posts.filters.query') }}</span>
+            <input
+              v-model="filters.query"
+              :disabled="busy"
+              :placeholder="t('posts.filters.queryPlaceholder')"
+            />
+          </label>
+          <div class="posts-filter-presets">
+            <span>{{ t('posts.filters.postedPreset') }}</span>
+            <div class="preset-chips">
+              <button
+                v-for="preset in postedPresets"
+                :key="preset.key"
+                type="button"
+                class="preset-chip"
+                :class="{ active: activePostedPreset === preset.key }"
+                @click="applyPostedPreset(preset.key)"
+              >
+                {{ t(preset.labelKey) }}
+              </button>
+            </div>
+          </div>
+          <div class="posts-filter-actions">
+            <button class="primary" type="submit" :disabled="busy">{{ t('actions.query') }}</button>
+            <button type="button" :disabled="busy" @click="filtersExpanded = !filtersExpanded">
+              {{ filtersExpanded ? t('posts.filters.hide') : t('posts.filters.show') }}
+            </button>
+            <button type="button" :disabled="busy" @click="clearFilters">
+              {{ t('actions.clearQuery') }}
             </button>
           </div>
         </div>
-        <div class="filter-field">
-          <span>{{ t('posts.filters.isReply') }}</span>
-          <SelectControl
-            v-model="filters.isReply"
-            :aria-label="t('posts.filters.isReply')"
-            :options="replyOptions"
-          />
-        </div>
-        <div class="filter-field">
-          <span>{{ t('posts.filters.isRepost') }}</span>
-          <SelectControl
-            v-model="filters.isRepost"
-            :aria-label="t('posts.filters.isRepost')"
-            :options="repostOptions"
-          />
-        </div>
-        <p class="posts-filter-hint">{{ t('posts.filters.replyRepostHint') }}</p>
-        <div class="posts-filter-actions">
-          <button class="primary" type="submit" :disabled="busy">{{ t('actions.query') }}</button>
-          <button type="button" :disabled="busy" @click="clearFilters">{{ t('actions.clearQuery') }}</button>
-          <button type="button" :disabled="busy" @click="manualRefresh">{{ t('posts.manualRefresh') }}</button>
+
+        <div v-if="filtersExpanded" class="posts-filter-advanced">
+          <label>
+            <span>{{ t('posts.filters.author') }}</span>
+            <input
+              v-model="filters.authorUsername"
+              :disabled="busy"
+              :placeholder="t('posts.filters.authorPlaceholder')"
+            />
+          </label>
+          <label>
+            <span>{{ t('posts.filters.postedFrom') }}</span>
+            <input
+              v-model="filters.postedFrom"
+              type="datetime-local"
+              @input="activePostedPreset = null"
+            />
+          </label>
+          <label>
+            <span>{{ t('posts.filters.postedTo') }}</span>
+            <input
+              v-model="filters.postedTo"
+              type="datetime-local"
+              @input="activePostedPreset = null"
+            />
+          </label>
+          <div class="filter-field">
+            <span>{{ t('posts.filters.isReply') }}</span>
+            <SelectControl
+              v-model="filters.isReply"
+              :aria-label="t('posts.filters.isReply')"
+              :options="replyOptions"
+            />
+          </div>
+          <div class="filter-field">
+            <span>{{ t('posts.filters.isRepost') }}</span>
+            <SelectControl
+              v-model="filters.isRepost"
+              :aria-label="t('posts.filters.isRepost')"
+              :options="repostOptions"
+            />
+          </div>
+          <p class="posts-filter-hint">{{ t('posts.filters.replyRepostHint') }}</p>
         </div>
       </form>
     </div>
@@ -123,10 +134,12 @@
     </button>
 
     <div class="posts-timeline" aria-live="polite">
-      <article v-if="posts.length === 0" class="panel posts-empty">
-        <h2>{{ t('posts.emptyTitle') }}</h2>
-        <p>{{ t('posts.emptyHint') }}</p>
-      </article>
+      <EmptyState
+        v-if="posts.length === 0"
+        class="posts-empty"
+        :title="t('posts.emptyTitle')"
+        :description="t('posts.emptyHint')"
+      />
 
       <article
         v-for="post in posts"
@@ -140,33 +153,20 @@
         <div class="post-card-body">
           <header class="post-card-header">
             <div class="post-author">
-              <strong>@{{ post.authorUsername }}</strong>
-              <span v-if="post.authorDisplayName">{{ post.authorDisplayName }}</span>
+              <strong>{{ toPostAuthorLabel(post) }}</strong>
+              <span class="muted" :title="formatBeijingTime(post.postedAt)">
+                {{ formatRelativeTime(post.postedAt) }}
+              </span>
             </div>
             <div class="post-tags">
               <span v-if="post.isReply" class="status-badge neutral">{{ t('posts.tag.reply') }}</span>
               <span v-if="post.isRepost" class="status-badge neutral">{{ t('posts.tag.repost') }}</span>
+              <span v-if="hasDeliveryIssue(post)" class="status-badge bad">
+                {{ t('posts.deliveryIssue') }}
+              </span>
             </div>
           </header>
           <p class="post-excerpt">{{ post.textContent }}</p>
-          <dl class="post-meta-grid">
-            <div>
-              <dt>{{ t('posts.fields.beijingTime') }}</dt>
-              <dd>{{ formatBeijingTime(post.postedAt) }}</dd>
-            </div>
-            <div>
-              <dt>{{ t('posts.fields.utcTime') }}</dt>
-              <dd>{{ formatUtcTime(post.postedAt) }}</dd>
-            </div>
-            <div>
-              <dt>{{ t('posts.fields.detectedAt') }}</dt>
-              <dd>{{ formatBeijingTime(post.detectedAt) }}</dd>
-            </div>
-            <div>
-              <dt>{{ t('posts.fields.postId') }}</dt>
-              <dd><code>{{ post.xPostId }}</code></dd>
-            </div>
-          </dl>
           <footer class="post-card-footer">
             <a
               class="button-link"
@@ -177,13 +177,6 @@
             >
               {{ t('posts.openOriginal') }}
             </a>
-            <div class="delivery-summary" :aria-label="t('posts.deliverySummary')">
-              <span>{{ t('posts.delivery.total', { count: post.deliverySummary.total }) }}</span>
-              <span>{{ t('posts.delivery.sent', { count: post.deliverySummary.sent }) }}</span>
-              <span>{{ t('posts.delivery.active', { count: post.deliverySummary.active }) }}</span>
-              <span>{{ t('posts.delivery.failed', { count: post.deliverySummary.failed }) }}</span>
-              <span>{{ t('posts.delivery.dead', { count: post.deliverySummary.dead }) }}</span>
-            </div>
           </footer>
         </div>
       </article>
@@ -197,6 +190,15 @@
         @invalid-page="setNotice(t('notice.invalidPage'), true)"
       />
     </div>
+
+    <ConfirmModal
+      :open="clearPostsOpen"
+      :title="t('posts.clearTitle')"
+      :body="t('posts.clearBody')"
+      :detail="t('posts.clearDetail')"
+      @cancel="clearPostsOpen = false"
+      @confirm="confirmClearPosts"
+    />
 
     <div
       v-if="selectedPost !== null"
@@ -316,6 +318,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 
 import {
+  clearPostsHistory,
   listPosts,
   type AdminPagination,
   type PostBooleanFilter,
@@ -323,13 +326,15 @@ import {
   type PostsSummary,
   type XPostContent,
 } from '../api/admin-api';
+import ConfirmModal from '../components/ConfirmModal.vue';
+import EmptyState from '../components/EmptyState.vue';
 import PageHeader from '../components/PageHeader.vue';
 import PaginationBar from '../components/PaginationBar.vue';
 import SelectControl from '../components/SelectControl.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import ToastNotice from '../components/ToastNotice.vue';
 import { t } from '../i18n';
-import { DEFAULT_PAGE_SIZE, dash, validateTimeRange } from '../utils';
+import { DEFAULT_PAGE_SIZE, dash, formatRelativeTime, validateTimeRange } from '../utils';
 
 const AUTO_REFRESH_MS = 15_000;
 
@@ -343,6 +348,7 @@ const postedPresets = [
 type PostedPresetKey = (typeof postedPresets)[number]['key'];
 
 const autoRefreshEnabled = ref(true);
+const clearPostsOpen = ref(false);
 const busy = ref(false);
 const activePostedPreset = ref<PostedPresetKey | null>(null);
 const filters = reactive({
@@ -520,6 +526,34 @@ async function runAutoRefresh(): Promise<void> {
 async function showNewContent(): Promise<void> {
   selectedPost.value = null;
   await loadPage(1);
+}
+
+async function confirmClearPosts(): Promise<void> {
+  clearPostsOpen.value = false;
+  busy.value = true;
+
+  try {
+    const result = await clearPostsHistory();
+    await loadPage(1, { silent: true });
+    setNotice(
+      t('notice.postsCleared', {
+        events: result.deletedEvents,
+        posts: result.deletedPosts,
+      }),
+    );
+  } catch (error) {
+    setNotice(error instanceof Error ? error.message : String(error), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+function toPostAuthorLabel(post: XPostContent): string {
+  return post.authorDisplayName ?? post.authorUsername;
+}
+
+function hasDeliveryIssue(post: XPostContent): boolean {
+  return post.deliverySummary.failed > 0 || post.deliverySummary.dead > 0;
 }
 
 function openDetail(post: XPostContent): void {

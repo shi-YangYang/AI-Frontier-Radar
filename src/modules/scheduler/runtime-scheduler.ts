@@ -2,12 +2,17 @@ import type { AppLogger } from '../../lib/logger';
 import type { AppConfig } from '../../shared/config/types';
 import { runDeliveryWorkerJob, type DeliveryWorkerRunOnceResult } from '../delivery';
 import {
+  createAi2BlogSourceProvider,
+  createAnthropicNewsSourceProvider,
   createBrowserXSourceProvider,
   createGithubTrendingSourceProvider,
   createHfDailyPapersSourceProvider,
+  createMetaAiBlogSourceProvider,
+  createMoonshotBlogSourceProvider,
   createRssSourceProvider,
   createSourceProviderRegistry,
   createXSourceProvider,
+  createXaiNewsSourceProvider,
   runPollingJob,
   type PollingRunResult,
   type SourceProvider,
@@ -53,10 +58,15 @@ export function createRuntimeScheduler(options: RuntimeSchedulerOptions): Runtim
 }
 
 export interface RuntimeSourceProviders {
+  ai2_blog: SourceProvider;
+  anthropic_news: SourceProvider;
   github: SourceProvider;
   hf_papers: SourceProvider;
+  meta_ai_blog: SourceProvider;
+  moonshot_blog: SourceProvider;
   rss: SourceProvider;
   x: SourceProvider;
+  xai_news: SourceProvider;
 }
 
 export function createRuntimeSourceProviders(config: AppConfig): RuntimeSourceProviders {
@@ -64,6 +74,11 @@ export function createRuntimeSourceProviders(config: AppConfig): RuntimeSourcePr
     config.source.rss?.proxyUrl === undefined ? {} : { proxyUrl: config.source.rss.proxyUrl };
 
   return {
+    ai2_blog: createAi2BlogSourceProvider(proxyOptions),
+    anthropic_news: createAnthropicNewsSourceProvider(proxyOptions),
+    meta_ai_blog: createMetaAiBlogSourceProvider(proxyOptions),
+    moonshot_blog: createMoonshotBlogSourceProvider(proxyOptions),
+    xai_news: createXaiNewsSourceProvider(proxyOptions),
     github: createGithubTrendingSourceProvider(proxyOptions),
     hf_papers: createHfDailyPapersSourceProvider(proxyOptions),
     rss: createRssSourceProvider(proxyOptions),
@@ -271,6 +286,24 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
       },
       'scheduler job started',
     );
+
+    const enabledAccounts = await this.options.storage.watchAccounts.listEnabled();
+
+    if (enabledAccounts.length === 0) {
+      this.logger.info(
+        {
+          job: 'polling',
+          trigger,
+        },
+        'scheduler skipped polling tick because no enabled sources are configured',
+      );
+      return {
+        job: 'polling',
+        message: 'No enabled sources are configured.',
+        status: 'skipped',
+        trigger,
+      };
+    }
 
     try {
       const config =

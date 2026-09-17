@@ -94,8 +94,8 @@ export async function loadAppConfig(options: LoadAppConfigOption = {}): Promise<
   });
   const pollIntervalSeconds = reader.readInteger('POLL_INTERVAL_SECONDS', {
     defaultValue: DEFAULT_POLL_INTERVAL_SECONDS,
-    max: 3_600,
-    min: 10,
+    max: 216_000,
+    min: 60,
   });
   const fetchLimitPerAccount = reader.readInteger('FETCH_LIMIT_PER_ACCOUNT', {
     defaultValue: DEFAULT_FETCH_LIMIT,

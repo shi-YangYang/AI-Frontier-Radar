@@ -38,13 +38,24 @@ import type {
   SaveXBrowserSettingsInput,
 } from '../../storage/runtime-settings-service';
 import type { XPostPageQuery, XPostRawWithDeliveryEvents, XPostSummary } from '../../storage/types';
+import { SOURCE_GROUPS, findSourceGroup } from '../../../config/source-groups';
+import {
+  applySourceGroup,
+  getSourceGroupStatuses,
+  type SourceGroupStatus,
+} from '../../storage';
 import { normalizeXUsername } from '../../storage/watch-account-repository';
 
 export type AdminWatchAccountValidationInput =
+  | { sourceType: 'ai2_blog'; sourceUrl: string }
+  | { sourceType: 'anthropic_news'; sourceUrl: string }
   | { sourceType: 'github'; sourceUrl: string }
   | { sourceType: 'hf_papers'; sourceUrl: string }
+  | { sourceType: 'meta_ai_blog'; sourceUrl: string }
+  | { sourceType: 'moonshot_blog'; sourceUrl: string }
   | { sourceType: 'rss'; sourceUrl: string }
-  | { sourceType: 'x'; xUsername: string };
+  | { sourceType: 'x'; xUsername: string }
+  | { sourceType: 'xai_news'; sourceUrl: string };
 
 export interface AdminActions {
   runDeliveryWorkerNow?(options?: { recoverStartupState?: boolean; trigger?: string }): Promise<RuntimeSchedulerRunNowResult>;
@@ -168,7 +179,16 @@ export async function createAdminWatchAccount(
   const input = readCreateWatchAccountBody(body);
   const account = await validateWatchSource(input, options);
 
-  if (input.sourceType === 'rss' || input.sourceType === 'github' || input.sourceType === 'hf_papers') {
+  if (
+    input.sourceType === 'rss' ||
+    input.sourceType === 'github' ||
+    input.sourceType === 'hf_papers' ||
+    input.sourceType === 'anthropic_news' ||
+    input.sourceType === 'ai2_blog' ||
+    input.sourceType === 'moonshot_blog' ||
+    input.sourceType === 'meta_ai_blog' ||
+    input.sourceType === 'xai_news'
+  ) {
     const { created, watchAccount } = await options.storage.watchAccounts.createIfAbsentBySource({
       displayName: account.displayName ?? null,
       enabled: true,
@@ -485,6 +505,60 @@ export async function updateAdminRssSettings(
   return {
     ok: true,
     data: settings,
+  };
+}
+
+export async function clearAdminPostsHistory(
+  options: AdminControllerOptions,
+): Promise<{
+  ok: true;
+  data: { deletedEvents: number; deletedPosts: number; resetBoardSources: number };
+}> {
+  const deletedEvents = await options.storage.deliveryEvents.deleteAll();
+  const deletedPosts = await options.storage.xPosts.deleteAll();
+  const resetBoardSources = await options.storage.watchAccounts.resetBoardSourceCursors();
+
+  return {
+    ok: true,
+    data: {
+      deletedEvents,
+      deletedPosts,
+      resetBoardSources,
+    },
+  };
+}
+
+export async function getAdminSourceGroups(
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { groups: SourceGroupStatus[] } }> {
+  const groups = await getSourceGroupStatuses(options.storage.watchAccounts, SOURCE_GROUPS);
+
+  return {
+    ok: true,
+    data: { groups },
+  };
+}
+
+export async function applyAdminSourceGroup(
+  params: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { created: number; existing: number; group: string } }> {
+  const id = readIdParam(params);
+  const group = findSourceGroup(id);
+
+  if (group === undefined) {
+    throw new AdminApiError(404, 'NOT_FOUND', `监听组合不存在：${id}`);
+  }
+
+  const result = await applySourceGroup(options.storage.watchAccounts, group);
+
+  return {
+    ok: true,
+    data: {
+      created: result.created,
+      existing: result.existing,
+      group: group.id,
+    },
   };
 }
 
@@ -1924,14 +1998,32 @@ function readCreateWatchAccountBody(body: unknown): AdminWatchAccountValidationI
     body.sourceType !== 'x' &&
     body.sourceType !== 'rss' &&
     body.sourceType !== 'github' &&
-    body.sourceType !== 'hf_papers'
+    body.sourceType !== 'hf_papers' &&
+    body.sourceType !== 'anthropic_news' &&
+    body.sourceType !== 'ai2_blog' &&
+    body.sourceType !== 'moonshot_blog' &&
+    body.sourceType !== 'meta_ai_blog' &&
+    body.sourceType !== 'xai_news'
   ) {
-    throw new AdminApiError(400, 'INVALID_REQUEST', 'sourceType 必须是 x、rss、github 或 hf_papers。');
+    throw new AdminApiError(
+      400,
+      'INVALID_REQUEST',
+      'sourceType 必须是 x、rss、github、hf_papers、anthropic_news、ai2_blog、moonshot_blog、meta_ai_blog 或 xai_news。',
+    );
   }
 
   const sourceType = body.sourceType ?? 'x';
 
-  if (sourceType === 'rss' || sourceType === 'github' || sourceType === 'hf_papers') {
+  if (
+    sourceType === 'rss' ||
+    sourceType === 'github' ||
+    sourceType === 'hf_papers' ||
+    sourceType === 'anthropic_news' ||
+    sourceType === 'ai2_blog' ||
+    sourceType === 'moonshot_blog' ||
+    sourceType === 'meta_ai_blog' ||
+    sourceType === 'xai_news'
+  ) {
     return {
       sourceType,
       sourceUrl: readRssSourceUrl(body.sourceUrl),

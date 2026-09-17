@@ -1,5 +1,5 @@
 <template>
-  <div class="pagination">
+  <div v-if="pagination.total > 0" class="pagination">
     <span class="page-info">
       {{ t('pagination.summary', {
         page: pagination.page,

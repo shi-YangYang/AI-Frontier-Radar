@@ -18,7 +18,7 @@
     <ToastNotice :message="notice" :danger="noticeDanger" />
 
     <div class="panel">
-      <div class="bulk-actions">
+      <div v-if="deliveryEvents.length > 0" class="bulk-actions">
         <span>{{ t('bulk.selectedCount', { count: selectedCount }) }}</span>
         <div class="action-row">
           <button class="danger" type="button" :disabled="busy || selectedCount === 0" @click="askBatchDelete">
@@ -29,7 +29,12 @@
           </button>
         </div>
       </div>
-      <div class="table-wrap">
+      <EmptyState
+        v-if="deliveryEvents.length === 0"
+        :title="t('delivery.emptyTitle')"
+        :description="t('delivery.empty')"
+      />
+      <div v-else class="table-wrap">
         <table>
           <thead>
             <tr>
@@ -43,19 +48,14 @@
                 />
               </th>
               <th>{{ t('table.createdAt') }}</th>
-              <th>{{ t('table.postId') }}</th>
+              <th>{{ t('delivery.postColumn') }}</th>
               <th>{{ t('table.target') }}</th>
               <th>{{ t('table.status') }}</th>
               <th>{{ t('table.attemptCount') }}</th>
-              <th>{{ t('table.nextRetryAt') }}</th>
-              <th>{{ t('table.sentAt') }}</th>
               <th>{{ t('table.actions') }}</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="deliveryEvents.length === 0">
-              <td colspan="9" class="empty-cell">{{ t('delivery.empty') }}</td>
-            </tr>
             <tr v-for="event in deliveryEvents" :key="event.id">
               <td class="select-cell">
                 <input
@@ -66,15 +66,15 @@
                   @change="toggleSelected(event.id)"
                 />
               </td>
-              <td>{{ formatDateTime(event.createdAt) }}</td>
-              <td><code>{{ event.xPostId }}</code></td>
+              <td :title="formatDateTime(event.createdAt)">{{ formatRelativeTime(event.createdAt) }}</td>
+              <td><code :title="event.xPostId">#{{ shortPostId(event.xPostId) }}</code></td>
               <td><code>{{ event.targetKey }}</code></td>
-              <td><StatusBadge :status="event.status" /></td>
+              <td :title="deliveryEventDetail(event)">
+                <StatusBadge :status="event.status" />
+              </td>
               <td>{{ event.attemptCount }}</td>
-              <td>{{ formatDateTime(event.nextRetryAt) }}</td>
-              <td>{{ formatDateTime(event.sentAt) }}</td>
               <td>
-                <button class="danger" type="button" :disabled="busy" @click="askDelete(event)">
+                <button class="text-button danger-text" type="button" :disabled="busy" @click="askDelete(event)">
                   {{ t('actions.delete') }}
                 </button>
               </td>
@@ -130,12 +130,18 @@ import {
   type PageQuery,
 } from '../api/admin-api';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import EmptyState from '../components/EmptyState.vue';
 import PageHeader from '../components/PageHeader.vue';
 import PaginationBar from '../components/PaginationBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import ToastNotice from '../components/ToastNotice.vue';
 import { t } from '../i18n';
-import { DEFAULT_PAGE_SIZE, formatDateTime, validateTimeRange } from '../utils';
+import {
+  DEFAULT_PAGE_SIZE,
+  formatDateTime,
+  formatRelativeTime,
+  validateTimeRange,
+} from '../utils';
 
 const batchDeleteOpen = ref(false);
 const busy = ref(false);
@@ -204,6 +210,28 @@ async function clearFilters(): Promise<void> {
   filters.from = '';
   filters.to = '';
   await loadPage(1);
+}
+
+function shortPostId(xPostId: string): string {
+  return xPostId.length <= 8 ? xPostId : xPostId.slice(-8);
+}
+
+function deliveryEventDetail(event: DeliveryEvent): string {
+  const parts: string[] = [];
+
+  if (event.sentAt !== null) {
+    parts.push(`${t('table.sentAt')}: ${formatDateTime(event.sentAt)}`);
+  }
+
+  if (event.nextRetryAt !== null) {
+    parts.push(`${t('table.nextRetryAt')}: ${formatDateTime(event.nextRetryAt)}`);
+  }
+
+  if (event.lastError !== null) {
+    parts.push(event.lastError);
+  }
+
+  return parts.join('\n');
 }
 
 function askDelete(event: DeliveryEvent): void {

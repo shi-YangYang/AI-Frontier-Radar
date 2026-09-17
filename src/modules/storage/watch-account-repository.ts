@@ -99,6 +99,30 @@ export class WatchAccountRepository {
     return mapWatchAccount(watchAccount);
   }
 
+  public async resetBoardSourceCursors(): Promise<number> {
+    const result = await this.prisma.watchAccount.updateMany({
+      data: {
+        baselinePostId: null,
+        lastSeenPostId: null,
+      },
+      where: {
+        sourceType: {
+          in: [
+            'ai2_blog',
+            'anthropic_news',
+            'github',
+            'hf_papers',
+            'meta_ai_blog',
+            'moonshot_blog',
+            'xai_news',
+          ],
+        },
+      },
+    });
+
+    return result.count;
+  }
+
   public async delete(id: string): Promise<boolean> {
     const result = await this.prisma.watchAccount.deleteMany({
       where: { id },

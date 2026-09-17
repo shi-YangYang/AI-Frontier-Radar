@@ -18,7 +18,7 @@
     <ToastNotice :message="notice" :danger="noticeDanger" />
 
     <div class="panel">
-      <div class="bulk-actions">
+      <div v-if="pollRuns.length > 0" class="bulk-actions">
         <span>{{ t('bulk.selectedCount', { count: selectedCount }) }}</span>
         <div class="action-row">
           <button class="danger" type="button" :disabled="busy || selectedCount === 0" @click="askBatchDelete">
@@ -29,7 +29,12 @@
           </button>
         </div>
       </div>
-      <div class="table-wrap">
+      <EmptyState
+        v-if="pollRuns.length === 0"
+        :title="t('poll.emptyTitle')"
+        :description="t('poll.empty')"
+      />
+      <div v-else class="table-wrap">
         <table>
           <thead>
             <tr>
@@ -43,18 +48,14 @@
                 />
               </th>
               <th>{{ t('table.startedAt') }}</th>
-              <th>{{ t('table.finishedAt') }}</th>
               <th>{{ t('table.status') }}</th>
-              <th>{{ t('table.pollProgress') }}</th>
+              <th>{{ t('poll.resultColumn') }}</th>
               <th>{{ t('table.newPosts') }}</th>
               <th>{{ t('table.pendingEvents') }}</th>
               <th>{{ t('table.actions') }}</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="pollRuns.length === 0">
-              <td colspan="8" class="empty-cell">{{ t('poll.empty') }}</td>
-            </tr>
             <tr v-for="run in pollRuns" :key="run.id">
               <td class="select-cell">
                 <input
@@ -65,10 +66,13 @@
                   @change="toggleSelected(run.id)"
                 />
               </td>
-              <td>{{ formatDateTime(run.startedAt) }}</td>
-              <td>{{ formatDateTime(run.finishedAt) }}</td>
+              <td :title="formatDateTime(run.startedAt)">{{ formatRelativeTime(run.startedAt) }}</td>
               <td><StatusBadge :status="run.status" /></td>
-              <td>{{ pollProgress(run) }}</td>
+              <td :title="pollProgress(run)">
+                <span :class="{ 'warn-text': run.accountsFailed > 0 }">
+                  {{ run.accountsSucceeded }}/{{ run.accountsTotal }}
+                </span>
+              </td>
               <td>{{ run.newPostsDetected }}</td>
               <td>{{ run.eventsCreated }}</td>
               <td>
@@ -76,7 +80,7 @@
                   <button v-if="run.errorSummary" type="button" @click="openError(run)">
                     {{ t('actions.viewError') }}
                   </button>
-                  <button class="danger" type="button" :disabled="busy" @click="askDelete(run)">
+                  <button class="text-button danger-text" type="button" :disabled="busy" @click="askDelete(run)">
                     {{ t('actions.delete') }}
                   </button>
                 </div>
@@ -138,13 +142,20 @@ import {
   type PollRun,
 } from '../api/admin-api';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import EmptyState from '../components/EmptyState.vue';
 import ErrorModal from '../components/ErrorModal.vue';
 import PageHeader from '../components/PageHeader.vue';
 import PaginationBar from '../components/PaginationBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import ToastNotice from '../components/ToastNotice.vue';
 import { t } from '../i18n';
-import { DEFAULT_PAGE_SIZE, formatDateTime, pollProgress, validateTimeRange } from '../utils';
+import {
+  DEFAULT_PAGE_SIZE,
+  formatDateTime,
+  formatRelativeTime,
+  pollProgress,
+  validateTimeRange,
+} from '../utils';
 
 const batchDeleteOpen = ref(false);
 const busy = ref(false);

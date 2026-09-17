@@ -1,4 +1,13 @@
-export type SourceType = 'github' | 'hf_papers' | 'rss' | 'x';
+export type SourceType =
+  | 'ai2_blog'
+  | 'anthropic_news'
+  | 'github'
+  | 'hf_papers'
+  | 'meta_ai_blog'
+  | 'moonshot_blog'
+  | 'rss'
+  | 'x'
+  | 'xai_news';
 
 export interface SourceDescriptor {
   sourceType: SourceType;

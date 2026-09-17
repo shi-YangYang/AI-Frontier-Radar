@@ -58,7 +58,7 @@ AI 领域的重要消息经常先出现在 X 上。这个项目的目标不是�
 | --- | --- | --- |
 | 总览 | `/` | 查看运行摘要、手动轮询、手动发送 |
 | 监听源 | `/accounts` | 查询、分页、新增、删除 X 账号与 RSS 源 |
-| 消息内容 | `/posts` | 查看已轮询到的帖子、筛选、详情抽屉、自动刷新 |
+| 消息内容 | `/posts` | 查看已轮询到的帖子、筛选、详情抽屉、自动刷新、一键清空 |
 | 最近轮询 | `/poll-runs` | 查询、分页、删除、批量删除、清空历史、查看错误 |
 | 最近发送 | `/delivery-events` | 查询、分页、删除、批量删除、清空历史 |
 | 配置 | `/settings` | 飞书 Webhook、轮询参数、X 数据源、运行信息 |
@@ -198,7 +198,7 @@ npm run dev
 | `REDIS_URL` | `redis://127.0.0.1:1` | 就绪检查使用；本地核心功能不强依赖 |
 | `FEISHU_WEBHOOK_URL` | 空 | 可选启动种子，推荐在 Web 控制台配置 |
 | `WATCH_ACCOUNTS_SOURCE` | `database` | X 账号启动种子来源，推荐保持数据库 |
-| `POLL_INTERVAL_SECONDS` | `300` | 轮询间隔，也可在 Web 控制台修改 |
+| `POLL_INTERVAL_SECONDS` | `300` | 轮询间隔（秒）；Web 控制台按分钟配置（1-3600 分钟） |
 | `FETCH_LIMIT_PER_ACCOUNT` | `5` | 每账号单次抓取数量 |
 | `EXCLUDE_REPLIES` | `true` | 默认排除回复 |
 | `EXCLUDE_REPOSTS` | `true` | 默认排除转发 |
@@ -303,11 +303,13 @@ X_API_BEARER_TOKEN=replace-with-real-token
 | 代理 | 支持 `RSS_PROXY_URL` 或在 `/settings -> RSS 源` 配置 http/https 代理 |
 | 错误处理 | 404/410 → 源不存在；其他非 2xx → 请求失败；解析失败 → 内容无效；单个源失败不影响其他源 |
 
+没有启用中的监听源时，轮询会自动跳过（不产生轮询记录）；「立即轮询」也会返回"已跳过"。
+
 RSS 与 X 走同一条基线 / 增量 / 去重 / 入库 / 投递链路：首次接入只建立基线（最新 1 条），之后只入库新条目；有启用的飞书 Webhook 时同步创建投递事件。
 
 需要出网代理时，在 `/settings -> RSS 源` 保存代理（优先级：Web 控制台 > `.env` 的 `RSS_PROXY_URL`）。仅支持 `http://` 与 `https://`，不支持 `socks5://`。
 
-首次初始化（监听源表为空）时，服务会自动导入一组推荐源：arXiv cs.AI / cs.CL / cs.LG / cs.CV、Techmeme、Hacker News、Product Hunt、Reddit r/LocalLLaMA、OpenAI News、Google AI、Google DeepMind、量子位、GitHub Trending（每日）、HF Daily Papers。默认源只导入一次，删除后不会恢复；导入发生在首次启动，不阻塞服务启动。
+初始化后监听源为空，默认不监听任何内容。可在 `/accounts` 顶部的“监听组合”中一键添加常用源（当前提供「AI 消息」组：arXiv 四分类、HF Daily Papers、Techmeme、Hacker News、Reddit r/LocalLLaMA、Product Hunt、OpenAI、Google AI、DeepMind、量子位、GitHub Trending 热门仓库）；重复应用会自动跳过已存在的源。
 
 ### 按来源添加（预设）
 
@@ -322,11 +324,37 @@ RSS 与 X 走同一条基线 / 增量 / 去重 / 入库 / 投递链路：首次�
 | Hacker News | 首页 / 最新 / ≥100 分 / ≥300 分 | `hnrss.org/...` |
 | Product Hunt | 无需输入 | `producthunt.com/feed` |
 | HF Daily Papers | 无需输入 | `huggingface.co/api/daily_papers`（JSON API） |
+| Anthropic 新闻 | 无需输入 | `anthropic.com/news`（服务端解析页面） |
+| Meta AI 博客 | 无需输入 | `ai.meta.com/blog`（无头浏览器渲染） |
+| xAI 新闻 | 无需输入 | `x.ai/news`（无头浏览器渲染） |
+| AI2 博客 | 无需输入 | `allenai.org/blog`（服务端解析页面） |
+| Moonshot 博客 | 无需输入 | `platform.moonshot.cn/blog`（服务端解析页面） |
 | GitHub 热门仓库 | 周期（每日/每周/每月）+ 可选语言 | `github.com/trending[/<lang>]?since=...`（服务端解析页面） |
 | GitHub 仓库发布 | `owner/repo` | `github.com/<owner>/<repo>/releases.atom` |
 | GitHub 用户动态 | 用户名 | `github.com/<user>.atom` |
 
 YouTube 解析与 GitHub 页面抓取遵循“RSS 源”页签里的代理配置；GitHub 热门仓库首次接入会把当前榜单整体作为基线入库（不推送），之后只有新进入榜单的仓库才会推送。
+
+## 监听组合
+
+`/accounts` 顶部提供内置监听组合，一键添加一组常用源（已存在的自动跳过）：
+
+| 组合 | 内容 |
+| --- | --- |
+| AI 消息 | arXiv cs.AI / cs.CL / cs.LG / cs.CV、HF Daily Papers、Techmeme、Hacker News、Reddit r/LocalLLaMA、Product Hunt、OpenAI News、Google AI、Google DeepMind、Anthropic News、AI at Meta、xAI News、AI2 Blog、Moonshot Blog、Mistral、Stability AI、Hugging Face Blog、量子位、GitHub Trending（每日） |
+
+初始化后监听源为空，不会自动添加任何源；首次轮询只建立基线，不推送历史内容。
+
+## 本地 Feed 输出
+
+外部阅读工具可直接订阅本机数据（无需鉴权）：
+
+| 地址 | 格式 | 说明 |
+| --- | --- | --- |
+| `http://127.0.0.1:3000/feed.xml` | RSS 2.0 | 最新内容 |
+| `http://127.0.0.1:3000/feed.json` | JSON Feed 1.1 | 最新内容 |
+
+参数：`?limit=50`（默认 50，最大 200）；`?matched=1` 仅输出命中启用“订阅规则”的内容（没有启用规则时等同全量）。
 
 ## 订阅规则（推送过滤）
 

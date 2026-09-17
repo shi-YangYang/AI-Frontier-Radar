@@ -3,7 +3,7 @@ import type { AppConfig } from '../shared/config/types';
 import { createApp } from '../app/create-app';
 import type { AppLogger } from '../lib/logger';
 import { createRuntimeScheduler, createRuntimeSourceProviders } from '../modules/scheduler';
-import { createRuntimeSettingsService, createStorageFromConfig, importDefaultWatchSources } from '../modules/storage';
+import { createRuntimeSettingsService, createStorageFromConfig } from '../modules/storage';
 
 export interface StartServerOptions {
   config: AppConfig;
@@ -44,6 +44,51 @@ export async function startServer(options: StartServerOptions): Promise<void> {
           return sourceProviders.github.validateSource({
             source: {
               sourceType: 'github',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
+        if (input.sourceType === 'ai2_blog') {
+          return sourceProviders.ai2_blog.validateSource({
+            source: {
+              sourceType: 'ai2_blog',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
+        if (input.sourceType === 'moonshot_blog') {
+          return sourceProviders.moonshot_blog.validateSource({
+            source: {
+              sourceType: 'moonshot_blog',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
+        if (input.sourceType === 'meta_ai_blog') {
+          return sourceProviders.meta_ai_blog.validateSource({
+            source: {
+              sourceType: 'meta_ai_blog',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
+        if (input.sourceType === 'xai_news') {
+          return sourceProviders.xai_news.validateSource({
+            source: {
+              sourceType: 'xai_news',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
+        if (input.sourceType === 'anthropic_news') {
+          return sourceProviders.anthropic_news.validateSource({
+            source: {
+              sourceType: 'anthropic_news',
               sourceUrl: input.sourceUrl,
             },
           });
@@ -108,7 +153,6 @@ export async function startServer(options: StartServerOptions): Promise<void> {
 
   try {
     await storage.initialize();
-    await importDefaultWatchSources(storage, options.logger);
     await app.listen({
       host: options.config.service.host,
       port: options.config.service.port,

@@ -33,6 +33,58 @@ function padTwoDigits(value: number): string {
   return String(value).padStart(2, '0');
 }
 
+export function formatDate(value: string | null | undefined): string {
+  if (value === null || value === undefined || value.trim().length === 0) {
+    return '-';
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+
+  return [date.getFullYear(), '/', date.getMonth() + 1, '/', date.getDate()].join('');
+}
+
+export function formatRelativeTime(value: string | null | undefined): string {
+  if (value === null || value === undefined || value.trim().length === 0) {
+    return '-';
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+
+  const diffMs = Date.now() - date.getTime();
+
+  if (diffMs < 60_000) {
+    return t('time.justNow');
+  }
+
+  const minutes = Math.floor(diffMs / 60_000);
+
+  if (minutes < 60) {
+    return t('time.minutesAgo', { count: minutes });
+  }
+
+  const hours = Math.floor(minutes / 60);
+
+  if (hours < 24) {
+    return t('time.hoursAgo', { count: hours });
+  }
+
+  const days = Math.floor(hours / 24);
+
+  if (days < 7) {
+    return t('time.daysAgo', { count: days });
+  }
+
+  return formatDate(value);
+}
+
 export function dash(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === '') {
     return '-';

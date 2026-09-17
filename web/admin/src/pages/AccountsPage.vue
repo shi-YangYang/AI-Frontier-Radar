@@ -97,6 +97,21 @@
           <template v-else-if="sourceKind === 'hf'">
             <span class="muted source-add-inline-hint">{{ t('accounts.hfPapersHint') }}</span>
           </template>
+          <template v-else-if="sourceKind === 'anthropic'">
+            <span class="muted source-add-inline-hint">{{ t('accounts.anthropicHint') }}</span>
+          </template>
+          <template v-else-if="sourceKind === 'ai2'">
+            <span class="muted source-add-inline-hint">{{ t('accounts.ai2Hint') }}</span>
+          </template>
+          <template v-else-if="sourceKind === 'moonshot'">
+            <span class="muted source-add-inline-hint">{{ t('accounts.moonshotHint') }}</span>
+          </template>
+          <template v-else-if="sourceKind === 'meta'">
+            <span class="muted source-add-inline-hint">{{ t('accounts.metaHint') }}</span>
+          </template>
+          <template v-else-if="sourceKind === 'xai'">
+            <span class="muted source-add-inline-hint">{{ t('accounts.xaiHint') }}</span>
+          </template>
           <span v-else class="muted source-add-inline-hint">
             {{ t('accounts.producthuntHint') }}
           </span>
@@ -112,6 +127,44 @@
 
     <ToastNotice :message="notice" :danger="noticeDanger" />
 
+    <div v-if="sourceGroups.length > 0" class="panel source-groups-panel">
+      <header class="panel-header">
+        <div>
+          <h2>{{ t('accounts.groups.title') }}</h2>
+          <p>{{ t('accounts.groups.description') }}</p>
+        </div>
+      </header>
+      <div class="source-group-list">
+        <div v-for="group in sourceGroups" :key="group.id" class="source-group-row">
+          <div class="source-group-info">
+            <strong>
+              {{ group.name }}
+              <span class="status-badge neutral">
+                {{ group.installedCount }} / {{ group.sourceCount }}
+              </span>
+            </strong>
+            <p class="muted">{{ group.description }}</p>
+            <details v-if="group.details !== undefined" class="source-group-details">
+              <summary>{{ t('accounts.groups.showSources') }}</summary>
+              <p class="muted">{{ group.details }}</p>
+            </details>
+          </div>
+          <button
+            class="primary"
+            type="button"
+            :disabled="busy || group.installedCount >= group.sourceCount"
+            @click="applyGroup(group)"
+          >
+            {{
+              group.installedCount >= group.sourceCount
+                ? t('accounts.groups.added')
+                : t('accounts.groups.apply')
+            }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div class="panel">
       <form class="query-form" @submit.prevent="applyQuery">
         <label>
@@ -126,22 +179,22 @@
         <button class="primary" type="submit" :disabled="busy">{{ t('actions.query') }}</button>
         <button type="button" :disabled="busy" @click="clearQuery">{{ t('accounts.clearQuery') }}</button>
       </form>
-      <div class="table-wrap">
+      <EmptyState
+        v-if="accounts.length === 0"
+        :title="t('accounts.emptyTitle')"
+        :description="t('accounts.empty')"
+      />
+      <div v-else class="table-wrap">
         <table>
           <thead>
             <tr>
               <th>{{ t('table.source') }}</th>
               <th>{{ t('table.lastPolledAt') }}</th>
               <th>{{ t('table.lastPollStatus') }}</th>
-              <th>{{ t('table.baselinePost') }}</th>
-              <th>{{ t('table.latestPost') }}</th>
               <th>{{ t('table.actions') }}</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="accounts.length === 0">
-              <td colspan="6" class="empty-cell">{{ t('accounts.empty') }}</td>
-            </tr>
             <tr v-for="account in accounts" :key="account.id">
               <td>
                 <strong>
@@ -152,12 +205,12 @@
                 </strong>
                 <div class="muted">{{ account.displayName ?? '-' }}</div>
               </td>
-              <td>{{ formatDateTime(account.lastPolledAt) }}</td>
+              <td :title="formatDateTime(account.lastPolledAt)">
+                {{ formatRelativeTime(account.lastPolledAt) }}
+              </td>
               <td><StatusBadge :status="account.lastPollStatus" /></td>
-              <td><code>{{ dash(account.baselinePostId) }}</code></td>
-              <td><code>{{ dash(account.lastSeenPostId) }}</code></td>
-              <td>
-                <button class="danger" type="button" :disabled="busy" @click="askDelete(account)">
+              <td class="source-actions-cell">
+                <button class="text-button danger-text" type="button" :disabled="busy" @click="askDelete(account)">
                   {{ t('actions.delete') }}
                 </button>
               </td>
@@ -191,20 +244,24 @@ import {
   AdminApiRequestError,
   createWatchAccount,
   deleteWatchAccount,
+  getSourceGroups,
   listWatchAccounts,
+  applySourceGroup,
   resolveYoutubeChannel,
   type AdminPagination,
   type ResolvedYoutubeChannel,
+  type SourceGroupStatus,
   type WatchAccount,
 } from '../api/admin-api';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import EmptyState from '../components/EmptyState.vue';
 import PageHeader from '../components/PageHeader.vue';
 import PaginationBar from '../components/PaginationBar.vue';
 import SelectControl from '../components/SelectControl.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import ToastNotice from '../components/ToastNotice.vue';
 import { t } from '../i18n';
-import { DEFAULT_PAGE_SIZE, dash, formatDateTime } from '../utils';
+import { DEFAULT_PAGE_SIZE, formatDateTime, formatRelativeTime } from '../utils';
 
 type SourceKind =
   | 'x'
@@ -215,7 +272,12 @@ type SourceKind =
   | 'hackernews'
   | 'producthunt'
   | 'github'
-  | 'hf';
+  | 'hf'
+  | 'anthropic'
+  | 'ai2'
+  | 'moonshot'
+  | 'meta'
+  | 'xai';
 type RedditSort = 'hot' | 'new' | 'top';
 type HackerNewsPreset = 'frontpage' | 'newest' | 'points100' | 'points300';
 type GithubMode = 'trending' | 'releases' | 'activity';
@@ -232,6 +294,7 @@ const YOUTUBE_CHANNEL_ID_PATTERN = /^UC[A-Za-z0-9_-]{20,}$/u;
 const REDDIT_NAME_PATTERN = /^[A-Za-z0-9_]{2,21}$/u;
 
 const accounts = ref<WatchAccount[]>([]);
+const sourceGroups = ref<SourceGroupStatus[]>([]);
 const activeQuery = ref('');
 const addingAccount = ref(false);
 const busy = ref(false);
@@ -270,6 +333,11 @@ const sourceKindOptions = computed<{ label: string; value: SourceKind }[]>(() =>
   { label: t('accounts.sourceKind.producthunt'), value: 'producthunt' },
   { label: t('accounts.sourceKind.github'), value: 'github' },
   { label: t('accounts.sourceKind.hfPapers'), value: 'hf' },
+  { label: t('accounts.sourceKind.anthropic'), value: 'anthropic' },
+  { label: t('accounts.sourceKind.ai2'), value: 'ai2' },
+  { label: t('accounts.sourceKind.moonshot'), value: 'moonshot' },
+  { label: t('accounts.sourceKind.metaAi'), value: 'meta' },
+  { label: t('accounts.sourceKind.xai'), value: 'xai' },
 ]);
 const redditSortOptions = computed<{ label: string; value: RedditSort }[]>(() => [
   { label: t('accounts.redditSort.hot'), value: 'hot' },
@@ -325,6 +393,16 @@ const pendingFeedUrl = computed<string | null>(() => {
       return buildGithubSourceUrl();
     case 'hf':
       return 'https://huggingface.co/api/daily_papers?limit=50';
+    case 'anthropic':
+      return 'https://www.anthropic.com/news';
+    case 'ai2':
+      return 'https://allenai.org/blog';
+    case 'moonshot':
+      return 'https://platform.moonshot.cn/blog';
+    case 'meta':
+      return 'https://ai.meta.com/blog/';
+    case 'xai':
+      return 'https://x.ai/news';
     default:
       return null;
   }
@@ -340,6 +418,7 @@ watch([redditName, redditSort, arxivCategory, hnPreset], () => {
 
 onMounted(() => {
   void loadAccounts(1, { silent: true });
+  void loadSourceGroups();
 });
 
 async function loadAccounts(page: number, options: { silent?: boolean } = {}): Promise<void> {
@@ -403,6 +482,11 @@ async function toCreateInput(): Promise<
   | { sourceType: 'rss'; sourceUrl: string }
   | { sourceType: 'github'; sourceUrl: string }
   | { sourceType: 'hf_papers'; sourceUrl: string }
+  | { sourceType: 'anthropic_news'; sourceUrl: string }
+  | { sourceType: 'ai2_blog'; sourceUrl: string }
+  | { sourceType: 'moonshot_blog'; sourceUrl: string }
+  | { sourceType: 'meta_ai_blog'; sourceUrl: string }
+  | { sourceType: 'xai_news'; sourceUrl: string }
 > {
   switch (sourceKind.value) {
     case 'x':
@@ -444,6 +528,31 @@ async function toCreateInput(): Promise<
       return {
         sourceType: 'hf_papers',
         sourceUrl: 'https://huggingface.co/api/daily_papers?limit=50',
+      };
+    case 'anthropic':
+      return {
+        sourceType: 'anthropic_news',
+        sourceUrl: 'https://www.anthropic.com/news',
+      };
+    case 'ai2':
+      return {
+        sourceType: 'ai2_blog',
+        sourceUrl: 'https://allenai.org/blog',
+      };
+    case 'moonshot':
+      return {
+        sourceType: 'moonshot_blog',
+        sourceUrl: 'https://platform.moonshot.cn/blog',
+      };
+    case 'meta':
+      return {
+        sourceType: 'meta_ai_blog',
+        sourceUrl: 'https://ai.meta.com/blog/',
+      };
+    case 'xai':
+      return {
+        sourceType: 'xai_news',
+        sourceUrl: 'https://x.ai/news',
       };
     case 'github': {
       if (githubMode.value === 'trending') {
@@ -534,6 +643,39 @@ function resetSourceForm(): void {
   githubLanguage.value = '';
   githubRepo.value = '';
   githubUser.value = '';
+}
+
+async function loadSourceGroups(): Promise<void> {
+  try {
+    sourceGroups.value = await getSourceGroups();
+  } catch {
+    sourceGroups.value = [];
+  }
+}
+
+async function applyGroup(group: SourceGroupStatus): Promise<void> {
+  busy.value = true;
+
+  try {
+    const result = await applySourceGroup(group.id);
+    await loadAccounts(1, { silent: true });
+    await loadSourceGroups();
+    setNotice(
+      t('notice.sourceGroupApplied', {
+        created: result.created,
+        existing: result.existing,
+      }),
+    );
+  } catch (error) {
+    setNotice(
+      t('notice.sourceGroupFailed', {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+      true,
+    );
+  } finally {
+    busy.value = false;
+  }
 }
 
 function askDelete(account: WatchAccount): void {
@@ -638,6 +780,26 @@ function sourceBadge(account: WatchAccount): string {
     return 'HF';
   }
 
+  if (account.sourceType === 'anthropic_news') {
+    return 'Anthropic';
+  }
+
+  if (account.sourceType === 'ai2_blog') {
+    return 'AI2';
+  }
+
+  if (account.sourceType === 'moonshot_blog') {
+    return 'Moonshot';
+  }
+
+  if (account.sourceType === 'meta_ai_blog') {
+    return 'Meta AI';
+  }
+
+  if (account.sourceType === 'xai_news') {
+    return 'xAI';
+  }
+
   const url = account.sourceUrl ?? '';
 
   if (url.includes('github.com')) {
@@ -646,6 +808,26 @@ function sourceBadge(account: WatchAccount): string {
 
   if (url.includes('huggingface.co')) {
     return 'HF';
+  }
+
+  if (url.includes('anthropic.com')) {
+    return 'Anthropic';
+  }
+
+  if (url.includes('allenai.org')) {
+    return 'AI2';
+  }
+
+  if (url.includes('moonshot.cn') || url.includes('kimi.com')) {
+    return 'Moonshot';
+  }
+
+  if (url.includes('ai.meta.com')) {
+    return 'Meta AI';
+  }
+
+  if (url.includes('x.ai')) {
+    return 'xAI';
   }
 
   if (url.includes('youtube.com')) {

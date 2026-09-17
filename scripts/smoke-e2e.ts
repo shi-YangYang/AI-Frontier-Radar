@@ -8,10 +8,11 @@ import { toPrismaSqliteDatabaseUrl } from '../src/shared/config';
 import { loadAppConfig } from '../src/config';
 import { createLogger } from '../src/lib/logger';
 import { createApp } from '../src/app/create-app';
-import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createGithubTrendingSourceProvider, createHfDailyPapersSourceProvider, createRssSourceProvider, createSourceProviderRegistry, createSubscriptionRuleMatcher, createXSourceProvider, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
+import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createAi2BlogSourceProvider, createAnthropicNewsSourceProvider, createGithubTrendingSourceProvider, createHfDailyPapersSourceProvider, createMoonshotBlogSourceProvider, createRssSourceProvider, createSourceProviderRegistry, createSubscriptionRuleMatcher, createXSourceProvider, normalizeMetaBlogRawEntries, parseAi2BlogHtml, parseMoonshotBlogHtml, parseXaiNewsHtml, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
 import { runDeliveryWorkerJob } from '../src/modules/delivery';
-import { createRuntimeSourceProviders } from '../src/modules/scheduler';
-import { createPrismaClient, createStorage, DEFAULT_WATCH_SOURCES, importDefaultWatchSources } from '../src/modules/storage';
+import { createRuntimeScheduler, createRuntimeSourceProviders } from '../src/modules/scheduler';
+import { applySourceGroup, createPrismaClient, createStorage, getSourceGroupStatuses } from '../src/modules/storage';
+import { SOURCE_GROUPS } from '../src/config/source-groups';
 import { ConfigValidationError } from '../src/shared/env/config-validation-error';
 
 type SmokeCheck = {
@@ -95,9 +96,21 @@ async function main(): Promise<void> {
   const hfPapersProvider = createHfDailyPapersSourceProvider({
     timeoutMs: 5_000,
   });
+  const anthropicProvider = createAnthropicNewsSourceProvider({
+    timeoutMs: 5_000,
+  });
+  const ai2BlogProvider = createAi2BlogSourceProvider({
+    timeoutMs: 5_000,
+  });
+  const moonshotBlogProvider = createMoonshotBlogSourceProvider({
+    timeoutMs: 5_000,
+  });
   const sourceProviders = createSourceProviderRegistry({
+    ai2_blog: ai2BlogProvider,
+    anthropic_news: anthropicProvider,
     github: githubProvider,
     hf_papers: hfPapersProvider,
+    moonshot_blog: moonshotBlogProvider,
     rss: rssProvider,
     x: sourceProvider,
   });
@@ -117,6 +130,33 @@ async function main(): Promise<void> {
           return githubProvider.validateSource({
             source: {
               sourceType: 'github',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
+        if (input.sourceType === 'anthropic_news') {
+          return anthropicProvider.validateSource({
+            source: {
+              sourceType: 'anthropic_news',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
+        if (input.sourceType === 'ai2_blog') {
+          return ai2BlogProvider.validateSource({
+            source: {
+              sourceType: 'ai2_blog',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
+        if (input.sourceType === 'moonshot_blog') {
+          return moonshotBlogProvider.validateSource({
+            source: {
+              sourceType: 'moonshot_blog',
               sourceUrl: input.sourceUrl,
             },
           });
@@ -156,34 +196,68 @@ async function main(): Promise<void> {
     assert(seededAccount.enabled, 'seed watch account should be enabled');
     checks.push({ name: 'seed watch account 写入数据库' });
 
-    const defaultsSqlitePath = join(tempDir, 'defaults.sqlite');
-    const defaultsStorage = createStorage({
-      databaseUrl: toPrismaSqliteDatabaseUrl(defaultsSqlitePath),
-      sqlitePath: defaultsSqlitePath,
+    const groupsSqlitePath = join(tempDir, 'groups.sqlite');
+    const groupsStorage = createStorage({
+      databaseUrl: toPrismaSqliteDatabaseUrl(groupsSqlitePath),
+      sqlitePath: groupsSqlitePath,
       watchAccountsSource: { items: [], type: 'database' },
     });
 
     try {
-      await defaultsStorage.initialize();
+      await groupsStorage.initialize();
 
-      const firstImport = await importDefaultWatchSources(defaultsStorage);
+      const aiGroup = SOURCE_GROUPS.find((group) => group.id === 'ai-news');
+      assert(aiGroup !== undefined, 'ai-news source group should exist');
+
+      const beforeStatuses = await getSourceGroupStatuses(
+        groupsStorage.watchAccounts,
+        SOURCE_GROUPS,
+      );
       assert(
-        firstImport.importedCount === DEFAULT_WATCH_SOURCES.length,
-        `fresh database should import ${DEFAULT_WATCH_SOURCES.length} default sources, got ${firstImport.importedCount}`,
+        beforeStatuses[0]?.installedCount === 0,
+        `fresh database should have no group sources installed, got ${beforeStatuses[0]?.installedCount}`,
       );
 
-      const secondImport = await importDefaultWatchSources(defaultsStorage);
-      assert(secondImport.skipped, 'second default-source import should be skipped by the marker');
-
-      const defaultsCount = await defaultsStorage.watchAccounts.countAll();
+      const firstApply = await applySourceGroup(groupsStorage.watchAccounts, aiGroup);
       assert(
-        defaultsCount === DEFAULT_WATCH_SOURCES.length,
-        `default sources should not be duplicated, got ${defaultsCount}`,
+        firstApply.created === aiGroup.sources.length,
+        `group apply should create ${aiGroup.sources.length} sources, got ${firstApply.created}`,
       );
-      checks.push({ name: '首次初始化导入默认源且只导入一次' });
+
+      const secondApply = await applySourceGroup(groupsStorage.watchAccounts, aiGroup);
+      assert(secondApply.created === 0, 'second group apply should not create duplicates');
+      assert(
+        secondApply.existing === aiGroup.sources.length,
+        `second apply should report ${aiGroup.sources.length} existing, got ${secondApply.existing}`,
+      );
+
+      const afterStatuses = await getSourceGroupStatuses(
+        groupsStorage.watchAccounts,
+        SOURCE_GROUPS,
+      );
+      assert(
+        afterStatuses[0]?.installedCount === aiGroup.sources.length,
+        'group status should report all sources installed',
+      );
+      checks.push({ name: '监听组合：一键添加且重复应用不重复' });
     } finally {
-      await defaultsStorage.close();
+      await groupsStorage.close();
     }
+
+    const groupsResponse = await app.inject({ method: 'GET', url: '/admin/api/source-groups' });
+    assert(
+      groupsResponse.statusCode === 200,
+      `GET source-groups returned ${groupsResponse.statusCode}`,
+    );
+    const missingGroupResponse = await app.inject({
+      method: 'POST',
+      url: '/admin/api/source-groups/not-exist/apply',
+    });
+    assert(
+      missingGroupResponse.statusCode === 404,
+      `unknown group should return 404, got ${missingGroupResponse.statusCode}`,
+    );
+    checks.push({ name: '监听组合 API：查询与未知组合 404' });
 
     const emptyPoll = await runPollingJob({
       config,
@@ -980,6 +1054,234 @@ async function main(): Promise<void> {
     assert(hfNewEvent !== null, 'newly listed hf paper should create a delivery event');
     checks.push({ name: 'HF Daily Papers 新论文增量入库并投递' });
 
+    const anthropicPath = '/anthropic-news';
+    const anthropicUrl = `${rssApi.url}${anthropicPath}`;
+    const createAnthropicHtml = (extraArticle: boolean): string => {
+      const articles = [
+        '<a href="/news/article-two"><div><span class="caption bold">Product</span><time class="date">Sep 12, 2026</time></div><h4 class="title">Article Two</h4><p class="body">Summary two.</p></a>',
+        '<a href="/news/article-one"><div><time class="date">Sep 10, 2026</time><span class="subject">Announcements</span></div><span class="title">Article One</span></a>',
+        ...(extraArticle
+          ? [
+              '<a href="/news/article-three"><div><span class="caption bold">Announcements</span><time class="date">Sep 14, 2026</time></div><h4 class="title">Article Three</h4><p class="body">Summary three.</p></a>',
+            ]
+          : []),
+      ];
+
+      return `<html><body>${articles.join('')}</body></html>`;
+    };
+
+    rssApi.setFeed(anthropicPath, {
+      body: createAnthropicHtml(false),
+      contentType: 'text/html; charset=utf-8',
+      statusCode: 200,
+    });
+
+    const directNews = await anthropicProvider.fetchPosts({
+      limit: 10,
+      source: { sourceType: 'anthropic_news', sourceUrl: anthropicUrl },
+    });
+    assert(directNews.posts.length === 2, `anthropic provider should parse 2 articles, got ${directNews.posts.length}`);
+    assert(
+      directNews.posts[0]?.textContent.includes('Article Two') &&
+        directNews.posts[0]?.textContent.includes('Summary two.') &&
+        directNews.posts[0]?.textContent.includes('Product'),
+      'anthropic post should contain title, summary and category',
+    );
+    assert(
+      directNews.posts[0]?.dedupeKey === 'anthropic:news:article-two',
+      `anthropic dedupe key mismatch: ${directNews.posts[0]?.dedupeKey}`,
+    );
+    checks.push({ name: 'Anthropic 新闻解析（标题/摘要/分类）' });
+
+    const createAnthropicResponse = await app.inject({
+      method: 'POST',
+      payload: { sourceType: 'anthropic_news', sourceUrl: anthropicUrl },
+      url: '/admin/api/watch-accounts',
+    });
+    assert(
+      createAnthropicResponse.statusCode === 200,
+      `anthropic source create returned ${createAnthropicResponse.statusCode}`,
+    );
+    const anthropicAccount = await storage.watchAccounts.findBySource({
+      sourceType: 'anthropic_news',
+      sourceUrl: anthropicUrl,
+    });
+    assert(anthropicAccount !== null, 'anthropic watch account was not stored');
+
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const anthropicBaselinePost = await storage.xPosts.findByDedupeKey('anthropic:news:article-two');
+    assert(anthropicBaselinePost !== null, 'anthropic baseline article was not stored');
+    const anthropicBaselineEvent = await storage.deliveryEvents.findByPostAndTarget(
+      anthropicBaselinePost.xPostId,
+      TARGET_KEY,
+    );
+    assert(anthropicBaselineEvent === null, 'anthropic baseline must not create delivery events');
+    checks.push({ name: 'Anthropic 首次基线不投递' });
+
+    rssApi.setFeed(anthropicPath, {
+      body: createAnthropicHtml(true),
+      contentType: 'text/html; charset=utf-8',
+      statusCode: 200,
+    });
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const anthropicNewPost = await storage.xPosts.findByDedupeKey('anthropic:news:article-three');
+    assert(anthropicNewPost !== null, 'new anthropic article was not stored');
+    const anthropicNewEvent = await storage.deliveryEvents.findByPostAndTarget(
+      anthropicNewPost.xPostId,
+      TARGET_KEY,
+    );
+    assert(anthropicNewEvent !== null, 'new anthropic article should create a delivery event');
+
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const anthropicAccountAfterPoll = await storage.watchAccounts.findById(anthropicAccount.id);
+    const anthropicPostsAfterRepeat = await prisma.xPostRaw.count({
+      where: { authorUserId: anthropicAccountAfterPoll?.xUserId ?? '' },
+    });
+    assert(
+      anthropicPostsAfterRepeat === 3,
+      `repeat anthropic poll should keep 3 posts, got ${anthropicPostsAfterRepeat}`,
+    );
+    checks.push({ name: 'Anthropic 增量入库并投递' });
+
+    const ai2Path = '/ai2-blog';
+    const ai2Url = `${rssApi.url}${ai2Path}`;
+    const createAi2Row = (date: string, slug: string, title: string, blurb: string): string =>
+      `<div class="d_grid cg_8 p_10 bd-be-w_2px"><div class="as_start justify-self_start">${date}</div>` +
+      `<div><a href="/blog/${slug}"><span class="label"><h2 class="mbs_0 fw_regular">${title}</h2></span></a>` +
+      `<span class="textStyle_wideCardBlurb c_colorPalette.text op_0.8 lh_1">${blurb}</span></div></div>`;
+    const createAi2Html = (extraArticle: boolean): string =>
+      `<html><body>${createAi2Row('June 12, 2026', 'olmo-eval', 'olmo-eval: An evaluation workbench', 'olmo-eval is an open evaluation workbench.')}` +
+      `${createAi2Row('May 19, 2026', 'olmoearth-v1-1', 'OlmoEarth v1.1', 'A more efficient family of models.')}` +
+      `${extraArticle ? createAi2Row('September 1, 2026', 'benchmirt', 'BenchMIRT: What are LLM benchmarks measuring?', 'Benchmark analysis.') : ''}` +
+      `</body></html>`;
+
+    rssApi.setFeed(ai2Path, {
+      body: createAi2Html(false),
+      contentType: 'text/html; charset=utf-8',
+      statusCode: 200,
+    });
+
+    const directAi2 = await ai2BlogProvider.fetchPosts({
+      limit: 10,
+      source: { sourceType: 'ai2_blog', sourceUrl: ai2Url },
+    });
+    assert(
+      directAi2.posts.length === 2,
+      `ai2 provider should parse 2 posts, got ${directAi2.posts.length}`,
+    );
+    assert(
+      directAi2.posts[0]?.dedupeKey === 'ai2:blog:olmo-eval' &&
+        directAi2.posts[0]?.textContent.includes('olmo-eval is an open evaluation workbench.'),
+      `ai2 post mismatch: ${JSON.stringify(directAi2.posts[0]?.dedupeKey)}`,
+    );
+    checks.push({ name: 'AI2 博客解析（标题/日期/摘要/去重键）' });
+
+    const createAi2Response = await app.inject({
+      method: 'POST',
+      payload: { sourceType: 'ai2_blog', sourceUrl: ai2Url },
+      url: '/admin/api/watch-accounts',
+    });
+    assert(createAi2Response.statusCode === 200, `ai2 source create returned ${createAi2Response.statusCode}`);
+    const ai2Account = await storage.watchAccounts.findBySource({
+      sourceType: 'ai2_blog',
+      sourceUrl: ai2Url,
+    });
+    assert(ai2Account !== null, 'ai2 watch account was not stored');
+
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const ai2BaselinePost = await storage.xPosts.findByDedupeKey('ai2:blog:olmo-eval');
+    assert(ai2BaselinePost !== null, 'ai2 baseline post was not stored');
+    const ai2BaselineEvent = await storage.deliveryEvents.findByPostAndTarget(
+      ai2BaselinePost.xPostId,
+      TARGET_KEY,
+    );
+    assert(ai2BaselineEvent === null, 'ai2 baseline must not create delivery events');
+
+    rssApi.setFeed(ai2Path, {
+      body: createAi2Html(true),
+      contentType: 'text/html; charset=utf-8',
+      statusCode: 200,
+    });
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const ai2NewPost = await storage.xPosts.findByDedupeKey('ai2:blog:benchmirt');
+    assert(ai2NewPost !== null, 'new ai2 post was not stored');
+    const ai2NewEvent = await storage.deliveryEvents.findByPostAndTarget(
+      ai2NewPost.xPostId,
+      TARGET_KEY,
+    );
+    assert(ai2NewEvent !== null, 'new ai2 post should create a delivery event');
+
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const ai2AccountAfterPoll = await storage.watchAccounts.findById(ai2Account.id);
+    const ai2PostsAfterRepeat = await prisma.xPostRaw.count({
+      where: { authorUserId: ai2AccountAfterPoll?.xUserId ?? '' },
+    });
+    assert(ai2PostsAfterRepeat === 3, `repeat ai2 poll should keep 3 posts, got ${ai2PostsAfterRepeat}`);
+    checks.push({ name: 'AI2 首次基线不投递 + 增量入库并投递' });
+
+    const moonshotHtml =
+      '<html><body>' +
+      '<div class="post-item"><h3><a class="!nx-no-underline" href="/blog/posts/k2-think">Kimi K2 Thinking 模型发布并开源</a></h3>' +
+      '<time class="nx-text-sm" dateTime="2025-11-06T00:00:00.000Z">2025年11月06日</time></div>' +
+      '<div class="post-item"><h3><a href="/blog/posts/k2-turbo-discount">Kimi K2 Turbo API 价格调整通知</a></h3>' +
+      '<time dateTime="2025-11-05T00:00:00.000Z">2025年11月05日</time></div>' +
+      '</body></html>';
+    const moonshotEntries = parseMoonshotBlogHtml(moonshotHtml, '2026-01-01T00:00:00.000Z');
+    assert(
+      moonshotEntries.length === 2 &&
+        moonshotEntries[0]?.slug === 'k2-think' &&
+        moonshotEntries[0]?.publishedAt === '2025-11-06T00:00:00.000Z' &&
+        moonshotEntries[0]?.title === 'Kimi K2 Thinking 模型发布并开源',
+      `moonshot parse mismatch: ${JSON.stringify(moonshotEntries[0])}`,
+    );
+    checks.push({ name: 'Moonshot 博客解析（标题/日期）' });
+
+    const metaEntries = normalizeMetaBlogRawEntries(
+      [
+        {
+          dateText: 'Jul 27, 2026',
+          href: 'https://ai.meta.com/blog/assistive-robotics-university-of-pittsburgh-sam-dino/',
+          title: 'Reimagining Independence: How Meta AI Models Help Assistive Robotics',
+        },
+        {
+          href: 'https://ai.meta.com/blog/assistive-robotics-university-of-pittsburgh-sam-dino/',
+          title: 'Reimagining Independence',
+        },
+        {
+          dateText: 'April 8, 2026',
+          href: 'https://ai.meta.com/blog/scaling-how-we-build-test-advanced-ai/',
+          title: 'Scaling How We Build and Test Our Most Advanced AI',
+        },
+      ],
+      '2026-08-01T00:00:00.000Z',
+    );
+    assert(
+      metaEntries.length === 2 &&
+        metaEntries[0]?.slug === 'assistive-robotics-university-of-pittsburgh-sam-dino' &&
+        metaEntries[0]?.title === 'Reimagining Independence: How Meta AI Models Help Assistive Robotics' &&
+        Date.parse(metaEntries[0]?.publishedAt ?? '') === Date.parse('Jul 27, 2026'),
+      `meta normalize mismatch: ${JSON.stringify(metaEntries[0])}`,
+    );
+    checks.push({ name: 'Meta AI 博客归一化（去重/日期）' });
+
+    const xaiHtml =
+      '<a class="group" href="/news/grok-bot-for-enterprise"><p>Sep 3, 2026</p><h1>Grok Bot for Enterprise</h1>' +
+      '<p>Grok Bot is now available for enterprises.</p><span>Read More</span></a>' +
+      '<a class="group" href="/news/grok-build-memory"><span>Product</span><span>·</span><time>Sep 16, 2026</time>' +
+      '<h3>Memory in Grok Build</h3></a>';
+    const xaiEntries = parseXaiNewsHtml(xaiHtml, '2026-09-17T00:00:00.000Z');
+    assert(
+      xaiEntries.length === 2 &&
+        xaiEntries[0]?.slug === 'grok-build-memory' &&
+        xaiEntries[0]?.category === 'Product' &&
+        Date.parse(xaiEntries[0]?.publishedAt ?? '') === Date.parse('Sep 16, 2026') &&
+        xaiEntries[1]?.slug === 'grok-bot-for-enterprise' &&
+        xaiEntries[1]?.summary === 'Grok Bot is now available for enterprises.' &&
+        xaiEntries[1]?.category === undefined,
+      `xai parse mismatch: ${JSON.stringify(xaiEntries)}`,
+    );
+    checks.push({ name: 'xAI 新闻解析（精选卡+列表卡/分类/摘要）' });
+
     const matcherWithoutRules = createSubscriptionRuleMatcher([]);
     assert(!matcherWithoutRules.hasEnabledRules, 'empty rules should not enable filtering');
 
@@ -1090,6 +1392,81 @@ async function main(): Promise<void> {
     assert(noRuleEvent !== null, 'with no enabled rules every new post should be delivered');
     checks.push({ name: '订阅规则：清空规则后恢复全量投递' });
 
+    const feedXmlResponse = await app.inject({ method: 'GET', url: '/feed.xml' });
+    assert(feedXmlResponse.statusCode === 200, `feed.xml returned ${feedXmlResponse.statusCode}`);
+    assert(
+      String(feedXmlResponse.headers['content-type'] ?? '').includes('rss+xml'),
+      `feed.xml content-type mismatch: ${feedXmlResponse.headers['content-type']}`,
+    );
+    assert(
+      feedXmlResponse.body.includes('<rss') && feedXmlResponse.body.includes('<item>'),
+      'feed.xml should contain items',
+    );
+    checks.push({ name: 'RSS feed 输出（/feed.xml）' });
+
+    const feedJsonResponse = await app.inject({ method: 'GET', url: '/feed.json?limit=5' });
+    assert(feedJsonResponse.statusCode === 200, `feed.json returned ${feedJsonResponse.statusCode}`);
+    const feedJson = JSON.parse(feedJsonResponse.body) as { items?: unknown[]; version?: string };
+    assert(
+      feedJson.version === 'https://jsonfeed.org/version/1.1',
+      `feed.json version mismatch: ${feedJson.version}`,
+    );
+    assert(
+      (feedJson.items?.length ?? 0) === 5,
+      `feed.json should honour limit=5, got ${feedJson.items?.length}`,
+    );
+    checks.push({ name: 'JSON feed 输出（/feed.json + limit）' });
+
+    await app.inject({
+      method: 'PUT',
+      payload: {
+        rules: [
+          { enabled: true, exclude: [], include: ['llama.cpp'], mode: 'any', name: 'feed filter' },
+        ],
+      },
+      url: '/admin/api/subscription-rules',
+    });
+    const matchedFeedResponse = await app.inject({ method: 'GET', url: '/feed.json?matched=1' });
+    const matchedFeed = JSON.parse(matchedFeedResponse.body) as {
+      items?: Array<{ content_text?: string }>;
+    };
+    assert((matchedFeed.items?.length ?? 0) >= 1, 'matched feed should return matching posts');
+    assert(
+      matchedFeed.items?.every((item) => (item.content_text ?? '').includes('llama.cpp')) ?? false,
+      'matched feed should only contain posts matching the enabled rule',
+    );
+    await app.inject({ method: 'PUT', payload: { rules: [] }, url: '/admin/api/subscription-rules' });
+    checks.push({ name: '订阅规则过滤 feed（?matched=1）' });
+
+    const scheduler = createRuntimeScheduler({
+      config,
+      logger,
+      sourceProviders,
+      storage,
+    });
+    const enabledAccounts = await storage.watchAccounts.listEnabled();
+
+    for (const account of enabledAccounts) {
+      await storage.watchAccounts.update(account.id, { enabled: false });
+    }
+
+    const pollRunsBeforeSkip = await prisma.pollRun.count();
+    const skippedResult = await scheduler.runPollingNow({ trigger: 'smoke-skip' });
+    const pollRunsAfterSkip = await prisma.pollRun.count();
+    assert(
+      skippedResult.status === 'skipped',
+      `polling without enabled sources should be skipped, got ${skippedResult.status}`,
+    );
+    assert(
+      pollRunsAfterSkip === pollRunsBeforeSkip,
+      'skipped polling must not create a poll run record',
+    );
+
+    for (const account of enabledAccounts) {
+      await storage.watchAccounts.update(account.id, { enabled: true });
+    }
+    checks.push({ name: '无启用监听源时跳过轮询且不产生记录' });
+
     const youtubeHtml = [
       '<!doctype html><html><head>',
       '<meta property="og:title" content="OpenAI - YouTube">',
@@ -1186,6 +1563,23 @@ async function main(): Promise<void> {
       detail: `watch_accounts=${counts[0]}, x_posts_raw=${counts[1]}, delivery_events=${counts[2]}, poll_runs=${counts[3]}`,
       name: '临时 SQLite 记录完整链路状态',
     });
+
+    const clearResponse = await app.inject({
+      method: 'POST',
+      url: '/admin/api/posts/clear-all',
+    });
+    assert(clearResponse.statusCode === 200, `clear posts returned ${clearResponse.statusCode}`);
+    const postsAfterClear = await prisma.xPostRaw.count();
+    const eventsAfterClear = await prisma.deliveryEvent.count();
+    assert(postsAfterClear === 0, `posts should be cleared, got ${postsAfterClear}`);
+    assert(eventsAfterClear === 0, `delivery events should be cleared, got ${eventsAfterClear}`);
+    const githubAccountAfterClear = await storage.watchAccounts.findById(githubAccount.id);
+    assert(
+      githubAccountAfterClear?.baselinePostId === null &&
+        githubAccountAfterClear?.lastSeenPostId === null,
+      'board source cursors should be reset after clearing posts',
+    );
+    checks.push({ name: '一键清空消息（帖子 + 投递事件 + 榜单游标重置）' });
 
     printSuccess(checks);
   } finally {
@@ -1336,7 +1730,14 @@ function verifyRuntimeSourceProviderFactory(checks: SmokeCheck[], config: AppCon
     providers.rss instanceof RssSourceProvider,
     'runtime source providers should create RssSourceProvider',
   );
-  checks.push({ name: 'scheduler 会创建 browser X provider 与 RSS provider' });
+  assert(
+    providers.ai2_blog.sourceType === 'ai2_blog' &&
+      providers.moonshot_blog.sourceType === 'moonshot_blog' &&
+      providers.meta_ai_blog.sourceType === 'meta_ai_blog' &&
+      providers.xai_news.sourceType === 'xai_news',
+    'runtime source providers should include the new official blog providers',
+  );
+  checks.push({ name: 'scheduler 会创建 browser X provider、RSS provider 与新增官方源 provider' });
 }
 
 async function assertRejectsConfigValidation(

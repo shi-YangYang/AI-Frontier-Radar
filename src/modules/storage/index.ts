@@ -11,9 +11,13 @@ export {
 } from './runtime-settings-service';
 export { WatchAccountRepository } from './watch-account-repository';
 export {
-  DEFAULT_WATCH_SOURCES,
-  importDefaultWatchSources,
-} from './default-watch-sources';
+  applySourceGroup,
+  getSourceGroupStatuses,
+} from './source-group-service';
+export type {
+  SourceGroupApplyResult,
+  SourceGroupStatus,
+} from './source-group-service';
 export {
   createSubscriptionRuleService,
   SubscriptionRuleService,
@@ -23,10 +27,6 @@ export type {
   SubscriptionRule,
   SubscriptionRuleMode,
 } from './subscription-rule-service';
-export type {
-  DefaultWatchSource,
-  ImportDefaultWatchSourcesResult,
-} from './default-watch-sources';
 export { XPostRepository } from './x-post-repository';
 export type {
   RuntimeFeishuSettings,

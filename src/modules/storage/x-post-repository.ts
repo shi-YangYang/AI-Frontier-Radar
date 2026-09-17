@@ -36,6 +36,12 @@ export class XPostRepository {
     return mapXPostRaw(xPost);
   }
 
+  public async deleteAll(): Promise<number> {
+    const result = await this.prisma.xPostRaw.deleteMany({});
+
+    return result.count;
+  }
+
   public async delete(id: string): Promise<boolean> {
     const result = await this.prisma.xPostRaw.deleteMany({
       where: { id },
@@ -77,6 +83,17 @@ export class XPostRepository {
       where: {
         authorUsername,
       },
+    });
+
+    return xPosts.map(mapXPostRaw);
+  }
+
+  public async listLatest(limit: number): Promise<XPostRaw[]> {
+    const xPosts = await this.prisma.xPostRaw.findMany({
+      orderBy: {
+        postedAt: 'desc',
+      },
+      take: limit,
     });
 
     return xPosts.map(mapXPostRaw);
