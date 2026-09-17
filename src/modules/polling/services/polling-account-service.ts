@@ -1,13 +1,13 @@
 import type { DeliveryTarget, WatchAccount, XPostRepository } from '../../storage';
 import type { DeliveryEventRepository } from '../../storage';
-import type { SourceProvider, StandardizedPost } from '../types';
+import type { SourceDescriptor, SourceProviderRegistry, StandardizedPost } from '../types';
 
 export interface PollingAccountServiceOptions {
   deliveryEvents: DeliveryEventRepository;
   excludeReplies?: boolean;
   excludeReposts?: boolean;
   fetchLimitPerAccount: number;
-  sourceProvider: SourceProvider;
+  sourceProviders: SourceProviderRegistry;
   xPosts: XPostRepository;
 }
 
@@ -17,7 +17,7 @@ export interface PollingAccountResult {
   lastSeenPostId: string | null;
   newPostsDetected: number;
   resolvedDisplayName: string | null;
-  resolvedXUserId: string;
+  resolvedSourceId: string;
 }
 
 export class PollingAccountService {
@@ -34,11 +34,11 @@ export class PollingAccountService {
     deliveryTargets: DeliveryTarget[],
   ): Promise<PollingAccountResult> {
     const fetchCursor = account.lastSeenPostId ?? account.baselinePostId ?? undefined;
-    const fetchResult = await this.options.sourceProvider.fetchPosts({
+    const sourceProvider = this.options.sourceProviders.get(account.sourceType);
+    const fetchResult = await sourceProvider.fetchPosts({
       limit: this.options.fetchLimitPerAccount,
       sincePostId: fetchCursor,
-      xUserId: account.xUserId ?? undefined,
-      xUsername: account.xUsername,
+      source: toSourceDescriptor(account),
     });
     const newestFetchedPostId = resolveNewestPostId(fetchResult.posts, fetchResult.meta.newestPostId);
     const filteredPosts = applyPostFilters(fetchResult.posts, {
@@ -58,7 +58,7 @@ export class PollingAccountService {
       lastSeenPostId: pickHigherPostId(fetchCursor ?? null, newestFetchedPostId ?? null),
       newPostsDetected: persistResult.newPostsDetected,
       resolvedDisplayName: fetchResult.account.displayName ?? null,
-      resolvedXUserId: fetchResult.account.xUserId,
+      resolvedSourceId: fetchResult.account.sourceId,
     };
   }
 
@@ -95,11 +95,22 @@ export class PollingAccountService {
     eventsCreated: number;
     isNewPost: boolean;
   }> {
-    const existingPost = await this.options.xPosts.findByXPostId(post.xPostId);
+    const existingPost =
+      post.dedupeKey === undefined
+        ? await this.options.xPosts.findByXPostId(post.xPostId)
+        : await this.options.xPosts.findByDedupeKey(post.dedupeKey);
+
+    if (existingPost !== null) {
+      return {
+        eventsCreated: 0,
+        isNewPost: false,
+      };
+    }
 
     await this.options.xPosts.upsertByXPostId({
-      authorUserId: post.author.xUserId,
-      authorUsername: post.author.xUsername,
+      authorUserId: post.author.sourceId,
+      authorUsername: post.author.sourceLabel,
+      dedupeKey: post.dedupeKey,
       detectedAt: new Date().toISOString(),
       isReply: post.isReply,
       isRepost: post.isRepost,
@@ -126,7 +137,7 @@ export class PollingAccountService {
 
     return {
       eventsCreated,
-      isNewPost: existingPost === null,
+      isNewPost: true,
     };
   }
 }
@@ -239,9 +250,18 @@ function serializeRawPayload(rawPayload: unknown): string {
     return JSON.stringify(rawPayload);
   } catch (error) {
     throw new Error(
-      `Failed to serialize raw X payload: ${error instanceof Error ? error.message : String(error)}`,
+      `Failed to serialize raw source payload: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+}
+
+function toSourceDescriptor(account: WatchAccount): SourceDescriptor {
+  return {
+    sourceType: account.sourceType,
+    ...(account.sourceUrl === null ? {} : { sourceUrl: account.sourceUrl }),
+    ...(account.xUserId === null ? {} : { xUserId: account.xUserId }),
+    ...(account.xUsername === null ? {} : { xUsername: account.xUsername }),
+  };
 }
 
 function sortPostsAscending(posts: StandardizedPost[]): StandardizedPost[] {

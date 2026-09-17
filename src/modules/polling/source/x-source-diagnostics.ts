@@ -103,7 +103,10 @@ export class XSourceDiagnostics {
       });
       const result = await provider.fetchPosts({
         limit: 1,
-        xUsername,
+        source: {
+          sourceType: 'x',
+          xUsername,
+        },
       });
 
       if (result.posts.length === 0) {
@@ -131,7 +134,12 @@ export class XSourceDiagnostics {
     const provider = this.createBrowserProvider(toBrowserProviderOptions(config.browser));
 
     try {
-      await provider.validateAccount({ xUsername });
+      await provider.validateSource({
+        source: {
+          sourceType: 'x',
+          xUsername,
+        },
+      });
 
       return {
         message: '当前 browser profile 可访问 X 页面；这可能是已登录，也可能是公开页面匿名可读。',

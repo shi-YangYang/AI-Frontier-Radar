@@ -40,6 +40,10 @@ export interface XBrowserSourceConfig {
   userDataDir: string;
 }
 
+export interface RssSourceConfig {
+  proxyUrl?: string;
+}
+
 export interface AppConfig {
   delivery: {
     feishu: {
@@ -63,6 +67,7 @@ export interface AppConfig {
   };
   source: {
     mode: XSourceMode;
+    rss?: RssSourceConfig;
     x: {
       apiBaseUrl?: string;
       bearerToken?: string;

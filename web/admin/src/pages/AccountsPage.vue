@@ -2,11 +2,23 @@
   <section>
     <PageHeader :title="t('accounts.title')" :subtitle="t('accounts.subtitle')">
       <form class="inline-form account-add-form" @submit.prevent="addAccount">
+        <select v-model="sourceType" :disabled="addingAccount">
+          <option value="x">{{ t('accounts.sourceTypeX') }}</option>
+          <option value="rss">{{ t('accounts.sourceTypeRss') }}</option>
+        </select>
         <input
+          v-if="sourceType === 'x'"
           v-model="username"
           autocomplete="off"
           :disabled="addingAccount"
           :placeholder="t('accounts.placeholder')"
+        />
+        <input
+          v-else
+          v-model="sourceUrl"
+          autocomplete="off"
+          :disabled="addingAccount"
+          :placeholder="t('accounts.rssPlaceholder')"
         />
         <button class="primary" type="submit" :disabled="busy || addingAccount">
           {{ addingAccount ? t('accounts.validating') : t('accounts.add') }}
@@ -34,7 +46,7 @@
         <table>
           <thead>
             <tr>
-              <th>{{ t('table.account') }}</th>
+              <th>{{ t('table.source') }}</th>
               <th>{{ t('table.lastPolledAt') }}</th>
               <th>{{ t('table.lastPollStatus') }}</th>
               <th>{{ t('table.baselinePost') }}</th>
@@ -48,7 +60,12 @@
             </tr>
             <tr v-for="account in accounts" :key="account.id">
               <td>
-                <strong>@{{ account.xUsername }}</strong>
+                <strong>
+                  <span class="status-badge neutral source-type-badge">
+                    {{ account.sourceType === 'rss' ? 'RSS' : 'X' }}
+                  </span>
+                  {{ toAccountLabel(account) }}
+                </strong>
                 <div class="muted">{{ account.displayName ?? '-' }}</div>
               </td>
               <td>{{ formatDateTime(account.lastPolledAt) }}</td>
@@ -75,7 +92,7 @@
     <ConfirmModal
       :open="deleteTarget !== null"
       :title="t('accounts.deleteTitle')"
-      :body="deleteTarget === null ? '' : '@' + deleteTarget.xUsername"
+      :body="deleteTarget === null ? '' : toAccountLabel(deleteTarget)"
       :detail="t('accounts.deleteBody')"
       @cancel="deleteTarget = null"
       @confirm="confirmDelete"
@@ -93,6 +110,7 @@ import {
   listWatchAccounts,
   type AdminPagination,
   type WatchAccount,
+  type WatchAccountSourceType,
 } from '../api/admin-api';
 import ConfirmModal from '../components/ConfirmModal.vue';
 import PageHeader from '../components/PageHeader.vue';
@@ -116,6 +134,8 @@ const pagination = ref<AdminPagination>({
   totalPages: 0,
 });
 const queryInput = ref('');
+const sourceType = ref<WatchAccountSourceType>('x');
+const sourceUrl = ref('');
 const username = ref('');
 
 onMounted(() => {
@@ -161,14 +181,20 @@ async function addAccount(): Promise<void> {
   setNotice(t('notice.accountValidating'));
 
   try {
-    await createWatchAccount(username.value);
-    username.value = '';
+    if (sourceType.value === 'rss') {
+      await createWatchAccount({ sourceType: 'rss', sourceUrl: sourceUrl.value });
+      sourceUrl.value = '';
+    } else {
+      await createWatchAccount({ sourceType: 'x', xUsername: username.value });
+      username.value = '';
+    }
+
     await loadAccounts(1, { silent: true });
     setNotice(t('notice.accountCreated'));
   } catch (error) {
     setNotice(
       t('notice.accountCreateFailed', {
-        error: toAccountCreateErrorMessage(error),
+        error: toAccountCreateErrorMessage(error, sourceType.value),
       }),
       true,
     );
@@ -205,10 +231,15 @@ function setNotice(message: string, danger = false): void {
   noticeDanger.value = danger;
 }
 
-function toAccountCreateErrorMessage(error: unknown): string {
+function toAccountCreateErrorMessage(
+  error: unknown,
+  sourceType: WatchAccountSourceType,
+): string {
   if (error instanceof AdminApiRequestError) {
+    const isRss = sourceType === 'rss';
+
     if (error.code === 'SOURCE_REQUEST_FAILED') {
-      return t('accounts.error.network');
+      return t(isRss ? 'accounts.error.rssNetwork' : 'accounts.error.network');
     }
 
     if (error.code === 'SOURCE_AUTH_FAILED') {
@@ -220,23 +251,35 @@ function toAccountCreateErrorMessage(error: unknown): string {
     }
 
     if (error.code === 'SOURCE_RESPONSE_INVALID') {
-      return t('accounts.error.pageUnreadable');
+      return t(isRss ? 'accounts.error.rssPageUnreadable' : 'accounts.error.pageUnreadable');
     }
 
     if (error.code === 'SOURCE_ACCOUNT_NOT_FOUND') {
-      return t('accounts.error.accountNotFound');
+      return t(isRss ? 'accounts.error.rssAccountNotFound' : 'accounts.error.accountNotFound');
     }
 
     if (error.code === 'SOURCE_INVALID_INPUT') {
-      return t('accounts.error.invalidInput');
+      return t(isRss ? 'accounts.error.rssInvalidInput' : 'accounts.error.invalidInput');
     }
 
     if (error.code === 'SOURCE_VALIDATION_UNAVAILABLE') {
-      return t('accounts.error.validationUnavailable');
+      return t(
+        isRss
+          ? 'accounts.error.rssValidationUnavailable'
+          : 'accounts.error.validationUnavailable',
+      );
     }
   }
 
   return error instanceof Error ? error.message : String(error);
+}
+
+function toAccountLabel(account: WatchAccount): string {
+  if (account.sourceType === 'rss') {
+    return account.sourceUrl ?? account.id;
+  }
+
+  return account.xUsername === null ? account.id : `@${account.xUsername}`;
 }
 
 async function loadAccountsAfterDelete(): Promise<void> {

@@ -923,6 +923,14 @@ tr:last-child td {
   color: #475467;
 }
 
+.source-type-badge {
+  margin-right: 6px;
+  min-height: 18px;
+  padding: 1px 7px;
+  font-size: 11px;
+  vertical-align: middle;
+}
+
 .button-link {
   display: inline-flex;
   align-items: center;

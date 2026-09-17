@@ -8,9 +8,9 @@ import { toPrismaSqliteDatabaseUrl } from '../src/shared/config';
 import { loadAppConfig } from '../src/config';
 import { createLogger } from '../src/lib/logger';
 import { createApp } from '../src/app/create-app';
-import { BrowserXSourceProvider, createXSourceProvider, runPollingJob } from '../src/modules/polling';
+import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, createRssSourceProvider, createSourceProviderRegistry, createXSourceProvider, runPollingJob } from '../src/modules/polling';
 import { runDeliveryWorkerJob } from '../src/modules/delivery';
-import { createRuntimeSourceProvider } from '../src/modules/scheduler';
+import { createRuntimeSourceProviders } from '../src/modules/scheduler';
 import { createPrismaClient, createStorage } from '../src/modules/storage';
 import { ConfigValidationError } from '../src/shared/env/config-validation-error';
 
@@ -25,9 +25,34 @@ type MockPost = {
   text: string;
 };
 
+type MockFeedItem = {
+  description?: string;
+  guid: string;
+  link?: string;
+  pubDate?: string;
+  title: string;
+};
+
+type MockAtomEntry = {
+  contentHtml?: string;
+  id: string;
+  link: string;
+  published?: string;
+  title: string;
+};
+
+type MockFeedResponse = {
+  body: string;
+  contentType: string;
+  statusCode: number;
+};
+
 const WATCH_USERNAME = 'mock_ai';
 const WATCH_USER_ID = '10001';
 const TARGET_KEY = 'feishu-main';
+const RSS_FEED_PATH = '/feed.xml';
+const ATOM_FEED_PATH = '/atom.xml';
+const EMPTY_FEED_PATH = '/empty.xml';
 
 async function main(): Promise<void> {
   const checks: SmokeCheck[] = [];
@@ -35,6 +60,7 @@ async function main(): Promise<void> {
   const sqlitePath = join(tempDir, 'smoke.sqlite');
   const databaseUrl = toPrismaSqliteDatabaseUrl(sqlitePath);
   const xApi = await startMockXApi();
+  const rssApi = await startMockFeedServer();
   const webhook = await startMockWebhook();
   const logger = createLogger({
     bindings: { service: 'ai-news-monitor-smoke' },
@@ -56,7 +82,37 @@ async function main(): Promise<void> {
     watchAccountsSource: config.watchAccounts,
   });
   const prisma = createPrismaClient(databaseUrl);
+  const sourceProvider = createXSourceProvider({
+    apiBaseUrl: xApi.url,
+    bearerToken: 'smoke-token',
+  });
+  const rssProvider = createRssSourceProvider({
+    timeoutMs: 5_000,
+  });
+  const sourceProviders = createSourceProviderRegistry({
+    rss: rssProvider,
+    x: sourceProvider,
+  });
   const app = createApp({
+    adminActions: {
+      validateWatchAccount: async (input) => {
+        if (input.sourceType === 'rss') {
+          return rssProvider.validateSource({
+            source: {
+              sourceType: 'rss',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
+        return sourceProvider.validateSource({
+          source: {
+            sourceType: 'x',
+            xUsername: input.xUsername,
+          },
+        });
+      },
+    },
     config,
     logger,
     storage,
@@ -74,15 +130,10 @@ async function main(): Promise<void> {
     assert(seededAccount.enabled, 'seed watch account should be enabled');
     checks.push({ name: 'seed watch account 写入数据库' });
 
-    const sourceProvider = createXSourceProvider({
-      apiBaseUrl: xApi.url,
-      bearerToken: 'smoke-token',
-    });
-
     const emptyPoll = await runPollingJob({
       config,
       logger,
-      sourceProvider,
+      sourceProviders,
       storage,
     });
     const accountAfterEmptyPoll = await storage.watchAccounts.findByUsername(WATCH_USERNAME);
@@ -108,7 +159,7 @@ async function main(): Promise<void> {
     const noTargetPoll = await runPollingJob({
       config,
       logger,
-      sourceProvider,
+      sourceProviders,
       storage,
     });
     assert(noTargetPoll.status === 'success', 'polling without enabled delivery targets should succeed');
@@ -140,7 +191,7 @@ async function main(): Promise<void> {
     const newPostPoll = await runPollingJob({
       config,
       logger,
-      sourceProvider,
+      sourceProviders,
       storage,
     });
     assert(newPostPoll.status === 'success', 'polling with one new post should succeed');
@@ -174,6 +225,477 @@ async function main(): Promise<void> {
     );
     assert(sentEvent?.status === 'sent', 'delivery event status should be sent');
     checks.push({ name: '成功后 delivery_events.status = sent' });
+
+    const legacyCreateResponse = await app.inject({
+      method: 'POST',
+      payload: { xUsername: WATCH_USERNAME },
+      url: '/admin/api/watch-accounts',
+    });
+    assert(
+      legacyCreateResponse.statusCode === 200,
+      `legacy watch account create returned ${legacyCreateResponse.statusCode}`,
+    );
+    const legacyCreateBody = JSON.parse(legacyCreateResponse.body) as {
+      data?: { created?: boolean; watchAccount?: { sourceType?: string } };
+      ok?: boolean;
+    };
+    assert(legacyCreateBody.ok === true, 'legacy watch account create did not return ok');
+    assert(
+      legacyCreateBody.data?.created === false,
+      'legacy duplicate xUsername should not create a new account',
+    );
+    assert(
+      legacyCreateBody.data?.watchAccount?.sourceType === 'x',
+      'legacy create should keep sourceType x',
+    );
+    checks.push({ name: '管理 API 兼容旧 {xUsername} 请求体' });
+
+    const invalidRssResponse = await app.inject({
+      method: 'POST',
+      payload: { sourceType: 'rss', sourceUrl: 'not-a-url' },
+      url: '/admin/api/watch-accounts',
+    });
+    assert(invalidRssResponse.statusCode === 400, `invalid RSS URL returned ${invalidRssResponse.statusCode}`);
+    const invalidRssBody = JSON.parse(invalidRssResponse.body) as { error?: { code?: string } };
+    assert(
+      invalidRssBody.error?.code === 'SOURCE_INVALID_INPUT',
+      `invalid RSS URL should map to SOURCE_INVALID_INPUT, got ${invalidRssBody.error?.code}`,
+    );
+    checks.push({ name: '非法 RSS URL 返回 SOURCE_INVALID_INPUT' });
+
+    const missingFeedResponse = await app.inject({
+      method: 'POST',
+      payload: { sourceType: 'rss', sourceUrl: `${rssApi.url}/missing.xml` },
+      url: '/admin/api/watch-accounts',
+    });
+    assert(
+      missingFeedResponse.statusCode === 404,
+      `missing RSS feed returned ${missingFeedResponse.statusCode}`,
+    );
+    const missingFeedBody = JSON.parse(missingFeedResponse.body) as { error?: { code?: string } };
+    assert(
+      missingFeedBody.error?.code === 'SOURCE_ACCOUNT_NOT_FOUND',
+      `missing RSS feed should map to SOURCE_ACCOUNT_NOT_FOUND, got ${missingFeedBody.error?.code}`,
+    );
+    checks.push({ name: 'RSS feed 404 返回 SOURCE_ACCOUNT_NOT_FOUND' });
+
+    const rssFeedUrl = `${rssApi.url}${RSS_FEED_PATH}`;
+
+    rssApi.setFeed(RSS_FEED_PATH, {
+      body: createRssDocument('Mock AI Feed', [
+        createRssItem({
+          description: '<p>Hello &amp; <b>world</b></p>',
+          guid: 'rss-item-2',
+          link: 'https://example.com/posts/2',
+          pubDate: 'Fri, 01 May 2026 08:00:00 GMT',
+          title: '新版本发布',
+        }),
+        createRssItem({
+          description: '<p>重复 guid 条目</p>',
+          guid: 'rss-item-2',
+          link: 'https://example.com/posts/2',
+          pubDate: 'Fri, 01 May 2026 08:00:00 GMT',
+          title: '新版本发布（重复）',
+        }),
+        createRssItem({
+          guid: 'rss-item-nolink',
+          pubDate: 'Sat, 02 May 2026 08:00:00 GMT',
+          title: '缺少 link 的条目',
+        }),
+        createRssItem({
+          description: '<p>旧条目</p>',
+          guid: 'rss-item-1',
+          link: 'https://example.com/posts/1',
+          pubDate: 'Thu, 30 Apr 2026 08:00:00 GMT',
+          title: '旧条目',
+        }),
+      ]),
+      contentType: 'application/rss+xml; charset=utf-8',
+      statusCode: 200,
+    });
+
+    const createRssResponse = await app.inject({
+      method: 'POST',
+      payload: { sourceType: 'rss', sourceUrl: rssFeedUrl },
+      url: '/admin/api/watch-accounts',
+    });
+    assert(createRssResponse.statusCode === 200, `RSS account create returned ${createRssResponse.statusCode}`);
+    const createRssBody = JSON.parse(createRssResponse.body) as {
+      data?: {
+        created?: boolean;
+        watchAccount?: { displayName?: string | null; sourceType?: string; sourceUrl?: string | null };
+      };
+    };
+    assert(createRssBody.data?.created === true, 'RSS watch account was not created');
+    assert(createRssBody.data?.watchAccount?.sourceType === 'rss', 'RSS account should keep sourceType rss');
+    assert(createRssBody.data?.watchAccount?.sourceUrl === rssFeedUrl, 'RSS account should store the feed URL');
+    assert(
+      createRssBody.data?.watchAccount?.displayName === 'Mock AI Feed',
+      'RSS account should store the resolved feed title',
+    );
+
+    const duplicateRssResponse = await app.inject({
+      method: 'POST',
+      payload: { sourceType: 'rss', sourceUrl: rssFeedUrl },
+      url: '/admin/api/watch-accounts',
+    });
+    const duplicateRssBody = JSON.parse(duplicateRssResponse.body) as {
+      data?: { created?: boolean };
+    };
+    assert(
+      duplicateRssResponse.statusCode === 200 && duplicateRssBody.data?.created === false,
+      'duplicate RSS sourceUrl should not create a new account',
+    );
+    checks.push({ name: '添加 RSS 源并按 sourceType + sourceUrl 去重' });
+
+    const rssAccount = await storage.watchAccounts.findBySource({
+      sourceType: 'rss',
+      sourceUrl: rssFeedUrl,
+    });
+    assert(rssAccount !== null, 'RSS watch account was not stored');
+    assert(rssAccount.baselinePostId === null, 'RSS account should start without a baseline');
+
+    const firstRssPoll = await runPollingJob({
+      config,
+      logger,
+      sourceProviders,
+      storage,
+    });
+    assert(firstRssPoll.status === 'success', 'first RSS polling run should succeed');
+
+    const rssAccountAfterFirstPoll = await storage.watchAccounts.findById(rssAccount.id);
+    assert(rssAccountAfterFirstPoll?.baselinePostId !== null, 'first RSS poll should set a baseline');
+    assert(rssAccountAfterFirstPoll?.xUserId !== null, 'first RSS poll should resolve a source id');
+    const rssSourceId = rssAccountAfterFirstPoll?.xUserId ?? '';
+    const rssPostsAfterFirstPoll = await prisma.xPostRaw.findMany({
+      where: { authorUserId: rssSourceId },
+    });
+    assert(
+      rssPostsAfterFirstPoll.length === 1,
+      `first RSS poll should store exactly one baseline post, got ${rssPostsAfterFirstPoll.length}`,
+    );
+    const baselineRssPost = rssPostsAfterFirstPoll[0];
+    assert(/^\d{24}$/u.test(baselineRssPost.xPostId), 'RSS post id should be 16+8 numeric digits');
+    assert(
+      baselineRssPost.postedAt === '2026-05-01T08:00:00.000Z',
+      `RSS baseline post should keep its pubDate, got ${baselineRssPost.postedAt}`,
+    );
+    assert(
+      baselineRssPost.textContent === '新版本发布\n\nHello & world',
+      `RSS textContent should strip HTML and decode entities, got ${JSON.stringify(baselineRssPost.textContent)}`,
+    );
+    assert(
+      baselineRssPost.authorUsername === 'Mock AI Feed',
+      'RSS post should fall back to the feed title as author',
+    );
+
+    const baselineRssEvent = await storage.deliveryEvents.findByPostAndTarget(
+      baselineRssPost.xPostId,
+      TARGET_KEY,
+    );
+    assert(baselineRssEvent !== null, 'RSS baseline post should create a delivery event');
+    const baselineDeliveryResult = await runDeliveryWorkerJob({ logger, storage });
+    assert(
+      baselineDeliveryResult.processed.length === 1,
+      'delivery worker should process the RSS baseline event',
+    );
+    assert(webhook.requests.length === 2, 'mock webhook should receive the RSS baseline request');
+    checks.push({ name: 'RSS 首次轮询只建基线 1 条并跳过缺 link / 重复 guid 条目' });
+
+    rssApi.setFeed(RSS_FEED_PATH, {
+      body: createRssDocument('Mock AI Feed', [
+        createRssItem({
+          description: '<p>三号条目</p>',
+          guid: 'rss-item-3',
+          link: 'https://example.com/posts/3',
+          pubDate: 'Sun, 03 May 2026 09:00:00 GMT',
+          title: '三号条目',
+        }),
+        createRssItem({
+          description: '<p>Hello &amp; <b>world</b></p>',
+          guid: 'rss-item-2',
+          link: 'https://example.com/posts/2',
+          pubDate: 'Fri, 01 May 2026 08:00:00 GMT',
+          title: '新版本发布',
+        }),
+        createRssItem({
+          description: '<p>旧条目</p>',
+          guid: 'rss-item-1',
+          link: 'https://example.com/posts/1',
+          pubDate: 'Thu, 30 Apr 2026 08:00:00 GMT',
+          title: '旧条目',
+        }),
+      ]),
+      contentType: 'application/rss+xml; charset=utf-8',
+      statusCode: 200,
+    });
+
+    const incrementalRssPoll = await runPollingJob({
+      config,
+      logger,
+      sourceProviders,
+      storage,
+    });
+    assert(incrementalRssPoll.status === 'success', 'incremental RSS polling run should succeed');
+    assert(incrementalRssPoll.newPostsDetected === 1, 'incremental RSS polling should detect one new post');
+    assert(incrementalRssPoll.eventsCreated === 1, 'incremental RSS polling should create one event');
+
+    const rssPostsAfterIncrement = await prisma.xPostRaw.findMany({
+      where: { authorUserId: rssSourceId },
+    });
+    assert(
+      rssPostsAfterIncrement.length === 2,
+      `incremental RSS poll should store one additional post, got ${rssPostsAfterIncrement.length}`,
+    );
+    const incrementalRssPost = rssPostsAfterIncrement.find(
+      (post) => post.postedAt === '2026-05-03T09:00:00.000Z',
+    );
+    assert(incrementalRssPost !== undefined, 'incremental RSS post was not stored with its pubDate');
+    assert(
+      incrementalRssPost.textContent === '三号条目\n\n三号条目',
+      'incremental RSS post should merge title and content',
+    );
+    const incrementalRssEvent = await storage.deliveryEvents.findByPostAndTarget(
+      incrementalRssPost.xPostId,
+      TARGET_KEY,
+    );
+    assert(incrementalRssEvent?.status === 'pending', 'incremental RSS post should create a pending event');
+    const incrementalDeliveryResult = await runDeliveryWorkerJob({ logger, storage });
+    assert(
+      incrementalDeliveryResult.processed.length === 1,
+      'delivery worker should process the incremental RSS event',
+    );
+    assert(webhook.requests.length === 3, 'mock webhook should receive the incremental RSS request');
+    checks.push({ name: 'RSS 增量检测、入库并投递' });
+
+    const dedupPoll = await runPollingJob({
+      config,
+      logger,
+      sourceProviders,
+      storage,
+    });
+    assert(dedupPoll.status === 'success', 'dedup RSS polling run should succeed');
+    assert(dedupPoll.newPostsDetected === 0, 'dedup RSS polling should not detect new posts');
+    const rssPostsAfterDedup = await prisma.xPostRaw.findMany({
+      where: { authorUserId: rssSourceId },
+    });
+    assert(rssPostsAfterDedup.length === 2, 'dedup RSS polling should not add duplicate rows');
+    checks.push({ name: 'RSS 重复轮询不重复入库' });
+
+    const emptyFeedUrl = `${rssApi.url}${EMPTY_FEED_PATH}`;
+    rssApi.setFeed(EMPTY_FEED_PATH, {
+      body: createRssDocument('Empty Feed', []),
+      contentType: 'application/rss+xml; charset=utf-8',
+      statusCode: 200,
+    });
+    const createEmptyFeedResponse = await app.inject({
+      method: 'POST',
+      payload: { sourceType: 'rss', sourceUrl: emptyFeedUrl },
+      url: '/admin/api/watch-accounts',
+    });
+    assert(
+      createEmptyFeedResponse.statusCode === 200,
+      `empty RSS feed create returned ${createEmptyFeedResponse.statusCode}`,
+    );
+    const emptyFeedAccount = await storage.watchAccounts.findBySource({
+      sourceType: 'rss',
+      sourceUrl: emptyFeedUrl,
+    });
+    assert(emptyFeedAccount !== null, 'empty RSS feed account was not stored');
+
+    const emptyFeedPoll = await runPollingJob({
+      config,
+      logger,
+      sourceProviders,
+      storage,
+    });
+    assert(emptyFeedPoll.status === 'success', 'empty RSS feed polling should succeed');
+    const emptyFeedAccountAfterPoll = await storage.watchAccounts.findById(emptyFeedAccount.id);
+    assert(
+      emptyFeedAccountAfterPoll?.baselinePostId === null &&
+        emptyFeedAccountAfterPoll?.lastSeenPostId === null,
+      'empty RSS feed must not set a baseline',
+    );
+    assert(emptyFeedAccountAfterPoll?.lastPollError === null, 'empty RSS feed must not set an error');
+    checks.push({ name: '空 feed 视为成功且不设基线' });
+
+    const atomFeedUrl = `${rssApi.url}${ATOM_FEED_PATH}`;
+    rssApi.setFeed(ATOM_FEED_PATH, {
+      body: createAtomDocument('Mock Atom Feed', [
+        createAtomEntry({
+          contentHtml: '<p>Atom &amp; content</p>',
+          id: 'atom-1',
+          link: 'https://example.com/atom/1',
+          published: '2026-05-04T10:00:00.000Z',
+          title: 'Atom 条目一',
+        }),
+      ]),
+      contentType: 'application/atom+xml; charset=utf-8',
+      statusCode: 200,
+    });
+    const createAtomResponse = await app.inject({
+      method: 'POST',
+      payload: { sourceType: 'rss', sourceUrl: atomFeedUrl },
+      url: '/admin/api/watch-accounts',
+    });
+    assert(createAtomResponse.statusCode === 200, `Atom feed create returned ${createAtomResponse.statusCode}`);
+    const atomAccount = await storage.watchAccounts.findBySource({
+      sourceType: 'rss',
+      sourceUrl: atomFeedUrl,
+    });
+    assert(atomAccount !== null, 'Atom feed account was not stored');
+
+    const atomPoll = await runPollingJob({
+      config,
+      logger,
+      sourceProviders,
+      storage,
+    });
+    assert(atomPoll.status === 'success', 'Atom feed polling should succeed');
+    const atomAccountAfterPoll = await storage.watchAccounts.findById(atomAccount.id);
+    const atomSourceId = atomAccountAfterPoll?.xUserId ?? '';
+    const atomPosts = await prisma.xPostRaw.findMany({ where: { authorUserId: atomSourceId } });
+    assert(atomPosts.length === 1, `Atom poll should store one baseline post, got ${atomPosts.length}`);
+    assert(
+      atomPosts[0].postedAt === '2026-05-04T10:00:00.000Z',
+      `Atom post should use published time, got ${atomPosts[0].postedAt}`,
+    );
+    assert(
+      atomPosts[0].textContent === 'Atom 条目一\n\nAtom & content',
+      `Atom textContent should strip HTML and decode entities, got ${JSON.stringify(atomPosts[0].textContent)}`,
+    );
+    checks.push({ name: 'Atom feed 解析与入库' });
+
+    rssApi.setFeed(ATOM_FEED_PATH, {
+      body: createAtomDocument('Mock Atom Feed', [
+        createAtomEntry({
+          contentHtml: '<p>缺少日期</p>',
+          id: 'atom-2',
+          link: 'https://example.com/atom/2',
+          title: 'Atom 条目二',
+        }),
+      ]),
+      contentType: 'application/atom+xml; charset=utf-8',
+      statusCode: 200,
+    });
+    const atomNoDatePoll = await runPollingJob({
+      config,
+      logger,
+      sourceProviders,
+      storage,
+    });
+    assert(atomNoDatePoll.status === 'success', 'Atom feed without dates should still succeed');
+    const atomAccountAfterNoDatePoll = await storage.watchAccounts.findById(atomAccount.id);
+    const noDateAtomPost = await prisma.xPostRaw.findUnique({
+      where: { xPostId: atomAccountAfterNoDatePoll?.lastSeenPostId ?? '' },
+    });
+    assert(noDateAtomPost !== null, 'Atom entry without a date was not stored');
+    assert(
+      noDateAtomPost.textContent === 'Atom 条目二\n\n缺少日期',
+      'Atom entry without a date should keep its content',
+    );
+    assert(
+      Math.abs(Date.now() - Date.parse(noDateAtomPost.postedAt)) < 5 * 60_000,
+      'Atom entry without a date should fall back to the fetch time',
+    );
+    checks.push({ name: 'Atom 缺日期回退抓取时刻' });
+
+    const atomPostCountBeforeRepeat = await prisma.xPostRaw.count({
+      where: { authorUserId: atomSourceId },
+    });
+    const atomNoDateRepeatPoll = await runPollingJob({
+      config,
+      logger,
+      sourceProviders,
+      storage,
+    });
+    assert(atomNoDateRepeatPoll.status === 'success', 'repeat Atom poll should succeed');
+    const atomPostCountAfterRepeat = await prisma.xPostRaw.count({
+      where: { authorUserId: atomSourceId },
+    });
+    assert(
+      atomPostCountAfterRepeat === atomPostCountBeforeRepeat,
+      `date-less Atom entry should not be stored twice, got ${atomPostCountAfterRepeat - atomPostCountBeforeRepeat} extra rows`,
+    );
+    checks.push({ name: '缺日期条目跨轮不重复入库' });
+
+    rssApi.setFeed(ATOM_FEED_PATH, {
+      body: createAtomDocument('Mock Atom Feed', []),
+      contentType: 'application/atom+xml; charset=utf-8',
+      statusCode: 200,
+    });
+    rssApi.setFeed(RSS_FEED_PATH, {
+      body: 'upstream failure',
+      contentType: 'text/plain; charset=utf-8',
+      statusCode: 500,
+    });
+
+    const failingPoll = await runPollingJob({
+      config,
+      logger,
+      sourceProviders,
+      storage,
+    });
+    assert(failingPoll.status === 'partial_failed', `failing poll status should be partial_failed, got ${failingPoll.status}`);
+    const failedRssAccount = await storage.watchAccounts.findById(rssAccount.id);
+    assert(failedRssAccount?.lastPollStatus === 'failed', 'failing RSS source should be marked failed');
+    assert(
+      (failedRssAccount?.lastPollError ?? '').includes('500'),
+      'failing RSS source should record the HTTP status',
+    );
+    const atomAccountAfterFailure = await storage.watchAccounts.findById(atomAccount.id);
+    assert(
+      atomAccountAfterFailure?.lastPollStatus === 'success',
+      'other sources should still succeed when one source fails',
+    );
+    checks.push({ name: '单个源失败不影响其他源并记录错误' });
+
+    const proxyFeedUrl = `${rssApi.url}${RSS_FEED_PATH}`;
+    rssApi.setFeed(RSS_FEED_PATH, {
+      body: createRssDocument('Proxy Feed', [
+        createRssItem({
+          description: 'Proxied entry',
+          guid: 'proxy-1',
+          link: 'https://example.com/proxy/1',
+          pubDate: 'Tue, 05 May 2026 10:00:00 GMT',
+          title: 'Proxy 条目',
+        }),
+      ]),
+      contentType: 'application/rss+xml; charset=utf-8',
+      statusCode: 200,
+    });
+
+    const proxyServer = await startMockProxy();
+    try {
+      const proxiedProvider = new RssSourceProvider({ proxyUrl: proxyServer.url });
+      const proxiedResult = await proxiedProvider.fetchPosts({
+        limit: 1,
+        source: { sourceType: 'rss', sourceUrl: proxyFeedUrl },
+      });
+      assert(proxiedResult.posts.length === 1, 'proxied RSS fetch should return the feed entry');
+      assert(proxyServer.requests.length === 1, 'proxied RSS fetch should go through the proxy');
+      checks.push({ name: 'RSS 代理请求经代理转发' });
+    } finally {
+      await proxyServer.close();
+    }
+
+    const unreachableProxyProvider = new RssSourceProvider({ proxyUrl: 'http://127.0.0.1:1' });
+    let unreachableProxyCode: string | null = null;
+
+    try {
+      await unreachableProxyProvider.fetchPosts({
+        limit: 1,
+        source: { sourceType: 'rss', sourceUrl: proxyFeedUrl },
+      });
+    } catch (error) {
+      unreachableProxyCode = error instanceof SourceProviderError ? error.code : null;
+    }
+
+    assert(
+      unreachableProxyCode === 'SOURCE_REQUEST_FAILED',
+      `unreachable proxy should fail the fetch, got ${unreachableProxyCode}`,
+    );
+    checks.push({ name: 'RSS 代理不可用时请求失败' });
 
     const healthResponse = await app.inject({ method: 'GET', url: '/health' });
     assert(healthResponse.statusCode === 200, `/health returned ${healthResponse.statusCode}`);
@@ -216,6 +738,7 @@ async function main(): Promise<void> {
     await app.close();
     await prisma.$disconnect();
     await storage.close();
+    await rssApi.close();
     await xApi.close();
     await webhook.close();
     await rm(tempDir, { force: true, recursive: true });
@@ -335,7 +858,7 @@ async function verifySourceModeConfig(
 }
 
 function verifyRuntimeSourceProviderFactory(checks: SmokeCheck[], config: AppConfig): void {
-  const browserProvider = createRuntimeSourceProvider({
+  const providers = createRuntimeSourceProviders({
     ...config,
     source: {
       mode: 'browser',
@@ -352,10 +875,14 @@ function verifyRuntimeSourceProviderFactory(checks: SmokeCheck[], config: AppCon
   });
 
   assert(
-    browserProvider instanceof BrowserXSourceProvider,
+    providers.x instanceof BrowserXSourceProvider,
     'browser mode should create BrowserXSourceProvider',
   );
-  checks.push({ name: 'scheduler browser 模式会创建 browser provider' });
+  assert(
+    providers.rss instanceof RssSourceProvider,
+    'runtime source providers should create RssSourceProvider',
+  );
+  checks.push({ name: 'scheduler 会创建 browser X provider 与 RSS provider' });
 }
 
 async function assertRejectsConfigValidation(
@@ -374,6 +901,63 @@ async function assertRejectsConfigValidation(
   }
 
   throw new Error('expected config validation failure');
+}
+
+function createRssItem(item: MockFeedItem): string {
+  return [
+    '<item>',
+    `<title>${escapeXml(item.title)}</title>`,
+    ...(item.link === undefined ? [] : [`<link>${escapeXml(item.link)}</link>`]),
+    `<guid isPermaLink="false">${escapeXml(item.guid)}</guid>`,
+    ...(item.pubDate === undefined ? [] : [`<pubDate>${escapeXml(item.pubDate)}</pubDate>`]),
+    ...(item.description === undefined
+      ? []
+      : [`<description><![CDATA[${item.description}]]></description>`]),
+    '</item>',
+  ].join('');
+}
+
+function createRssDocument(title: string, items: string[]): string {
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<rss version="2.0"><channel>',
+    `<title>${escapeXml(title)}</title>`,
+    ...items,
+    '</channel></rss>',
+  ].join('');
+}
+
+function createAtomEntry(entry: MockAtomEntry): string {
+  return [
+    '<entry>',
+    `<title>${escapeXml(entry.title)}</title>`,
+    `<id>${escapeXml(entry.id)}</id>`,
+    `<link rel="alternate" href="${escapeXml(entry.link)}"/>`,
+    ...(entry.published === undefined ? [] : [`<published>${escapeXml(entry.published)}</published>`]),
+    ...(entry.contentHtml === undefined
+      ? []
+      : [`<content type="html"><![CDATA[${entry.contentHtml}]]></content>`]),
+    '</entry>',
+  ].join('');
+}
+
+function createAtomDocument(title: string, entries: string[]): string {
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<feed xmlns="http://www.w3.org/2005/Atom">',
+    `<title>${escapeXml(title)}</title>`,
+    ...entries,
+    '</feed>',
+  ].join('');
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/gu, '&amp;')
+    .replace(/</gu, '&lt;')
+    .replace(/>/gu, '&gt;')
+    .replace(/"/gu, '&quot;')
+    .replace(/'/gu, '&apos;');
 }
 
 async function startMockXApi(): Promise<{
@@ -429,6 +1013,40 @@ async function startMockXApi(): Promise<{
   };
 }
 
+async function startMockFeedServer(): Promise<{
+  close(): Promise<void>;
+  setFeed(path: string, feed: MockFeedResponse): void;
+  url: string;
+}> {
+  const feeds = new Map<string, MockFeedResponse>();
+  const server = http.createServer((request, response) => {
+    const requestUrl = new URL(request.url ?? '/', 'http://127.0.0.1');
+    const feed = feeds.get(requestUrl.pathname);
+
+    if (request.method !== 'GET' || feed === undefined) {
+      response.writeHead(404, {
+        'content-type': 'text/plain; charset=utf-8',
+      });
+      response.end('not found');
+      return;
+    }
+
+    response.writeHead(feed.statusCode, {
+      'content-type': feed.contentType,
+    });
+    response.end(feed.body);
+  });
+  const url = await listen(server);
+
+  return {
+    close: () => closeServer(server),
+    setFeed(path, feed) {
+      feeds.set(path, feed);
+    },
+    url,
+  };
+}
+
 async function startMockWebhook(): Promise<{
   close(): Promise<void>;
   requests: unknown[];
@@ -453,6 +1071,54 @@ async function startMockWebhook(): Promise<{
     close: () => closeServer(server),
     requests,
     url: `${baseUrl}/mock-feishu-webhook-secret`,
+  };
+}
+
+async function startMockProxy(): Promise<{
+  close(): Promise<void>;
+  requests: string[];
+  url: string;
+}> {
+  const requests: string[] = [];
+  const server = http.createServer((request, response) => {
+    const target = request.url ?? '';
+    requests.push(target);
+
+    if (request.method !== 'GET' || !/^http:\/\//u.test(target)) {
+      sendJson(response, { error: 'unsupported proxy request' }, 400);
+      return;
+    }
+
+    const targetUrl = new URL(target);
+    const upstream = http.request(
+      {
+        headers: {
+          ...request.headers,
+          host: targetUrl.host,
+        },
+        hostname: targetUrl.hostname,
+        method: 'GET',
+        path: `${targetUrl.pathname}${targetUrl.search}`,
+        port: targetUrl.port,
+      },
+      (upstreamResponse) => {
+        response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
+        upstreamResponse.pipe(response);
+      },
+    );
+
+    upstream.on('error', () => {
+      response.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
+      response.end('proxy upstream error');
+    });
+    request.pipe(upstream);
+  });
+  const url = await listen(server);
+
+  return {
+    close: () => closeServer(server),
+    requests,
+    url,
   };
 }
 

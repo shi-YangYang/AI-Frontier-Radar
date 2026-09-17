@@ -20,6 +20,8 @@
 | 前端 | Vue 3.5 + vue-router 5 + Vite 8 + vue-tsc |
 | 日志 | 项目内 `src/lib/logger` |
 | HTTP 客户端 | 项目内 `src/lib/http` |
+| RSS/Atom 解析 | fast-xml-parser ^5.11（仅订阅源解析使用） |
+| RSS 代理 | undici（ProxyAgent，仅 RSS 抓取使用；仅支持 http/https 代理） |
 | 队列 | 不使用 BullMQ；Redis 仅用于 `/ready` 就绪检查，核心功能不强依赖 |
 
 ## 业务代码目录
@@ -79,6 +81,7 @@
 ## 重要约束
 
 - X 数据源支持 `browser` 与 `api` 两种模式，默认 `browser`
+- 订阅源支持 `x` 与 `rss` 两种类型；`watch_accounts.source_type` 默认 `x`，RSS 以 `(source_type, source_url)` 唯一
 - 浏览器代理支持 `http://`、`https://`、`socks5://`
 - 密钥、Token、Webhook、浏览器 profile 不写入日志、不提交 Git
 - 不引入 Docker、Redis 等核心运行强依赖

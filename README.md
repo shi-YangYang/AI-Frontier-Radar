@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./web/admin/public/brand/logo-mark.png" width="96" alt="AI Frontier Radar logo" />
   <h1>AI 前沿雷达</h1>
-  <p><strong>本地优先的 AI 公开消息监测工具：监听 X 账号新帖，沉淀到 SQLite，并同步推送到飞书群。</strong></p>
+  <p><strong>本地优先的 AI 公开消息监测工具：监听 X 账号与 RSS 订阅源新帖，沉淀到 SQLite，并同步推送到飞书群。</strong></p>
   <p>
     <a href="#快速开始">快速开始</a>
     · <a href="#功能">功能</a>
@@ -22,7 +22,7 @@
 
 ## English Summary
 
-AI Frontier Radar is a local-first monitor for public X posts. It polls selected AI-related accounts, stores state in SQLite, sends new posts to Feishu webhooks, and provides a local Web dashboard for account, message, delivery, and runtime configuration management.
+AI Frontier Radar is a local-first monitor for public X posts and RSS/Atom feeds. It polls selected AI-related accounts and feeds, stores state in SQLite, sends new posts to Feishu webhooks, and provides a local Web dashboard for source, message, delivery, and runtime configuration management.
 
 ## 这是什么
 
@@ -31,10 +31,11 @@ AI 领域的重要消息经常先出现在 X 上。这个项目的目标不是�
 | 能力 | 说明 |
 | --- | --- |
 | 监听公开 X 账号 | 维护一个账号列表，定时检测新帖 |
-| 防止历史消息轰炸 | 首次接入账号时建立基线，不补发旧帖 |
+| 监听 RSS/Atom 订阅源 | 添加官方博客、媒体、Newsletter 等 feed URL，与 X 账号统一管理 |
+| 防止历史消息轰炸 | 首次接入来源时建立基线，不补发旧帖 |
 | 飞书群通知 | 支持多个飞书自定义机器人 Webhook |
-| 本地 Web 控制台 | 管理账号、查看消息、查看轮询/发送历史、调整配置 |
-| SQLite 持久化 | 本地保存账号、帖子、投递事件、运行配置 |
+| 本地 Web 控制台 | 管理订阅源、查看消息、查看轮询/发送历史、调整配置 |
+| SQLite 持久化 | 本地保存订阅源、帖子、投递事件、运行配置 |
 | 浏览器数据源 | 支持代理、匿名抓取测试、登录态检查 |
 
 ## 项目边界
@@ -56,7 +57,7 @@ AI 领域的重要消息经常先出现在 X 上。这个项目的目标不是�
 | 模块 | 页面 | 功能 |
 | --- | --- | --- |
 | 总览 | `/` | 查看运行摘要、手动轮询、手动发送 |
-| 监听账号 | `/accounts` | 查询、分页、新增、删除监听账号 |
+| 监听源 | `/accounts` | 查询、分页、新增、删除 X 账号与 RSS 源 |
 | 消息内容 | `/posts` | 查看已轮询到的帖子、筛选、详情抽屉、自动刷新 |
 | 最近轮询 | `/poll-runs` | 查询、分页、删除、批量删除、清空历史、查看错误 |
 | 最近发送 | `/delivery-events` | 查询、分页、删除、批量删除、清空历史 |
@@ -66,7 +67,8 @@ AI 领域的重要消息经常先出现在 X 上。这个项目的目标不是�
 
 ```mermaid
 flowchart LR
-  X["X public pages / API"] --> Source["SourceProvider"]
+  X["X public pages / API"] --> Source["SourceProvider (x / rss)"]
+  RSS["RSS / Atom feeds"] --> Source
   Source --> Polling["Polling Orchestrator"]
   Polling --> SQLite["SQLite + Prisma"]
   SQLite --> Delivery["Delivery Worker"]
@@ -109,7 +111,7 @@ http://127.0.0.1:3000/
 | --- | --- | --- |
 | 1 | `/settings` -> 飞书配置 | 添加飞书群自定义机器人 Webhook |
 | 2 | `/settings` -> X 数据源 | 配置代理或运行匿名抓取测试 |
-| 3 | `/accounts` | 添加监听账号，例如 `openai` 或 `@openai` |
+| 3 | `/accounts` | 添加监听源：X 账号（例如 `openai` 或 `@openai`）或 RSS 源（例如 `https://openai.com/blog/rss.xml`） |
 | 4 | `/` | 手动触发轮询和发送，确认链路可用 |
 
 ## 初始化
@@ -195,7 +197,7 @@ npm run dev
 | `PORT` | `3000` | 服务端口 |
 | `REDIS_URL` | `redis://127.0.0.1:1` | 就绪检查使用；本地核心功能不强依赖 |
 | `FEISHU_WEBHOOK_URL` | 空 | 可选启动种子，推荐在 Web 控制台配置 |
-| `WATCH_ACCOUNTS_SOURCE` | `database` | 监听账号来源，推荐保持数据库 |
+| `WATCH_ACCOUNTS_SOURCE` | `database` | X 账号启动种子来源，推荐保持数据库 |
 | `POLL_INTERVAL_SECONDS` | `300` | 轮询间隔，也可在 Web 控制台修改 |
 | `FETCH_LIMIT_PER_ACCOUNT` | `5` | 每账号单次抓取数量 |
 | `EXCLUDE_REPLIES` | `true` | 默认排除回复 |
@@ -214,6 +216,7 @@ npm run dev
 | `X_BROWSER_POST_LOAD_TIMEOUT_MS` | `15000` | 帖子加载等待时间 |
 | `X_API_BASE_URL` | 空 | API 模式使用 |
 | `X_API_BEARER_TOKEN` | 空 | API 模式使用 |
+| `RSS_PROXY_URL` | 空 | RSS 抓取代理（仅 http/https），可在 Web 控制台 RSS 源中覆盖 |
 
 真实的飞书 Webhook、代理认证信息、Token、Cookie、浏览器 profile 都不应该提交到 Git。
 
@@ -285,6 +288,25 @@ X_API_BASE_URL=https://api.x.com
 X_API_BEARER_TOKEN=replace-with-real-token
 ```
 
+## RSS 订阅源
+
+在 `/accounts` 页面把新增类型切换为 `RSS 源`，填入 feed URL 即可添加（仅支持 http/https 绝对地址）。列表展示来源类型、feed 标题与最近轮询状态。
+
+| 项 | 说明 |
+| --- | --- |
+| Feed 格式 | RSS 2.0、Atom；RSS 1.0 / RDF 尽力支持 |
+| 抓取方式 | 直接 HTTP GET，30 秒超时，固定 User-Agent，跟随跳转 |
+| 内容范围 | 只使用 feed 提供的 title / description / content，不抓取全文 |
+| HTML 处理 | 去标签并解码常见实体，正文截断到 4000 字 |
+| 日期 | 使用 pubDate / published / updated；缺失时回退为抓取时刻 |
+| 去重 | 稳定去重键（feed URL + guid/link 的哈希）；缺日期条目跨轮不会重复入库 |
+| 代理 | 支持 `RSS_PROXY_URL` 或在 `/settings -> RSS 源` 配置 http/https 代理 |
+| 错误处理 | 404/410 → 源不存在；其他非 2xx → 请求失败；解析失败 → 内容无效；单个源失败不影响其他源 |
+
+RSS 与 X 走同一条基线 / 增量 / 去重 / 入库 / 投递链路：首次接入只建立基线（最新 1 条），之后只入库新条目；有启用的飞书 Webhook 时同步创建投递事件。
+
+需要出网代理时，在 `/settings -> RSS 源` 保存代理（优先级：Web 控制台 > `.env` 的 `RSS_PROXY_URL`）。仅支持 `http://` 与 `https://`，不支持 `socks5://`。
+
 ## 常用命令
 
 | 命令 | 用途 |
@@ -345,6 +367,18 @@ npm run playwright:install
 </details>
 
 <details>
+<summary><strong>新增 RSS 源失败怎么办？</strong></summary>
+
+按错误提示区分处理：
+
+- 源不存在（feed 返回 404/410）：确认 URL 是否可公开访问。
+- 网络请求失败：检查本机网络、服务器出口或目标站点可达性。
+- 内容无法解析：确认地址返回的是 RSS/Atom XML，而不是网页或 JSON。
+- URL 无效：必须是完整的 `http://` 或 `https://` 地址。
+
+</details>
+
+<details>
 <summary><strong>飞书没有收到消息怎么办？</strong></summary>
 
 检查：
@@ -369,7 +403,7 @@ src/app                 Fastify app 组装
 src/config              运行时配置加载
 src/modules/api         HTTP API 和本地管理 API
 src/modules/delivery    飞书发送、worker、retry
-src/modules/polling     X 数据源、轮询编排
+src/modules/polling     X / RSS 数据源、轮询编排
 src/modules/scheduler   本地运行时调度器
 src/modules/storage     Prisma storage 和 repository
 web/admin               Vue 本地管理前端

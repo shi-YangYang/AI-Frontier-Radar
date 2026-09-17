@@ -8,6 +8,9 @@ export {
 export type { BrowserXProxySettings, BrowserXSourceProviderOptions } from './browser-x-source-provider';
 export { createXSourceProvider, XSourceProvider } from './x-source-provider';
 export type { XSourceProviderOptions } from './x-source-provider';
+export { createRssSourceProvider, RssSourceProvider } from './rss-source-provider';
+export type { RssSourceProviderOptions } from './rss-source-provider';
+export { createSourceProviderRegistry } from './source-provider-registry';
 export { XTimelineClient } from './x-timeline-client';
 export type { XResolvedAccount, XTimelineClientOptions } from './x-timeline-client';
 export {

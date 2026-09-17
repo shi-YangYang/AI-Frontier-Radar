@@ -20,6 +20,7 @@ export class XPostRepository {
         authorUserId: input.authorUserId ?? null,
         authorUsername: input.authorUsername,
         createdAt,
+        dedupeKey: input.dedupeKey ?? null,
         detectedAt: input.detectedAt ?? createdAt,
         id: input.id ?? createDatabaseId(),
         isReply: input.isReply ?? false,
@@ -54,6 +55,14 @@ export class XPostRepository {
   public async findByXPostId(xPostId: string): Promise<XPostRaw | null> {
     const xPost = await this.prisma.xPostRaw.findUnique({
       where: { xPostId },
+    });
+
+    return xPost === null ? null : mapXPostRaw(xPost);
+  }
+
+  public async findByDedupeKey(dedupeKey: string): Promise<XPostRaw | null> {
+    const xPost = await this.prisma.xPostRaw.findUnique({
+      where: { dedupeKey },
     });
 
     return xPost === null ? null : mapXPostRaw(xPost);
@@ -132,6 +141,7 @@ export class XPostRepository {
         authorUserId: input.authorUserId ?? null,
         authorUsername: input.authorUsername,
         createdAt,
+        dedupeKey: input.dedupeKey ?? null,
         detectedAt: input.detectedAt ?? createdAt,
         id: input.id ?? createDatabaseId(),
         isReply: input.isReply ?? false,
@@ -157,6 +167,7 @@ function mapXPostRaw(xPost: Prisma.XPostRawGetPayload<Record<string, never>>): X
     authorUserId: xPost.authorUserId,
     authorUsername: xPost.authorUsername,
     createdAt: xPost.createdAt,
+    dedupeKey: xPost.dedupeKey,
     detectedAt: xPost.detectedAt,
     id: xPost.id,
     isReply: xPost.isReply,

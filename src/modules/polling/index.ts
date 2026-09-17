@@ -1,7 +1,10 @@
 export {
   BrowserXSourceProvider,
   createBrowserXSourceProvider,
+  createRssSourceProvider,
+  createSourceProviderRegistry,
   parseXTimelineFromPage,
+  RssSourceProvider,
   SourceProviderError,
   createXSourceProvider,
   XSourceProvider,
@@ -9,11 +12,13 @@ export {
 } from './source/index';
 export type {
   BrowserXSourceProviderOptions,
+  RssSourceProviderOptions,
   XResolvedAccount,
   XSourceProviderOptions,
   XTimelineClientOptions,
 } from './source/index';
 export type {
+  SourceDescriptor,
   SourceProvider,
   SourceProviderAccount,
   SourceProviderErrorCode,
@@ -21,7 +26,9 @@ export type {
   SourceProviderFetchInput,
   SourceProviderFetchMeta,
   SourceProviderFetchResult,
-  SourceProviderValidateAccountInput,
+  SourceProviderRegistry,
+  SourceProviderValidateSourceInput,
+  SourceType,
   StandardizedPost,
 } from './types/index';
 export { PollingAccountService } from './services/index';

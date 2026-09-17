@@ -63,6 +63,16 @@ export interface SaveXBrowserSettingsInput {
   proxyUrl?: string;
 }
 
+export interface RuntimeRssSettings {
+  proxyConfigured: boolean;
+  proxyPreview: string | null;
+  proxySource: RuntimeSettingSource;
+}
+
+export interface SaveRssSettingsInput {
+  proxyUrl: string;
+}
+
 export interface SavePollingSettingsInput {
   excludeReplies: boolean;
   excludeReposts: boolean;
@@ -94,14 +104,17 @@ const POLLING_SETTING_KEYS = [
 ];
 const X_BROWSER_SETTING_KEYS = [X_BROWSER_HEADLESS_KEY, X_BROWSER_PROXY_URL_KEY];
 const X_BROWSER_PROXY_PROTOCOLS = ['http:', 'https:', 'socks5:'] as const;
+const RSS_PROXY_URL_KEY = 'source.rss.proxyUrl';
+const RSS_PROXY_PROTOCOLS = ['http:', 'https:'] as const;
 
 export class RuntimeSettingsService {
   public constructor(private readonly options: RuntimeSettingsServiceOptions) {}
 
   public async getEffectiveAppConfig(): Promise<AppConfig> {
-    const [polling, browser] = await Promise.all([
+    const [polling, browser, rss] = await Promise.all([
       this.getEffectivePollingSettings(),
       this.getEffectiveXBrowserSettings(),
+      this.getEffectiveRssProxySettings(),
     ]);
 
     return {
@@ -114,12 +127,53 @@ export class RuntimeSettingsService {
       },
       source: {
         ...this.options.config.source,
+        rss: rss.proxyUrl === undefined ? {} : { proxyUrl: rss.proxyUrl },
         x: {
           ...this.options.config.source.x,
           browser: toEffectiveBrowserConfig(browser),
         },
       },
     };
+  }
+
+  public async getEffectiveRssProxySettings(): Promise<{
+    proxySource: RuntimeSettingSource;
+    proxyUrl?: string;
+  }> {
+    const values = await this.options.storage.appSettings.getManyJson([RSS_PROXY_URL_KEY]);
+    const resolved = resolveProxyUrlSetting(
+      values,
+      RSS_PROXY_URL_KEY,
+      this.options.config.source.rss?.proxyUrl,
+      RSS_PROXY_PROTOCOLS,
+    );
+
+    return {
+      ...(resolved.proxyUrl === undefined ? {} : { proxyUrl: resolved.proxyUrl }),
+      proxySource: resolved.source,
+    };
+  }
+
+  public async getRssSettings(): Promise<RuntimeRssSettings> {
+    const settings = await this.getEffectiveRssProxySettings();
+
+    return {
+      proxyConfigured: settings.proxyUrl !== undefined,
+      proxyPreview: previewProxyUrl(settings.proxyUrl),
+      proxySource: settings.proxySource,
+    };
+  }
+
+  public async saveRssSettings(input: SaveRssSettingsInput): Promise<RuntimeRssSettings> {
+    const proxyUrl = normalizeOptionalProxyUrl(input.proxyUrl, RSS_PROXY_PROTOCOLS);
+
+    if (proxyUrl === undefined) {
+      await this.options.storage.appSettings.deleteByKey(RSS_PROXY_URL_KEY);
+    } else {
+      await this.options.storage.appSettings.setJson(RSS_PROXY_URL_KEY, proxyUrl);
+    }
+
+    return this.getRssSettings();
   }
 
   public async getEffectiveXBrowserSettings(): Promise<RuntimeXBrowserEffectiveSettings> {
@@ -360,6 +414,7 @@ function resolveProxyUrlSetting(
   values: Record<string, unknown>,
   key: string,
   defaultValue: string | undefined,
+  protocols: readonly string[] = X_BROWSER_PROXY_PROTOCOLS,
 ): { proxyUrl?: string; source: RuntimeSettingSource } {
   if (!hasSetting(values, key) || values[key] === null) {
     return defaultValue === undefined
@@ -373,7 +428,7 @@ function resolveProxyUrlSetting(
     throw new Error(`App setting "${key}" must be a string or null.`);
   }
 
-  const proxyUrl = normalizeOptionalProxyUrl(value);
+  const proxyUrl = normalizeOptionalProxyUrl(value, protocols);
 
   if (proxyUrl === undefined) {
     return defaultValue === undefined
@@ -387,7 +442,10 @@ function resolveProxyUrlSetting(
   };
 }
 
-function normalizeOptionalProxyUrl(rawValue: string): string | undefined {
+function normalizeOptionalProxyUrl(
+  rawValue: string,
+  protocols: readonly string[] = X_BROWSER_PROXY_PROTOCOLS,
+): string | undefined {
   const value = rawValue.trim();
 
   if (value.length === 0) {
@@ -402,10 +460,8 @@ function normalizeOptionalProxyUrl(rawValue: string): string | undefined {
     throw new Error('Proxy URL must be a valid URL.');
   }
 
-  if (!X_BROWSER_PROXY_PROTOCOLS.includes(url.protocol as typeof X_BROWSER_PROXY_PROTOCOLS[number])) {
-    throw new Error(
-      `Proxy URL must use one of these protocols: ${X_BROWSER_PROXY_PROTOCOLS.join(', ')}.`,
-    );
+  if (!protocols.includes(url.protocol)) {
+    throw new Error(`Proxy URL must use one of these protocols: ${protocols.join(', ')}.`);
   }
 
   return url.toString();

@@ -3,7 +3,7 @@ import type {
   SourceProviderAccount,
   SourceProviderFetchInput,
   SourceProviderFetchResult,
-  SourceProviderValidateAccountInput,
+  SourceProviderValidateSourceInput,
   StandardizedPost,
 } from '../types';
 import type { XApiTimelineResponse, XApiTweet } from '../types/x-api';
@@ -13,6 +13,7 @@ import { XTimelineClient, type XTimelineClientOptions } from './x-timeline-clien
 export interface XSourceProviderOptions extends XTimelineClientOptions {}
 
 export class XSourceProvider implements SourceProvider {
+  public readonly sourceType = 'x' as const;
   private readonly timelineClient: XTimelineClient;
 
   public constructor(options: XSourceProviderOptions) {
@@ -23,8 +24,8 @@ export class XSourceProvider implements SourceProvider {
     validateFetchInput(input);
 
     const account = await this.timelineClient.resolveAccount({
-      xUserId: input.xUserId,
-      xUsername: input.xUsername,
+      xUserId: input.source.xUserId,
+      xUsername: input.source.xUsername,
     });
     const timelineResponse = await this.timelineClient.fetchTimeline({
       limit: input.limit,
@@ -34,8 +35,8 @@ export class XSourceProvider implements SourceProvider {
     });
     const standardizedAccount: SourceProviderAccount = {
       displayName: account.displayName,
-      xUserId: account.xUserId,
-      xUsername: account.xUsername,
+      sourceId: account.xUserId,
+      sourceLabel: account.xUsername,
     };
     const posts = normalizeTimelinePosts(timelineResponse, standardizedAccount);
 
@@ -53,19 +54,19 @@ export class XSourceProvider implements SourceProvider {
     };
   }
 
-  public async validateAccount(
-    input: SourceProviderValidateAccountInput,
+  public async validateSource(
+    input: SourceProviderValidateSourceInput,
   ): Promise<SourceProviderAccount> {
-    validateAccountInput(input);
+    validateSourceInput(input);
 
     const account = await this.timelineClient.resolveAccount({
-      xUsername: input.xUsername,
+      xUsername: input.source.xUsername,
     });
 
     return {
       displayName: account.displayName,
-      xUserId: account.xUserId,
-      xUsername: account.xUsername,
+      sourceId: account.xUserId,
+      sourceLabel: account.xUsername,
     };
   }
 }
@@ -75,7 +76,7 @@ export function createXSourceProvider(options: XSourceProviderOptions): SourcePr
 }
 
 function validateFetchInput(input: SourceProviderFetchInput): void {
-  if (!isPresent(input.xUsername) && !isPresent(input.xUserId)) {
+  if (!isPresent(input.source.xUsername) && !isPresent(input.source.xUserId)) {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
       'SourceProvider requires xUsername or xUserId.',
@@ -84,8 +85,8 @@ function validateFetchInput(input: SourceProviderFetchInput): void {
         operation: 'resolve-account',
         provider: 'x',
         sincePostId: input.sincePostId,
-        xUserId: input.xUserId,
-        xUsername: input.xUsername,
+        xUserId: input.source.xUserId,
+        xUsername: input.source.xUsername,
       },
     );
   }
@@ -99,22 +100,22 @@ function validateFetchInput(input: SourceProviderFetchInput): void {
         operation: 'fetch-timeline',
         provider: 'x',
         sincePostId: input.sincePostId,
-        xUserId: input.xUserId,
-        xUsername: input.xUsername,
+        xUserId: input.source.xUserId,
+        xUsername: input.source.xUsername,
       },
     );
   }
 }
 
-function validateAccountInput(input: SourceProviderValidateAccountInput): void {
-  if (!isPresent(input.xUsername)) {
+function validateSourceInput(input: SourceProviderValidateSourceInput): void {
+  if (!isPresent(input.source.xUsername)) {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
       'SourceProvider requires xUsername.',
       {
         operation: 'resolve-account',
         provider: 'x',
-        xUsername: input.xUsername,
+        xUsername: input.source.xUsername,
       },
     );
   }
@@ -139,8 +140,8 @@ function normalizeTweet(tweet: XApiTweet, account: SourceProviderAccount): Stand
       {
         operation: 'fetch-timeline',
         provider: 'x',
-        xUserId: account.xUserId,
-        xUsername: account.xUsername,
+        xUserId: account.sourceId,
+        xUsername: account.sourceLabel,
       },
     );
   }
@@ -149,7 +150,7 @@ function normalizeTweet(tweet: XApiTweet, account: SourceProviderAccount): Stand
     author: account,
     isReply: hasReferenceType(tweet, 'replied_to'),
     isRepost: hasReferenceType(tweet, 'retweeted'),
-    permalinkUrl: `https://x.com/${account.xUsername}/status/${tweet.id}`,
+    permalinkUrl: `https://x.com/${account.sourceLabel}/status/${tweet.id}`,
     postedAt: tweet.created_at,
     rawPayload: tweet,
     textContent: tweet.text,

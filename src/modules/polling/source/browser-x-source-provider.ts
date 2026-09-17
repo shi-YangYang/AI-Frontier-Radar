@@ -5,7 +5,7 @@ import type {
   SourceProviderAccount,
   SourceProviderFetchInput,
   SourceProviderFetchResult,
-  SourceProviderValidateAccountInput,
+  SourceProviderValidateSourceInput,
   StandardizedPost,
 } from '../types';
 import { SourceProviderError } from './source-provider-error';
@@ -38,12 +38,6 @@ interface BrowserXParsedPost {
   xPostId: string;
 }
 
-interface BrowserXResolvedAccount {
-  displayName?: string;
-  xUserId: string;
-  xUsername: string;
-}
-
 const DEFAULT_BASE_URL = 'https://x.com';
 const DEFAULT_POST_LOAD_TIMEOUT_MS = 15_000;
 const DEFAULT_NAVIGATION_TIMEOUT_MS = 30_000;
@@ -64,6 +58,7 @@ const CDP_ARCHITECTURE_BY_CPU: Record<string, string> = {
 };
 
 export class BrowserXSourceProvider implements SourceProvider {
+  public readonly sourceType = 'x' as const;
   private readonly baseUrl: string;
   private readonly headless: boolean;
   private readonly navigationTimeoutMs: number;
@@ -87,17 +82,17 @@ export class BrowserXSourceProvider implements SourceProvider {
     return this.runBrowserOperation(() => this.fetchPostsExclusive(input));
   }
 
-  public async validateAccount(
-    input: SourceProviderValidateAccountInput,
+  public async validateSource(
+    input: SourceProviderValidateSourceInput,
   ): Promise<SourceProviderAccount> {
-    return this.runBrowserOperation(() => this.validateAccountExclusive(input));
+    return this.runBrowserOperation(() => this.validateSourceExclusive(input));
   }
 
   private async fetchPostsExclusive(
     input: SourceProviderFetchInput,
   ): Promise<SourceProviderFetchResult> {
 
-    const xUsername = normalizeUsername(input.xUsername);
+    const xUsername = normalizeUsername(input.source.xUsername);
     if (xUsername === undefined) {
       throw new SourceProviderError(
         'SOURCE_INVALID_INPUT',
@@ -164,10 +159,10 @@ export class BrowserXSourceProvider implements SourceProvider {
     }
   }
 
-  private async validateAccountExclusive(
-    input: SourceProviderValidateAccountInput,
+  private async validateSourceExclusive(
+    input: SourceProviderValidateSourceInput,
   ): Promise<SourceProviderAccount> {
-    const xUsername = normalizeUsername(input.xUsername);
+    const xUsername = normalizeUsername(input.source.xUsername);
     if (xUsername === undefined) {
       throw new SourceProviderError(
         'SOURCE_INVALID_INPUT',
@@ -452,7 +447,7 @@ export async function parseXTimelineFromPage(
 }
 
 function validateBrowserFetchInput(input: SourceProviderFetchInput): void {
-  if (!isPresent(input.xUsername)) {
+  if (!isPresent(input.source.xUsername)) {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
       'BrowserXSourceProvider requires xUsername.',
@@ -472,7 +467,7 @@ function validateBrowserFetchInput(input: SourceProviderFetchInput): void {
 async function waitForProfileOrKnownFailure(
   page: Page,
   options: {
-    input: SourceProviderFetchInput | SourceProviderValidateAccountInput;
+    input: SourceProviderFetchInput | SourceProviderValidateSourceInput;
     operation: 'fetch-timeline' | 'resolve-account';
     postLoadTimeoutMs: number;
     profileUrl: string;
@@ -553,7 +548,7 @@ async function expandCollapsedPosts(page: Page): Promise<void> {
 
 function classifyBrowserPageError(
   pageText: string,
-  input: SourceProviderFetchInput | SourceProviderValidateAccountInput,
+  input: SourceProviderFetchInput | SourceProviderValidateSourceInput,
   context: {
     cause: unknown;
     endpoint: string;
@@ -601,19 +596,19 @@ function classifyBrowserPageError(
 
 async function resolveAccountFromPage(
   page: Page,
-  input: SourceProviderFetchInput | SourceProviderValidateAccountInput,
+  input: SourceProviderFetchInput | SourceProviderValidateSourceInput,
   xUsername: string,
-): Promise<BrowserXResolvedAccount> {
+): Promise<SourceProviderAccount> {
   const displayName = await resolveDisplayNameFromPage(page, xUsername);
   const xUserId =
-    ('xUserId' in input ? input.xUserId : undefined) ??
+    input.source.xUserId ??
     (await findXUserIdInPageScripts(page, xUsername)) ??
     `x:${xUsername}`;
 
   return {
     displayName,
-    xUserId,
-    xUsername,
+    sourceId: xUserId,
+    sourceLabel: xUsername,
   };
 }
 
@@ -681,7 +676,7 @@ function normalizeParsedPosts(
       continue;
     }
 
-    if (parsedPost.authorUsername.toLowerCase() !== account.xUsername.toLowerCase()) {
+    if (parsedPost.authorUsername.toLowerCase() !== account.sourceLabel.toLowerCase()) {
       continue;
     }
 
@@ -693,11 +688,7 @@ function normalizeParsedPosts(
 
     seenPostIds.add(parsedPost.xPostId);
     posts.push({
-      author: {
-        displayName: account.displayName,
-        xUserId: account.xUserId,
-        xUsername: account.xUsername,
-      },
+      author: account,
       isReply: parsedPost.isReply,
       isRepost: parsedPost.isRepost,
       permalinkUrl: parsedPost.permalinkUrl,
@@ -720,7 +711,7 @@ async function getBodyText(page: Page): Promise<string> {
 }
 
 function buildDiagnostics(
-  input: SourceProviderFetchInput | SourceProviderValidateAccountInput,
+  input: SourceProviderFetchInput | SourceProviderValidateSourceInput,
   operation: 'fetch-timeline' | 'resolve-account',
   extra: Partial<{
     causeMessage: string;
@@ -740,8 +731,8 @@ function buildDiagnostics(
     responseBodySnippet: extra.responseBodySnippet,
     sincePostId: 'sincePostId' in input ? input.sincePostId : undefined,
     statusCode: extra.statusCode,
-    xUserId: extra.xUserId ?? ('xUserId' in input ? input.xUserId : undefined),
-    xUsername: extra.xUsername ?? input.xUsername,
+    xUserId: extra.xUserId ?? input.source.xUserId,
+    xUsername: extra.xUsername ?? input.source.xUsername,
   };
 }
 

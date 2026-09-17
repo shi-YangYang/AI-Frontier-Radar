@@ -1,13 +1,23 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 
 import { createDatabaseId, createTimestamp } from './database';
-import type { CreateWatchAccountInput, UpdateWatchAccountInput, WatchAccount } from './types';
+import type {
+  CreateWatchAccountInput,
+  UpdateWatchAccountInput,
+  WatchAccount,
+  WatchAccountSourceType,
+} from './types';
+
+interface WatchAccountSourceKey {
+  sourceType: WatchAccountSourceType;
+  sourceUrl: string;
+}
 
 export class WatchAccountRepository {
   public constructor(private readonly prisma: PrismaClient) {}
 
   public async createIfAbsentByUsername(
-    input: CreateWatchAccountInput,
+    input: CreateWatchAccountInput & { xUsername: string },
   ): Promise<{ created: boolean; watchAccount: WatchAccount }> {
     try {
       const watchAccount = await this.create(input);
@@ -35,6 +45,35 @@ export class WatchAccountRepository {
     }
   }
 
+  public async createIfAbsentBySource(
+    input: CreateWatchAccountInput & WatchAccountSourceKey,
+  ): Promise<{ created: boolean; watchAccount: WatchAccount }> {
+    try {
+      const watchAccount = await this.create(input);
+
+      return {
+        created: true,
+        watchAccount,
+      };
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const existingWatchAccount = await this.findBySource(input);
+
+        if (existingWatchAccount !== null) {
+          return {
+            created: false,
+            watchAccount: existingWatchAccount,
+          };
+        }
+      }
+
+      throw error;
+    }
+  }
+
   public async create(input: CreateWatchAccountInput): Promise<WatchAccount> {
     const now = createTimestamp();
 
@@ -49,9 +88,11 @@ export class WatchAccountRepository {
         lastPolledAt: input.lastPolledAt ?? null,
         lastPollStatus: input.lastPollStatus ?? null,
         lastSeenPostId: input.lastSeenPostId ?? null,
+        sourceType: input.sourceType ?? 'x',
+        sourceUrl: input.sourceUrl ?? null,
         updatedAt: now,
         xUserId: input.xUserId ?? null,
-        xUsername: normalizeXUsername(input.xUsername),
+        xUsername: normalizeOptionalXUsername(input.xUsername),
       },
     });
 
@@ -69,6 +110,19 @@ export class WatchAccountRepository {
   public async findById(id: string): Promise<WatchAccount | null> {
     const watchAccount = await this.prisma.watchAccount.findUnique({
       where: { id },
+    });
+
+    return watchAccount === null ? null : mapWatchAccount(watchAccount);
+  }
+
+  public async findBySource(input: WatchAccountSourceKey): Promise<WatchAccount | null> {
+    const watchAccount = await this.prisma.watchAccount.findUnique({
+      where: {
+        sourceType_sourceUrl: {
+          sourceType: input.sourceType,
+          sourceUrl: input.sourceUrl,
+        },
+      },
     });
 
     return watchAccount === null ? null : mapWatchAccount(watchAccount);
@@ -128,6 +182,7 @@ export class WatchAccountRepository {
         updatedAt: createTimestamp(),
       },
       where: {
+        sourceType: 'x',
         xUsername: {
           notIn: normalizedUsernames,
         },
@@ -159,7 +214,9 @@ export class WatchAccountRepository {
     return this.findById(id);
   }
 
-  public async upsertByUsername(input: CreateWatchAccountInput): Promise<WatchAccount> {
+  public async upsertByUsername(
+    input: CreateWatchAccountInput & { xUsername: string },
+  ): Promise<WatchAccount> {
     const now = createTimestamp();
     const watchAccount = await this.prisma.watchAccount.upsert({
       create: {
@@ -172,6 +229,8 @@ export class WatchAccountRepository {
         lastPolledAt: input.lastPolledAt ?? null,
         lastPollStatus: input.lastPollStatus ?? null,
         lastSeenPostId: input.lastSeenPostId ?? null,
+        sourceType: 'x',
+        sourceUrl: null,
         updatedAt: now,
         xUserId: input.xUserId ?? null,
         xUsername: normalizeXUsername(input.xUsername),
@@ -189,23 +248,26 @@ export class WatchAccountRepository {
   }
 
   public async upsertSeedByUsername(
-    input: Pick<CreateWatchAccountInput, 'enabled' | 'xUsername'>,
+    input: { enabled?: boolean; xUsername: string },
   ): Promise<WatchAccount> {
     const now = createTimestamp();
+    const xUsername = normalizeXUsername(input.xUsername);
     const watchAccount = await this.prisma.watchAccount.upsert({
       create: {
         createdAt: now,
         enabled: input.enabled ?? true,
         id: createDatabaseId(),
+        sourceType: 'x',
+        sourceUrl: null,
         updatedAt: now,
-        xUsername: normalizeXUsername(input.xUsername),
+        xUsername,
       },
       update: {
         enabled: input.enabled ?? true,
         updatedAt: createTimestamp(),
       },
       where: {
-        xUsername: normalizeXUsername(input.xUsername),
+        xUsername,
       },
     });
 
@@ -226,6 +288,8 @@ function mapWatchAccount(
     lastPolledAt: watchAccount.lastPolledAt,
     lastPollStatus: watchAccount.lastPollStatus as WatchAccount['lastPollStatus'],
     lastSeenPostId: watchAccount.lastSeenPostId,
+    sourceType: watchAccount.sourceType as WatchAccount['sourceType'],
+    sourceUrl: watchAccount.sourceUrl,
     updatedAt: watchAccount.updatedAt,
     xUserId: watchAccount.xUserId,
     xUsername: watchAccount.xUsername,
@@ -234,6 +298,14 @@ function mapWatchAccount(
 
 export function normalizeXUsername(xUsername: string): string {
   return xUsername.trim().replace(/^@+/, '').toLowerCase();
+}
+
+function normalizeOptionalXUsername(xUsername: string | null | undefined): string | null {
+  if (xUsername === undefined || xUsername === null || xUsername.trim().length === 0) {
+    return null;
+  }
+
+  return normalizeXUsername(xUsername);
 }
 
 function toWatchAccountWhereInput(input: { query?: string }): Prisma.WatchAccountWhereInput {
@@ -252,6 +324,11 @@ function toWatchAccountWhereInput(input: { query?: string }): Prisma.WatchAccoun
       },
       {
         displayName: {
+          contains: query,
+        },
+      },
+      {
+        sourceUrl: {
           contains: query,
         },
       },

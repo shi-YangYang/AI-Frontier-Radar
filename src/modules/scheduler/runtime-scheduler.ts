@@ -3,10 +3,13 @@ import type { AppConfig } from '../../shared/config/types';
 import { runDeliveryWorkerJob, type DeliveryWorkerRunOnceResult } from '../delivery';
 import {
   createBrowserXSourceProvider,
+  createRssSourceProvider,
+  createSourceProviderRegistry,
   createXSourceProvider,
   runPollingJob,
   type PollingRunResult,
   type SourceProvider,
+  type SourceProviderRegistry,
 } from '../polling';
 import type { StorageContext } from '../storage';
 
@@ -18,7 +21,7 @@ export interface RuntimeSchedulerOptions {
   logger: AppLogger;
   pollingIntervalMs?: number;
   runtimeSettings?: RuntimeSettingsProvider;
-  sourceProvider?: SourceProvider;
+  sourceProviders?: SourceProviderRegistry;
   storage: StorageContext;
 }
 
@@ -47,7 +50,27 @@ export function createRuntimeScheduler(options: RuntimeSchedulerOptions): Runtim
   return new IntervalRuntimeScheduler(options);
 }
 
-export function createRuntimeSourceProvider(config: AppConfig): SourceProvider {
+export interface RuntimeSourceProviders {
+  rss: SourceProvider;
+  x: SourceProvider;
+}
+
+export function createRuntimeSourceProviders(config: AppConfig): RuntimeSourceProviders {
+  return {
+    rss: createRssSourceProvider({
+      ...(config.source.rss?.proxyUrl === undefined
+        ? {}
+        : { proxyUrl: config.source.rss.proxyUrl }),
+    }),
+    x: createRuntimeXSourceProvider(config),
+  };
+}
+
+export function createRuntimeSourceProviderRegistry(config: AppConfig): SourceProviderRegistry {
+  return createSourceProviderRegistry(createRuntimeSourceProviders(config));
+}
+
+function createRuntimeXSourceProvider(config: AppConfig): SourceProvider {
   if (config.source.mode === 'browser') {
     return createBrowserXSourceProvider({
       baseUrl: config.source.x.browser.baseUrl,
@@ -72,7 +95,7 @@ export function createRuntimeSourceProvider(config: AppConfig): SourceProvider {
 class IntervalRuntimeScheduler implements RuntimeScheduler {
   private readonly deliveryIntervalMs: number;
   private readonly logger: AppLogger;
-  private readonly sourceProvider?: SourceProvider;
+  private readonly sourceProviders?: SourceProviderRegistry;
   private deliveryInterval: TimerHandle | null = null;
   private deliveryRunPromise: Promise<RuntimeSchedulerRunNowResult> | null = null;
   private pollingInterval: TimerHandle | null = null;
@@ -85,7 +108,7 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
     this.pollingIntervalMs =
       options.pollingIntervalMs ?? options.config.polling.intervalSeconds * 1_000;
     this.deliveryIntervalMs = options.deliveryIntervalMs ?? DEFAULT_DELIVERY_INTERVAL_MS;
-    this.sourceProvider = options.sourceProvider;
+    this.sourceProviders = options.sourceProviders;
   }
 
   public start(): void {
@@ -249,11 +272,12 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
         this.options.runtimeSettings === undefined
           ? this.options.config
           : await this.options.runtimeSettings.getEffectiveAppConfig();
-      const sourceProvider = this.sourceProvider ?? createRuntimeSourceProvider(config);
+      const sourceProviders =
+        this.sourceProviders ?? createRuntimeSourceProviderRegistry(config);
       const result = await runPollingJob({
         config,
         logger: this.options.logger,
-        sourceProvider,
+        sourceProviders,
         storage: this.options.storage,
       });
 

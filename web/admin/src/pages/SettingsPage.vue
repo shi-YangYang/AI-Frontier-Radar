@@ -414,6 +414,63 @@
           </article>
         </section>
 
+        <section v-else-if="activeSettingsTab === 'rss'" class="settings-layout single-column">
+          <article class="panel settings-wide">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.rss.summaryTitle') }}</h2>
+                <p>{{ t('settings.rss.summaryDescription') }}</p>
+              </div>
+            </header>
+            <dl class="detail-list">
+              <div>
+                <dt>{{ t('settings.rss.proxyPreview') }}</dt>
+                <dd>
+                  <code class="wrap">
+                    {{ rssSettings?.proxyPreview ?? t('settings.rss.proxyNotConfigured') }}
+                  </code>
+                  <span v-if="rssSettings !== null" class="muted">
+                    ({{ sourceLabel(rssSettings.proxySource) }})
+                  </span>
+                </dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="panel settings-form-panel">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.rss.proxyTitle') }}</h2>
+                <p>{{ t('settings.rss.proxyDescription') }}</p>
+              </div>
+            </header>
+
+            <form class="settings-form" @submit.prevent="saveRssProxy">
+              <label>
+                <span>{{ t('settings.rss.proxyUrlLabel') }}</span>
+                <input
+                  v-model="rssProxyForm.proxyUrl"
+                  autocomplete="off"
+                  inputmode="url"
+                  :placeholder="t('settings.rss.proxyUrlPlaceholder')"
+                />
+                <small>{{ t('settings.rss.proxyHelp') }}</small>
+              </label>
+              <div class="inline-alert">
+                {{ t('settings.rss.proxySecurityHint') }}
+              </div>
+              <div class="form-actions">
+                <button class="primary" type="submit" :disabled="busy">
+                  {{ t('settings.rss.saveProxy') }}
+                </button>
+                <button type="button" :disabled="busy" @click="clearRssProxy">
+                  {{ t('settings.rss.clearProxy') }}
+                </button>
+              </div>
+            </form>
+          </article>
+        </section>
+
         <section v-else class="settings-layout single-column">
           <article class="panel settings-form-panel">
             <header class="panel-header">
@@ -546,6 +603,7 @@ import {
   checkXSourceLogin,
   createDeliveryTarget,
   deleteDeliveryTarget,
+  getRssSettings,
   getSettings,
   getXSourceSettings,
   listDeliveryTargets,
@@ -554,11 +612,13 @@ import {
   testXSourceAnonymous,
   updateDeliveryTarget,
   updateDeliveryTargetEnabled,
+  updateRssSettings,
   updateXBrowserSettings,
   updatePollingSettings,
   type AdminPagination,
   type DeliveryTarget,
   type DeliveryTargetSummary,
+  type RuntimeRssSettings,
   type RuntimeSettingSource,
   type RuntimeSettingsSummary,
   type RuntimeXSourceSettings,
@@ -596,7 +656,7 @@ const xSourceSettings = ref<RuntimeXSourceSettings | null>(null);
 const anonymousCheckResult = ref<XSourceAnonymousCheckResult | null>(null);
 const loginCheckResult = ref<XSourceLoginCheckResult | null>(null);
 
-type SettingsTabKey = 'feishu' | 'polling' | 'xSource' | 'runtime';
+type SettingsTabKey = 'feishu' | 'polling' | 'rss' | 'xSource' | 'runtime';
 
 const activeSettingsTab = ref<SettingsTabKey>('feishu');
 const settingsTabs: Array<{ descriptionKey: MessageKey; key: SettingsTabKey; labelKey: MessageKey }> = [
@@ -614,6 +674,11 @@ const settingsTabs: Array<{ descriptionKey: MessageKey; key: SettingsTabKey; lab
     descriptionKey: 'settings.tabs.xSource.description',
     key: 'xSource',
     labelKey: 'settings.tabs.xSource.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.rss.description',
+    key: 'rss',
+    labelKey: 'settings.tabs.rss.label',
   },
   {
     descriptionKey: 'settings.tabs.runtime.description',
@@ -644,6 +709,12 @@ const xProxyForm = reactive({
   proxyUrl: '',
 });
 
+const rssSettings = ref<RuntimeRssSettings | null>(null);
+
+const rssProxyForm = reactive({
+  proxyUrl: '',
+});
+
 const xRunModeForm = reactive({
   mode: 'headless' as 'headless' | 'headed',
 });
@@ -663,13 +734,16 @@ async function loadSettings(options: { silent?: boolean } = {}): Promise<void> {
   busy.value = true;
 
   try {
-    const [loadedSettings, loadedXSourceSettings, loadedTargets] = await Promise.all([
-      getSettings(),
-      getXSourceSettings(),
-      listDeliveryTargets(toDeliveryTargetQuery(deliveryTargetPagination.value.page)),
-    ]);
+    const [loadedSettings, loadedXSourceSettings, loadedRssSettings, loadedTargets] =
+      await Promise.all([
+        getSettings(),
+        getXSourceSettings(),
+        getRssSettings(),
+        listDeliveryTargets(toDeliveryTargetQuery(deliveryTargetPagination.value.page)),
+      ]);
     applySettings(loadedSettings);
     applyXSourceSettings(loadedXSourceSettings);
+    applyRssSettings(loadedRssSettings);
     applyDeliveryTargets(loadedTargets);
 
     if (options.silent !== true) {
@@ -755,6 +829,37 @@ async function saveXProxy(): Promise<void> {
     setNotice(t('settings.notice.saveXProxySuccess'));
   } catch (error) {
     setNotice(t('settings.notice.saveXProxyFailure', { error: toErrorMessage(error) }), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function saveRssProxy(): Promise<void> {
+  busy.value = true;
+
+  try {
+    const settings = await updateRssSettings({
+      proxyUrl: rssProxyForm.proxyUrl.trim(),
+    });
+    applyRssSettings(settings);
+    rssProxyForm.proxyUrl = '';
+    setNotice(t('settings.notice.saveRssProxySuccess'));
+  } catch (error) {
+    setNotice(t('settings.notice.saveRssProxyFailure', { error: toErrorMessage(error) }), true);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function clearRssProxy(): Promise<void> {
+  busy.value = true;
+
+  try {
+    const settings = await updateRssSettings({ proxyUrl: '' });
+    applyRssSettings(settings);
+    setNotice(t('settings.notice.saveRssProxySuccess'));
+  } catch (error) {
+    setNotice(t('settings.notice.saveRssProxyFailure', { error: toErrorMessage(error) }), true);
   } finally {
     busy.value = false;
   }
@@ -989,6 +1094,10 @@ function applySettings(loadedSettings: RuntimeSettingsSummary): void {
   pollingForm.excludeReposts = loadedSettings.polling.excludeReposts;
   pollingForm.fetchLimitPerAccount = loadedSettings.polling.fetchLimitPerAccount;
   pollingForm.intervalSeconds = loadedSettings.polling.intervalSeconds;
+}
+
+function applyRssSettings(loadedRssSettings: RuntimeRssSettings): void {
+  rssSettings.value = loadedRssSettings;
 }
 
 function applyXSourceSettings(loadedXSourceSettings: RuntimeXSourceSettings): void {

@@ -1,7 +1,7 @@
 import type { AppLogger } from '../../../lib/logger';
 import { createTimestamp } from '../../storage/database';
 import type { StorageContext, WatchAccount } from '../../storage';
-import type { SourceProvider } from '../types';
+import type { SourceProviderRegistry } from '../types';
 import { PollingAccountService } from '../services';
 
 export interface PollingOrchestratorOptions {
@@ -11,7 +11,7 @@ export interface PollingOrchestratorOptions {
     excludeReposts?: boolean;
     fetchLimitPerAccount: number;
   };
-  sourceProvider: SourceProvider;
+  sourceProviders: SourceProviderRegistry;
   storage: Pick<
     StorageContext,
     'deliveryEvents' | 'deliveryTargets' | 'pollRuns' | 'watchAccounts' | 'xPosts'
@@ -22,9 +22,9 @@ export interface PollingAccountRunResult {
   error: string | null;
   eventsCreated: number;
   newPostsDetected: number;
+  sourceLabel: string;
   status: 'failed' | 'success';
   watchAccountId: string;
-  xUsername: string;
 }
 
 export interface PollingRunResult {
@@ -49,7 +49,7 @@ export class PollingOrchestrator {
       excludeReplies: options.polling.excludeReplies,
       excludeReposts: options.polling.excludeReposts,
       fetchLimitPerAccount: options.polling.fetchLimitPerAccount,
-      sourceProvider: options.sourceProvider,
+      sourceProviders: options.sourceProviders,
       xPosts: options.storage.xPosts,
     });
     this.logger = options.logger?.child({ module: 'polling-orchestrator' });
@@ -155,6 +155,8 @@ export class PollingOrchestrator {
     watchAccount: WatchAccount,
     deliveryTargets: Awaited<ReturnType<StorageContext['deliveryTargets']['listEnabled']>>,
   ): Promise<PollingAccountRunResult> {
+    const sourceLabel = toWatchAccountLabel(watchAccount);
+
     try {
       const result = await this.accountService.pollAccount(watchAccount, deliveryTargets);
       const updatedAccount = await this.options.storage.watchAccounts.update(watchAccount.id, {
@@ -164,20 +166,20 @@ export class PollingOrchestrator {
         lastPolledAt: createTimestamp(),
         lastPollStatus: 'success',
         lastSeenPostId: result.lastSeenPostId,
-        xUserId: result.resolvedXUserId,
+        xUserId: result.resolvedSourceId,
       });
 
       if (updatedAccount === null) {
-        throw new Error(`Watch account "${watchAccount.xUsername}" was not found during update.`);
+        throw new Error(`Watch account "${sourceLabel}" was not found during update.`);
       }
 
       return {
         error: null,
         eventsCreated: result.eventsCreated,
         newPostsDetected: result.newPostsDetected,
+        sourceLabel,
         status: 'success',
         watchAccountId: watchAccount.id,
-        xUsername: watchAccount.xUsername,
       };
     } catch (error) {
       const errorMessage = toErrorMessage(error);
@@ -191,8 +193,8 @@ export class PollingOrchestrator {
       this.logger?.warn(
         {
           err: error,
+          sourceLabel,
           watchAccountId: watchAccount.id,
-          xUsername: watchAccount.xUsername,
         },
         'Polling account failed.',
       );
@@ -201,9 +203,9 @@ export class PollingOrchestrator {
         error: errorMessage,
         eventsCreated: 0,
         newPostsDetected: 0,
+        sourceLabel,
         status: 'failed',
         watchAccountId: watchAccount.id,
-        xUsername: watchAccount.xUsername,
       };
     }
   }
@@ -234,8 +236,16 @@ function summarizeErrors(accountResults: PollingAccountRunResult[]): string | nu
   }
 
   return failedResults
-    .map((accountResult) => `${accountResult.xUsername}: ${accountResult.error}`)
+    .map((accountResult) => `${accountResult.sourceLabel}: ${accountResult.error}`)
     .join(' | ');
+}
+
+function toWatchAccountLabel(watchAccount: WatchAccount): string {
+  if (watchAccount.xUsername !== null) {
+    return `@${watchAccount.xUsername}`;
+  }
+
+  return watchAccount.sourceUrl ?? watchAccount.id;
 }
 
 function toErrorMessage(error: unknown): string {

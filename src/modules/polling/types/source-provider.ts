@@ -1,22 +1,31 @@
-export interface SourceProviderFetchInput {
-  limit: number;
-  sincePostId?: string;
+export type SourceType = 'rss' | 'x';
+
+export interface SourceDescriptor {
+  sourceType: SourceType;
+  sourceUrl?: string;
   xUserId?: string;
   xUsername?: string;
 }
 
-export interface SourceProviderValidateAccountInput {
-  xUsername: string;
+export interface SourceProviderFetchInput {
+  limit: number;
+  sincePostId?: string;
+  source: SourceDescriptor;
+}
+
+export interface SourceProviderValidateSourceInput {
+  source: SourceDescriptor;
 }
 
 export interface SourceProviderAccount {
   displayName?: string;
-  xUserId: string;
-  xUsername: string;
+  sourceId: string;
+  sourceLabel: string;
 }
 
 export interface StandardizedPost {
   author: SourceProviderAccount;
+  dedupeKey?: string;
   isReply: boolean;
   isRepost: boolean;
   permalinkUrl: string;
@@ -29,9 +38,9 @@ export interface StandardizedPost {
 export interface SourceProviderFetchMeta {
   newestPostId?: string;
   oldestPostId?: string;
-  provider: 'x';
+  provider: SourceType;
   requestedLimit: number;
-  resolvedBy: 'xUserId' | 'xUsername';
+  resolvedBy: 'sourceUrl' | 'xUserId' | 'xUsername';
   sincePostId?: string;
 }
 
@@ -42,8 +51,13 @@ export interface SourceProviderFetchResult {
 }
 
 export interface SourceProvider {
+  readonly sourceType: SourceType;
   fetchPosts(input: SourceProviderFetchInput): Promise<SourceProviderFetchResult>;
-  validateAccount(input: SourceProviderValidateAccountInput): Promise<SourceProviderAccount>;
+  validateSource(input: SourceProviderValidateSourceInput): Promise<SourceProviderAccount>;
+}
+
+export interface SourceProviderRegistry {
+  get(sourceType: SourceType): SourceProvider;
 }
 
 export type SourceProviderErrorCode =
@@ -59,9 +73,10 @@ export interface SourceProviderErrorDiagnostics {
   endpoint?: string;
   limit?: number;
   operation: 'fetch-timeline' | 'resolve-account';
-  provider: 'x';
+  provider: SourceType;
   responseBodySnippet?: string;
   sincePostId?: string;
+  sourceUrl?: string;
   statusCode?: number;
   xUserId?: string;
   xUsername?: string;
