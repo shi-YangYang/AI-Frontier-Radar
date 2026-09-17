@@ -2031,6 +2031,12 @@ tr:last-child td {
   display: grid;
   gap: 6px;
   min-width: 0;
+  flex: 1;
+}
+
+.source-group-row > button {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .source-group-info p {
