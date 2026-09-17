@@ -47,11 +47,15 @@ import {
 import { normalizeXUsername } from '../../storage/watch-account-repository';
 
 export type AdminWatchAccountValidationInput =
+  | { sourceType: 'ai2_blog'; sourceUrl: string }
   | { sourceType: 'anthropic_news'; sourceUrl: string }
   | { sourceType: 'github'; sourceUrl: string }
   | { sourceType: 'hf_papers'; sourceUrl: string }
+  | { sourceType: 'meta_ai_blog'; sourceUrl: string }
+  | { sourceType: 'moonshot_blog'; sourceUrl: string }
   | { sourceType: 'rss'; sourceUrl: string }
-  | { sourceType: 'x'; xUsername: string };
+  | { sourceType: 'x'; xUsername: string }
+  | { sourceType: 'xai_news'; sourceUrl: string };
 
 export interface AdminActions {
   runDeliveryWorkerNow?(options?: { recoverStartupState?: boolean; trigger?: string }): Promise<RuntimeSchedulerRunNowResult>;
@@ -179,7 +183,11 @@ export async function createAdminWatchAccount(
     input.sourceType === 'rss' ||
     input.sourceType === 'github' ||
     input.sourceType === 'hf_papers' ||
-    input.sourceType === 'anthropic_news'
+    input.sourceType === 'anthropic_news' ||
+    input.sourceType === 'ai2_blog' ||
+    input.sourceType === 'moonshot_blog' ||
+    input.sourceType === 'meta_ai_blog' ||
+    input.sourceType === 'xai_news'
   ) {
     const { created, watchAccount } = await options.storage.watchAccounts.createIfAbsentBySource({
       displayName: account.displayName ?? null,
@@ -1991,9 +1999,17 @@ function readCreateWatchAccountBody(body: unknown): AdminWatchAccountValidationI
     body.sourceType !== 'rss' &&
     body.sourceType !== 'github' &&
     body.sourceType !== 'hf_papers' &&
-    body.sourceType !== 'anthropic_news'
+    body.sourceType !== 'anthropic_news' &&
+    body.sourceType !== 'ai2_blog' &&
+    body.sourceType !== 'moonshot_blog' &&
+    body.sourceType !== 'meta_ai_blog' &&
+    body.sourceType !== 'xai_news'
   ) {
-    throw new AdminApiError(400, 'INVALID_REQUEST', 'sourceType 必须是 x、rss、github、hf_papers 或 anthropic_news。');
+    throw new AdminApiError(
+      400,
+      'INVALID_REQUEST',
+      'sourceType 必须是 x、rss、github、hf_papers、anthropic_news、ai2_blog、moonshot_blog、meta_ai_blog 或 xai_news。',
+    );
   }
 
   const sourceType = body.sourceType ?? 'x';
@@ -2002,7 +2018,11 @@ function readCreateWatchAccountBody(body: unknown): AdminWatchAccountValidationI
     sourceType === 'rss' ||
     sourceType === 'github' ||
     sourceType === 'hf_papers' ||
-    sourceType === 'anthropic_news'
+    sourceType === 'anthropic_news' ||
+    sourceType === 'ai2_blog' ||
+    sourceType === 'moonshot_blog' ||
+    sourceType === 'meta_ai_blog' ||
+    sourceType === 'xai_news'
   ) {
     return {
       sourceType,

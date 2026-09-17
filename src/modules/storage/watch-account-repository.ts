@@ -107,7 +107,15 @@ export class WatchAccountRepository {
       },
       where: {
         sourceType: {
-          in: ['github', 'hf_papers'],
+          in: [
+            'ai2_blog',
+            'anthropic_news',
+            'github',
+            'hf_papers',
+            'meta_ai_blog',
+            'moonshot_blog',
+            'xai_news',
+          ],
         },
       },
     });

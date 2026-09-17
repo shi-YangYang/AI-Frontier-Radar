@@ -13,7 +13,16 @@ export interface AdminErrorResponse {
 }
 
 export type WatchAccountPollStatus = 'failed' | 'pending' | 'success';
-export type WatchAccountSourceType = 'anthropic_news' | 'github' | 'hf_papers' | 'rss' | 'x';
+export type WatchAccountSourceType =
+  | 'ai2_blog'
+  | 'anthropic_news'
+  | 'github'
+  | 'hf_papers'
+  | 'meta_ai_blog'
+  | 'moonshot_blog'
+  | 'rss'
+  | 'x'
+  | 'xai_news';
 export type PollRunStatus = 'failed' | 'partial_failed' | 'running' | 'success';
 export type DeliveryEventStatus = 'dead' | 'failed' | 'pending' | 'retry_wait' | 'sending' | 'sent';
 export type PostBooleanFilter = 'all' | 'false' | 'true';
@@ -585,11 +594,15 @@ export async function listWatchAccounts(query?: WatchAccountPageQuery): Promise<
 }
 
 export type CreateWatchAccountInput =
+  | { sourceType: 'ai2_blog'; sourceUrl: string }
   | { sourceType: 'anthropic_news'; sourceUrl: string }
   | { sourceType: 'github'; sourceUrl: string }
+  | { sourceType: 'meta_ai_blog'; sourceUrl: string }
+  | { sourceType: 'moonshot_blog'; sourceUrl: string }
   | { sourceType: 'hf_papers'; sourceUrl: string }
   | { sourceType: 'rss'; sourceUrl: string }
-  | { sourceType: 'x'; xUsername: string };
+  | { sourceType: 'x'; xUsername: string }
+  | { sourceType: 'xai_news'; sourceUrl: string };
 
 export async function createWatchAccount(
   input: CreateWatchAccountInput,

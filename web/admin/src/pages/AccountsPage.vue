@@ -100,6 +100,18 @@
           <template v-else-if="sourceKind === 'anthropic'">
             <span class="muted source-add-inline-hint">{{ t('accounts.anthropicHint') }}</span>
           </template>
+          <template v-else-if="sourceKind === 'ai2'">
+            <span class="muted source-add-inline-hint">{{ t('accounts.ai2Hint') }}</span>
+          </template>
+          <template v-else-if="sourceKind === 'moonshot'">
+            <span class="muted source-add-inline-hint">{{ t('accounts.moonshotHint') }}</span>
+          </template>
+          <template v-else-if="sourceKind === 'meta'">
+            <span class="muted source-add-inline-hint">{{ t('accounts.metaHint') }}</span>
+          </template>
+          <template v-else-if="sourceKind === 'xai'">
+            <span class="muted source-add-inline-hint">{{ t('accounts.xaiHint') }}</span>
+          </template>
           <span v-else class="muted source-add-inline-hint">
             {{ t('accounts.producthuntHint') }}
           </span>
@@ -261,7 +273,11 @@ type SourceKind =
   | 'producthunt'
   | 'github'
   | 'hf'
-  | 'anthropic';
+  | 'anthropic'
+  | 'ai2'
+  | 'moonshot'
+  | 'meta'
+  | 'xai';
 type RedditSort = 'hot' | 'new' | 'top';
 type HackerNewsPreset = 'frontpage' | 'newest' | 'points100' | 'points300';
 type GithubMode = 'trending' | 'releases' | 'activity';
@@ -318,6 +334,10 @@ const sourceKindOptions = computed<{ label: string; value: SourceKind }[]>(() =>
   { label: t('accounts.sourceKind.github'), value: 'github' },
   { label: t('accounts.sourceKind.hfPapers'), value: 'hf' },
   { label: t('accounts.sourceKind.anthropic'), value: 'anthropic' },
+  { label: t('accounts.sourceKind.ai2'), value: 'ai2' },
+  { label: t('accounts.sourceKind.moonshot'), value: 'moonshot' },
+  { label: t('accounts.sourceKind.metaAi'), value: 'meta' },
+  { label: t('accounts.sourceKind.xai'), value: 'xai' },
 ]);
 const redditSortOptions = computed<{ label: string; value: RedditSort }[]>(() => [
   { label: t('accounts.redditSort.hot'), value: 'hot' },
@@ -375,6 +395,14 @@ const pendingFeedUrl = computed<string | null>(() => {
       return 'https://huggingface.co/api/daily_papers?limit=50';
     case 'anthropic':
       return 'https://www.anthropic.com/news';
+    case 'ai2':
+      return 'https://allenai.org/blog';
+    case 'moonshot':
+      return 'https://platform.moonshot.cn/blog';
+    case 'meta':
+      return 'https://ai.meta.com/blog/';
+    case 'xai':
+      return 'https://x.ai/news';
     default:
       return null;
   }
@@ -455,6 +483,10 @@ async function toCreateInput(): Promise<
   | { sourceType: 'github'; sourceUrl: string }
   | { sourceType: 'hf_papers'; sourceUrl: string }
   | { sourceType: 'anthropic_news'; sourceUrl: string }
+  | { sourceType: 'ai2_blog'; sourceUrl: string }
+  | { sourceType: 'moonshot_blog'; sourceUrl: string }
+  | { sourceType: 'meta_ai_blog'; sourceUrl: string }
+  | { sourceType: 'xai_news'; sourceUrl: string }
 > {
   switch (sourceKind.value) {
     case 'x':
@@ -501,6 +533,26 @@ async function toCreateInput(): Promise<
       return {
         sourceType: 'anthropic_news',
         sourceUrl: 'https://www.anthropic.com/news',
+      };
+    case 'ai2':
+      return {
+        sourceType: 'ai2_blog',
+        sourceUrl: 'https://allenai.org/blog',
+      };
+    case 'moonshot':
+      return {
+        sourceType: 'moonshot_blog',
+        sourceUrl: 'https://platform.moonshot.cn/blog',
+      };
+    case 'meta':
+      return {
+        sourceType: 'meta_ai_blog',
+        sourceUrl: 'https://ai.meta.com/blog/',
+      };
+    case 'xai':
+      return {
+        sourceType: 'xai_news',
+        sourceUrl: 'https://x.ai/news',
       };
     case 'github': {
       if (githubMode.value === 'trending') {
@@ -732,6 +784,22 @@ function sourceBadge(account: WatchAccount): string {
     return 'Anthropic';
   }
 
+  if (account.sourceType === 'ai2_blog') {
+    return 'AI2';
+  }
+
+  if (account.sourceType === 'moonshot_blog') {
+    return 'Moonshot';
+  }
+
+  if (account.sourceType === 'meta_ai_blog') {
+    return 'Meta AI';
+  }
+
+  if (account.sourceType === 'xai_news') {
+    return 'xAI';
+  }
+
   const url = account.sourceUrl ?? '';
 
   if (url.includes('github.com')) {
@@ -744,6 +812,22 @@ function sourceBadge(account: WatchAccount): string {
 
   if (url.includes('anthropic.com')) {
     return 'Anthropic';
+  }
+
+  if (url.includes('allenai.org')) {
+    return 'AI2';
+  }
+
+  if (url.includes('moonshot.cn') || url.includes('kimi.com')) {
+    return 'Moonshot';
+  }
+
+  if (url.includes('ai.meta.com')) {
+    return 'Meta AI';
+  }
+
+  if (url.includes('x.ai')) {
+    return 'xAI';
   }
 
   if (url.includes('youtube.com')) {

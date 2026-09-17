@@ -49,6 +49,42 @@ export async function startServer(options: StartServerOptions): Promise<void> {
           });
         }
 
+        if (input.sourceType === 'ai2_blog') {
+          return sourceProviders.ai2_blog.validateSource({
+            source: {
+              sourceType: 'ai2_blog',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
+        if (input.sourceType === 'moonshot_blog') {
+          return sourceProviders.moonshot_blog.validateSource({
+            source: {
+              sourceType: 'moonshot_blog',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
+        if (input.sourceType === 'meta_ai_blog') {
+          return sourceProviders.meta_ai_blog.validateSource({
+            source: {
+              sourceType: 'meta_ai_blog',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
+        if (input.sourceType === 'xai_news') {
+          return sourceProviders.xai_news.validateSource({
+            source: {
+              sourceType: 'xai_news',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
         if (input.sourceType === 'anthropic_news') {
           return sourceProviders.anthropic_news.validateSource({
             source: {

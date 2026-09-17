@@ -19,6 +19,7 @@
 | spec-004 | 管理台 UI/UX 重构（信息密度收敛、全站空态） |
 | spec-005 | 本地 Feed 输出（RSS / JSON Feed，支持规则过滤） |
 | spec-006 | Anthropic 官方新闻源（无 RSS 站点专用解析） |
+| spec-007 | 第二批官方源：AI2 / Moonshot / Meta AI / xAI（含无头浏览器源）与 Mistral / Stability / HF Blog（RSS） |
 | 追加 | GitHub Trending / HF Daily Papers 源、关键词订阅规则、监听组合、无源跳过轮询、消息一键清空、轮询间隔分钟化 |
 | 已放弃 | 邮件通讯（自有邮箱 IMAP）不做 |
 

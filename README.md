@@ -325,6 +325,10 @@ RSS 与 X 走同一条基线 / 增量 / 去重 / 入库 / 投递链路：首次�
 | Product Hunt | 无需输入 | `producthunt.com/feed` |
 | HF Daily Papers | 无需输入 | `huggingface.co/api/daily_papers`（JSON API） |
 | Anthropic 新闻 | 无需输入 | `anthropic.com/news`（服务端解析页面） |
+| Meta AI 博客 | 无需输入 | `ai.meta.com/blog`（无头浏览器渲染） |
+| xAI 新闻 | 无需输入 | `x.ai/news`（无头浏览器渲染） |
+| AI2 博客 | 无需输入 | `allenai.org/blog`（服务端解析页面） |
+| Moonshot 博客 | 无需输入 | `platform.moonshot.cn/blog`（服务端解析页面） |
 | GitHub 热门仓库 | 周期（每日/每周/每月）+ 可选语言 | `github.com/trending[/<lang>]?since=...`（服务端解析页面） |
 | GitHub 仓库发布 | `owner/repo` | `github.com/<owner>/<repo>/releases.atom` |
 | GitHub 用户动态 | 用户名 | `github.com/<user>.atom` |
@@ -337,7 +341,7 @@ YouTube 解析与 GitHub 页面抓取遵循“RSS 源”页签里的代理配置
 
 | 组合 | 内容 |
 | --- | --- |
-| AI 消息 | arXiv cs.AI / cs.CL / cs.LG / cs.CV、HF Daily Papers、Techmeme、Hacker News、Reddit r/LocalLLaMA、Product Hunt、OpenAI News、Google AI、Google DeepMind、Anthropic News、量子位、GitHub Trending（每日） |
+| AI 消息 | arXiv cs.AI / cs.CL / cs.LG / cs.CV、HF Daily Papers、Techmeme、Hacker News、Reddit r/LocalLLaMA、Product Hunt、OpenAI News、Google AI、Google DeepMind、Anthropic News、AI at Meta、xAI News、AI2 Blog、Moonshot Blog、Mistral、Stability AI、Hugging Face Blog、量子位、GitHub Trending（每日） |
 
 初始化后监听源为空，不会自动添加任何源；首次轮询只建立基线，不推送历史内容。
 
