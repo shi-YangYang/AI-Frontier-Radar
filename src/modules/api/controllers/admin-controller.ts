@@ -2,7 +2,12 @@ import { randomBytes } from 'node:crypto';
 
 import type { AppConfig } from '../../../shared/config/types';
 import { createFeishuWebhookClient, type FeishuWebhookFailureResult } from '../../delivery';
-import { SourceProviderError, type SourceProviderAccount } from '../../polling';
+import {
+  SourceProviderError,
+  YoutubeChannelResolveError,
+  resolveYoutubeChannel,
+  type SourceProviderAccount,
+} from '../../polling';
 import {
   XSourceDiagnosticError,
   createXSourceDiagnostics,
@@ -478,6 +483,36 @@ export async function updateAdminRssSettings(
     ok: true,
     data: settings,
   };
+}
+
+export async function resolveAdminYoutubeChannel(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { feedUrl: string; label?: string } }> {
+  const input = readYoutubeResolveInput(body);
+  const runtimeSettings = resolveRuntimeSettings(options);
+  const rssSettings = await runtimeSettings.getEffectiveRssProxySettings();
+
+  try {
+    const resolved = await resolveYoutubeChannel(input, {
+      ...(rssSettings.proxyUrl === undefined ? {} : { proxyUrl: rssSettings.proxyUrl }),
+    });
+
+    return {
+      ok: true,
+      data: resolved,
+    };
+  } catch (error) {
+    if (error instanceof YoutubeChannelResolveError) {
+      if (error.kind === 'invalid-input') {
+        throw new AdminApiError(400, 'INVALID_REQUEST', error.message);
+      }
+
+      throw new AdminApiError(502, 'YOUTUBE_RESOLVE_FAILED', error.message);
+    }
+
+    throw error;
+  }
 }
 
 export async function testAdminXSourceAnonymous(
@@ -1632,6 +1667,14 @@ function readRssSettingsBody(body: unknown): SaveRssSettingsInput {
   return {
     proxyUrl: normalizeOptionalProxyUrlBody(body.proxyUrl, RSS_PROXY_PROTOCOLS),
   };
+}
+
+function readYoutubeResolveInput(body: unknown): string {
+  if (!isRecord(body) || typeof body.input !== 'string') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'input 必须是字符串。');
+  }
+
+  return body.input;
 }
 
 function readXSourceUsernameBody(body: unknown): string {

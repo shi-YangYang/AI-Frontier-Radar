@@ -1,21 +1,27 @@
 export {
   BrowserXSourceProvider,
   createBrowserXSourceProvider,
+  createFetchWithProxy,
   createRssSourceProvider,
   createSourceProviderRegistry,
   parseXTimelineFromPage,
+  resolveYoutubeChannel,
   RssSourceProvider,
   SourceProviderError,
   createXSourceProvider,
   XSourceProvider,
   XTimelineClient,
+  YoutubeChannelResolveError,
 } from './source/index';
 export type {
   BrowserXSourceProviderOptions,
+  FetchImplementation,
+  ResolvedYoutubeChannel,
   RssSourceProviderOptions,
   XResolvedAccount,
   XSourceProviderOptions,
   XTimelineClientOptions,
+  YoutubeChannelResolveOptions,
 } from './source/index';
 export type {
   SourceDescriptor,

@@ -307,6 +307,21 @@ RSS 与 X 走同一条基线 / 增量 / 去重 / 入库 / 投递链路：首次�
 
 需要出网代理时，在 `/settings -> RSS 源` 保存代理（优先级：Web 控制台 > `.env` 的 `RSS_PROXY_URL`）。仅支持 `http://` 与 `https://`，不支持 `socks5://`。
 
+### 按来源添加（预设）
+
+`/accounts` 的“添加监听源”支持按来源类型直接添加，自动转换为标准 feed URL：
+
+| 类型 | 输入 | 生成地址 |
+| --- | --- | --- |
+| RSS / 播客 | feed URL | 原样 |
+| YouTube 频道 | `@handle`、频道链接或 `UC...` 频道 ID | `youtube.com/feeds/videos.xml?channel_id=...`（服务端解析） |
+| Reddit 子版块 | 子版块名 + 排序（热门/最新/最高） | `reddit.com/r/<name>/<sort>/.rss` |
+| arXiv | 分类（cs.AI / cs.CL / cs.CV / cs.LG / cs.RO / stat.ML） | `export.arxiv.org/rss/<category>` |
+| Hacker News | 首页 / 最新 / ≥100 分 / ≥300 分 | `hnrss.org/...` |
+| Product Hunt | 无需输入 | `producthunt.com/feed` |
+
+YouTube 解析遵循 RSS 代理配置；解析失败时可改为直接粘贴频道 RSS 地址。
+
 ## 常用命令
 
 | 命令 | 用途 |

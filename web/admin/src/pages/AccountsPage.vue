@@ -1,28 +1,73 @@
 <template>
   <section>
     <PageHeader :title="t('accounts.title')" :subtitle="t('accounts.subtitle')">
-      <form class="inline-form account-add-form" @submit.prevent="addAccount">
-        <select v-model="sourceType" :disabled="addingAccount">
-          <option value="x">{{ t('accounts.sourceTypeX') }}</option>
-          <option value="rss">{{ t('accounts.sourceTypeRss') }}</option>
-        </select>
-        <input
-          v-if="sourceType === 'x'"
-          v-model="username"
-          autocomplete="off"
-          :disabled="addingAccount"
-          :placeholder="t('accounts.placeholder')"
-        />
-        <input
-          v-else
-          v-model="sourceUrl"
-          autocomplete="off"
-          :disabled="addingAccount"
-          :placeholder="t('accounts.rssPlaceholder')"
-        />
-        <button class="primary" type="submit" :disabled="busy || addingAccount">
-          {{ addingAccount ? t('accounts.validating') : t('accounts.add') }}
-        </button>
+      <form class="source-add-form" @submit.prevent="addAccount">
+        <div class="source-add-fields">
+          <SelectControl
+            v-model="sourceKind"
+            :aria-label="t('accounts.sourceType')"
+            :disabled="addingAccount"
+            :options="sourceKindOptions"
+          />
+          <input
+            v-if="sourceKind === 'x'"
+            v-model="username"
+            autocomplete="off"
+            :disabled="addingAccount"
+            :placeholder="t('accounts.placeholder')"
+          />
+          <input
+            v-else-if="sourceKind === 'rss'"
+            v-model="rssUrl"
+            autocomplete="off"
+            :disabled="addingAccount"
+            :placeholder="t('accounts.rssPlaceholder')"
+          />
+          <input
+            v-else-if="sourceKind === 'youtube'"
+            v-model="youtubeInput"
+            autocomplete="off"
+            :disabled="addingAccount"
+            :placeholder="t('accounts.youtubePlaceholder')"
+          />
+          <template v-else-if="sourceKind === 'reddit'">
+            <input
+              v-model="redditName"
+              autocomplete="off"
+              :disabled="addingAccount"
+              :placeholder="t('accounts.redditPlaceholder')"
+            />
+            <SelectControl
+              v-model="redditSort"
+              :aria-label="t('accounts.redditSortLabel')"
+              :disabled="addingAccount"
+              :options="redditSortOptions"
+            />
+          </template>
+          <SelectControl
+            v-else-if="sourceKind === 'arxiv'"
+            v-model="arxivCategory"
+            :aria-label="t('accounts.arxivCategoryLabel')"
+            :disabled="addingAccount"
+            :options="arxivCategoryOptions"
+          />
+          <SelectControl
+            v-else-if="sourceKind === 'hackernews'"
+            v-model="hnPreset"
+            :aria-label="t('accounts.hnPresetLabel')"
+            :disabled="addingAccount"
+            :options="hnPresetOptions"
+          />
+          <span v-else class="muted source-add-inline-hint">
+            {{ t('accounts.producthuntHint') }}
+          </span>
+          <button class="primary" type="submit" :disabled="busy || addingAccount">
+            {{ addingAccount ? t('accounts.validating') : t('accounts.add') }}
+          </button>
+        </div>
+        <small v-if="pendingFeedUrl !== null" class="source-add-preview">
+          {{ t('accounts.addPreview', { url: pendingFeedUrl }) }}
+        </small>
       </form>
     </PageHeader>
 
@@ -62,7 +107,7 @@
               <td>
                 <strong>
                   <span class="status-badge neutral source-type-badge">
-                    {{ account.sourceType === 'rss' ? 'RSS' : 'X' }}
+                    {{ sourceBadge(account) }}
                   </span>
                   {{ toAccountLabel(account) }}
                 </strong>
@@ -101,24 +146,40 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 
 import {
   AdminApiRequestError,
   createWatchAccount,
   deleteWatchAccount,
   listWatchAccounts,
+  resolveYoutubeChannel,
   type AdminPagination,
+  type ResolvedYoutubeChannel,
   type WatchAccount,
-  type WatchAccountSourceType,
 } from '../api/admin-api';
 import ConfirmModal from '../components/ConfirmModal.vue';
 import PageHeader from '../components/PageHeader.vue';
 import PaginationBar from '../components/PaginationBar.vue';
+import SelectControl from '../components/SelectControl.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import ToastNotice from '../components/ToastNotice.vue';
 import { t } from '../i18n';
 import { DEFAULT_PAGE_SIZE, dash, formatDateTime } from '../utils';
+
+type SourceKind = 'x' | 'rss' | 'youtube' | 'reddit' | 'arxiv' | 'hackernews' | 'producthunt';
+type RedditSort = 'hot' | 'new' | 'top';
+type HackerNewsPreset = 'frontpage' | 'newest' | 'points100' | 'points300';
+
+const HN_PRESET_URLS: Record<HackerNewsPreset, string> = {
+  frontpage: 'https://hnrss.org/frontpage',
+  newest: 'https://hnrss.org/newest',
+  points100: 'https://hnrss.org/newest?points=100',
+  points300: 'https://hnrss.org/newest?points=300',
+};
+const YOUTUBE_FEED_PREFIX = 'https://www.youtube.com/feeds/videos.xml?channel_id=';
+const YOUTUBE_CHANNEL_ID_PATTERN = /^UC[A-Za-z0-9_-]{20,}$/u;
+const REDDIT_NAME_PATTERN = /^[A-Za-z0-9_]{2,21}$/u;
 
 const accounts = ref<WatchAccount[]>([]);
 const activeQuery = ref('');
@@ -134,9 +195,77 @@ const pagination = ref<AdminPagination>({
   totalPages: 0,
 });
 const queryInput = ref('');
-const sourceType = ref<WatchAccountSourceType>('x');
-const sourceUrl = ref('');
+const sourceKind = ref<SourceKind>('x');
 const username = ref('');
+const rssUrl = ref('');
+const youtubeInput = ref('');
+const youtubeResolved = ref<ResolvedYoutubeChannel | null>(null);
+const redditName = ref('');
+const redditSort = ref<RedditSort>('hot');
+const arxivCategory = ref('cs.AI');
+const hnPreset = ref<HackerNewsPreset>('frontpage');
+
+const sourceKindOptions = computed<{ label: string; value: SourceKind }[]>(() => [
+  { label: t('accounts.sourceKind.x'), value: 'x' },
+  { label: t('accounts.sourceKind.rss'), value: 'rss' },
+  { label: t('accounts.sourceKind.youtube'), value: 'youtube' },
+  { label: t('accounts.sourceKind.reddit'), value: 'reddit' },
+  { label: t('accounts.sourceKind.arxiv'), value: 'arxiv' },
+  { label: t('accounts.sourceKind.hackernews'), value: 'hackernews' },
+  { label: t('accounts.sourceKind.producthunt'), value: 'producthunt' },
+]);
+const redditSortOptions = computed<{ label: string; value: RedditSort }[]>(() => [
+  { label: t('accounts.redditSort.hot'), value: 'hot' },
+  { label: t('accounts.redditSort.new'), value: 'new' },
+  { label: t('accounts.redditSort.top'), value: 'top' },
+]);
+const arxivCategoryOptions = [
+  { label: 'cs.AI', value: 'cs.AI' },
+  { label: 'cs.CL', value: 'cs.CL' },
+  { label: 'cs.CV', value: 'cs.CV' },
+  { label: 'cs.LG', value: 'cs.LG' },
+  { label: 'cs.RO', value: 'cs.RO' },
+  { label: 'stat.ML', value: 'stat.ML' },
+];
+const hnPresetOptions = computed<{ label: string; value: HackerNewsPreset }[]>(() => [
+  { label: t('accounts.hnPreset.frontpage'), value: 'frontpage' },
+  { label: t('accounts.hnPreset.newest'), value: 'newest' },
+  { label: t('accounts.hnPreset.points100'), value: 'points100' },
+  { label: t('accounts.hnPreset.points300'), value: 'points300' },
+]);
+const pendingFeedUrl = computed<string | null>(() => {
+  switch (sourceKind.value) {
+    case 'arxiv':
+      return `https://export.arxiv.org/rss/${arxivCategory.value}`;
+    case 'hackernews':
+      return HN_PRESET_URLS[hnPreset.value];
+    case 'reddit': {
+      const name = redditName.value.trim().replace(/^r\//iu, '');
+      if (!REDDIT_NAME_PATTERN.test(name)) {
+        return null;
+      }
+
+      const sortPath = redditSort.value === 'hot' ? '' : `${redditSort.value}/`;
+      return `https://www.reddit.com/r/${name}/${sortPath}.rss`;
+    }
+    case 'youtube': {
+      const channelId = extractYoutubeChannelId(youtubeInput.value);
+      return channelId === null ? null : `${YOUTUBE_FEED_PREFIX}${channelId}`;
+    }
+    case 'producthunt':
+      return 'https://www.producthunt.com/feed';
+    default:
+      return null;
+  }
+});
+
+watch([sourceKind, youtubeInput], () => {
+  youtubeResolved.value = null;
+});
+
+watch([redditName, redditSort, arxivCategory, hnPreset], () => {
+  youtubeResolved.value = null;
+});
 
 onMounted(() => {
   void loadAccounts(1, { silent: true });
@@ -181,26 +310,83 @@ async function addAccount(): Promise<void> {
   setNotice(t('notice.accountValidating'));
 
   try {
-    if (sourceType.value === 'rss') {
-      await createWatchAccount({ sourceType: 'rss', sourceUrl: sourceUrl.value });
-      sourceUrl.value = '';
-    } else {
-      await createWatchAccount({ sourceType: 'x', xUsername: username.value });
-      username.value = '';
-    }
-
+    const input = await toCreateInput();
+    await createWatchAccount(input);
+    resetSourceForm();
     await loadAccounts(1, { silent: true });
     setNotice(t('notice.accountCreated'));
   } catch (error) {
     setNotice(
       t('notice.accountCreateFailed', {
-        error: toAccountCreateErrorMessage(error, sourceType.value),
+        error: toAccountCreateErrorMessage(error),
       }),
       true,
     );
   } finally {
     addingAccount.value = false;
   }
+}
+
+async function toCreateInput(): Promise<
+  { sourceType: 'x'; xUsername: string } | { sourceType: 'rss'; sourceUrl: string }
+> {
+  switch (sourceKind.value) {
+    case 'x':
+      return { sourceType: 'x', xUsername: username.value };
+    case 'rss':
+      return { sourceType: 'rss', sourceUrl: rssUrl.value };
+    case 'youtube': {
+      if (youtubeResolved.value !== null) {
+        return { sourceType: 'rss', sourceUrl: youtubeResolved.value.feedUrl };
+      }
+
+      const channelId = extractYoutubeChannelId(youtubeInput.value);
+
+      if (channelId !== null) {
+        return { sourceType: 'rss', sourceUrl: `${YOUTUBE_FEED_PREFIX}${channelId}` };
+      }
+
+      const resolved = await resolveYoutubeChannel(youtubeInput.value);
+      youtubeResolved.value = resolved;
+      return { sourceType: 'rss', sourceUrl: resolved.feedUrl };
+    }
+    case 'reddit': {
+      const name = redditName.value.trim().replace(/^r\//iu, '');
+
+      if (!REDDIT_NAME_PATTERN.test(name)) {
+        throw new Error(t('accounts.error.redditInvalid'));
+      }
+
+      const sortPath = redditSort.value === 'hot' ? '' : `${redditSort.value}/`;
+      return { sourceType: 'rss', sourceUrl: `https://www.reddit.com/r/${name}/${sortPath}.rss` };
+    }
+    case 'arxiv':
+      return { sourceType: 'rss', sourceUrl: `https://export.arxiv.org/rss/${arxivCategory.value}` };
+    case 'hackernews':
+      return { sourceType: 'rss', sourceUrl: HN_PRESET_URLS[hnPreset.value] };
+    case 'producthunt':
+      return { sourceType: 'rss', sourceUrl: 'https://www.producthunt.com/feed' };
+  }
+}
+
+function extractYoutubeChannelId(value: string): string | null {
+  const input = value.trim();
+
+  if (YOUTUBE_CHANNEL_ID_PATTERN.test(input)) {
+    return input;
+  }
+
+  const match = /(?:^|\/)channel\/(UC[A-Za-z0-9_-]{20,})(?:[/?#]|$)/u.exec(input);
+
+  return match?.[1] ?? null;
+}
+
+function resetSourceForm(): void {
+  username.value = '';
+  rssUrl.value = '';
+  youtubeInput.value = '';
+  youtubeResolved.value = null;
+  redditName.value = '';
 }
 
 function askDelete(account: WatchAccount): void {
@@ -231,12 +417,17 @@ function setNotice(message: string, danger = false): void {
   noticeDanger.value = danger;
 }
 
-function toAccountCreateErrorMessage(
-  error: unknown,
-  sourceType: WatchAccountSourceType,
-): string {
+function toAccountCreateErrorMessage(error: unknown): string {
   if (error instanceof AdminApiRequestError) {
-    const isRss = sourceType === 'rss';
+    const isRss = sourceKind.value !== 'x';
+
+    if (error.code === 'YOUTUBE_RESOLVE_FAILED') {
+      return t('accounts.error.youtubeResolveFailed');
+    }
+
+    if (error.code === 'INVALID_REQUEST' && sourceKind.value === 'youtube') {
+      return t('accounts.error.youtubeInvalid');
+    }
 
     if (error.code === 'SOURCE_REQUEST_FAILED') {
       return t(isRss ? 'accounts.error.rssNetwork' : 'accounts.error.network');
@@ -272,6 +463,36 @@ function toAccountCreateErrorMessage(
   }
 
   return error instanceof Error ? error.message : String(error);
+}
+
+function sourceBadge(account: WatchAccount): string {
+  if (account.sourceType !== 'rss') {
+    return 'X';
+  }
+
+  const url = account.sourceUrl ?? '';
+
+  if (url.includes('youtube.com')) {
+    return 'YouTube';
+  }
+
+  if (url.includes('reddit.com')) {
+    return 'Reddit';
+  }
+
+  if (url.includes('arxiv.org')) {
+    return 'arXiv';
+  }
+
+  if (url.includes('hnrss.org')) {
+    return 'HN';
+  }
+
+  if (url.includes('producthunt.com')) {
+    return 'PH';
+  }
+
+  return 'RSS';
 }
 
 function toAccountLabel(account: WatchAccount): string {

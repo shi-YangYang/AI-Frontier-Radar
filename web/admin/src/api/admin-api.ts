@@ -400,6 +400,18 @@ export async function updateRssSettings(input: {
   });
 }
 
+export interface ResolvedYoutubeChannel {
+  feedUrl: string;
+  label?: string;
+}
+
+export async function resolveYoutubeChannel(input: string): Promise<ResolvedYoutubeChannel> {
+  return requestJson<ResolvedYoutubeChannel>('/admin/api/source-presets/youtube/resolve', {
+    body: JSON.stringify({ input }),
+    method: 'POST',
+  });
+}
+
 export async function testXSourceAnonymous(
   xUsername: string,
 ): Promise<XSourceAnonymousCheckResult> {

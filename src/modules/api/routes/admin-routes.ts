@@ -29,6 +29,7 @@ import {
   listAdminPosts,
   listAdminWatchAccounts,
   openAdminXLoginWindow,
+  resolveAdminYoutubeChannel,
   runAdminDeliveryNow,
   runAdminPollingNow,
   testAdminDeliveryTarget,
@@ -150,6 +151,17 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     },
     async (request, reply) =>
       sendAdminResponse(reply, () => updateAdminRssSettings(request.body, options)),
+  );
+
+  app.post(
+    '/admin/api/source-presets/youtube/resolve',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => resolveAdminYoutubeChannel(request.body, options)),
   );
 
   app.post(

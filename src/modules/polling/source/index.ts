@@ -11,6 +11,10 @@ export type { XSourceProviderOptions } from './x-source-provider';
 export { createRssSourceProvider, RssSourceProvider } from './rss-source-provider';
 export type { RssSourceProviderOptions } from './rss-source-provider';
 export { createSourceProviderRegistry } from './source-provider-registry';
+export { createFetchWithProxy } from './fetch-with-proxy';
+export type { FetchImplementation } from './fetch-with-proxy';
+export { resolveYoutubeChannel, YoutubeChannelResolveError } from './youtube-channel-resolver';
+export type { ResolvedYoutubeChannel, YoutubeChannelResolveOptions } from './youtube-channel-resolver';
 export { XTimelineClient } from './x-timeline-client';
 export type { XResolvedAccount, XTimelineClientOptions } from './x-timeline-client';
 export {

@@ -397,8 +397,36 @@ tr:last-child td {
   font-size: 12px;
 }
 
-.account-add-form input {
-  min-width: 400px;
+.source-add-form {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+  max-width: 100%;
+}
+
+.source-add-fields {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.source-add-fields input {
+  min-width: 260px;
+}
+
+.source-add-fields .select-control {
+  min-width: 150px;
+}
+
+.source-add-preview,
+.source-add-inline-hint {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 
 .query-form {

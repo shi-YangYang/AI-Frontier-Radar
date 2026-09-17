@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 
 import { XMLParser } from 'fast-xml-parser';
-import { ProxyAgent, fetch as undiciFetch } from 'undici';
+
+import { createFetchWithProxy } from './fetch-with-proxy';
 
 import type {
   SourceProvider,
@@ -62,15 +63,8 @@ export class RssSourceProvider implements SourceProvider {
   public constructor(options: RssSourceProviderOptions = {}) {
     if (options.fetchImplementation !== undefined) {
       this.fetchImplementation = options.fetchImplementation;
-    } else if (options.proxyUrl !== undefined && options.proxyUrl.trim().length > 0) {
-      const dispatcher = new ProxyAgent(options.proxyUrl);
-      this.fetchImplementation = ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
-        undiciFetch(input as Parameters<typeof undiciFetch>[0], {
-          ...(init ?? {}),
-          dispatcher,
-        } as Parameters<typeof undiciFetch>[1])) as unknown as typeof fetch;
     } else {
-      this.fetchImplementation = globalThis.fetch;
+      this.fetchImplementation = createFetchWithProxy(options.proxyUrl);
     }
 
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;

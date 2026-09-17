@@ -6,3 +6,4 @@
 - 帖子去重使用独立 `dedupe_key`（RSS 为 `feed URL + guid/link` 的 sha256 前缀，X 留空）：缺日期条目不再依赖合成时间 ID 判重，跨轮不会重复入库；命中去重键的条目直接跳过 upsert 与投递事件。事件只在帖子确为新增时创建。
 - RSS 抓取代理通过 `undici` 的 `ProxyAgent` 实现（全局 fetch 与外部 undici 的 dispatcher 接口不兼容，代理路径必须走 undici 自带的 fetch）；配置为 `RSS_PROXY_URL`（.env 默认）与 Web 控制台 `source.rss.proxyUrl`（运行时优先），仅支持 http/https，不支持 socks5。
 - RSS 解析使用 `fast-xml-parser`（唯一新增依赖），仅支持 feed 提供的 title/description/content，不抓取全文。
+- 来源预设（YouTube / Reddit / arXiv / Hacker News / Product Hunt）统一在前端转换为标准 feed URL 后按 RSS 源入库，不新增 source_type；YouTube 频道解析在服务端完成，复用 RSS 代理配置；列表徽标由前端按 feed URL 推断。

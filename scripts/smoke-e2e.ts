@@ -8,7 +8,7 @@ import { toPrismaSqliteDatabaseUrl } from '../src/shared/config';
 import { loadAppConfig } from '../src/config';
 import { createLogger } from '../src/lib/logger';
 import { createApp } from '../src/app/create-app';
-import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, createRssSourceProvider, createSourceProviderRegistry, createXSourceProvider, runPollingJob } from '../src/modules/polling';
+import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createRssSourceProvider, createSourceProviderRegistry, createXSourceProvider, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
 import { runDeliveryWorkerJob } from '../src/modules/delivery';
 import { createRuntimeSourceProviders } from '../src/modules/scheduler';
 import { createPrismaClient, createStorage } from '../src/modules/storage';
@@ -696,6 +696,67 @@ async function main(): Promise<void> {
       `unreachable proxy should fail the fetch, got ${unreachableProxyCode}`,
     );
     checks.push({ name: 'RSS 代理不可用时请求失败' });
+
+    const youtubeHtml = [
+      '<!doctype html><html><head>',
+      '<meta property="og:title" content="OpenAI - YouTube">',
+      '</head><body>',
+      '<script>var ytInitialData = {"metadata":{"channelMetadataRenderer":{"channelId":"UCabcdefghijklmnopqrstuv"}}};</script>',
+      '</body></html>',
+    ].join('');
+    const resolvedYoutube = await resolveYoutubeChannel('@openai', {
+      fetchImplementation: async () =>
+        new Response(youtubeHtml, {
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+          status: 200,
+        }),
+    });
+    assert(
+      resolvedYoutube.feedUrl ===
+        'https://www.youtube.com/feeds/videos.xml?channel_id=UCabcdefghijklmnopqrstuv',
+      `youtube resolver should build the feed url, got ${resolvedYoutube.feedUrl}`,
+    );
+    assert(
+      resolvedYoutube.label === 'OpenAI',
+      `youtube resolver should extract the channel title, got ${resolvedYoutube.label}`,
+    );
+    checks.push({ name: 'YouTube 频道解析（@handle）' });
+
+    let youtubeResolveErrorKind: string | null = null;
+
+    try {
+      await resolveYoutubeChannel('@missing', {
+        fetchImplementation: async () =>
+          new Response('<html><body>no channel here</body></html>', { status: 200 }),
+      });
+    } catch (error) {
+      youtubeResolveErrorKind = error instanceof YoutubeChannelResolveError ? error.kind : null;
+    }
+
+    assert(
+      youtubeResolveErrorKind === 'resolve-failed',
+      `youtube resolver should fail when channelId is missing, got ${youtubeResolveErrorKind}`,
+    );
+    checks.push({ name: 'YouTube 解析失败路径' });
+
+    const directChannel = await resolveYoutubeChannel('UCabcdefghijklmnopqrstuv');
+    assert(
+      directChannel.feedUrl ===
+        'https://www.youtube.com/feeds/videos.xml?channel_id=UCabcdefghijklmnopqrstuv',
+      'youtube resolver should accept a raw channel id without fetching',
+    );
+    checks.push({ name: 'YouTube 频道 ID 直接构造 feed' });
+
+    const youtubeInvalidResponse = await app.inject({
+      method: 'POST',
+      payload: { input: '' },
+      url: '/admin/api/source-presets/youtube/resolve',
+    });
+    assert(
+      youtubeInvalidResponse.statusCode === 400,
+      `empty youtube input should return 400, got ${youtubeInvalidResponse.statusCode}`,
+    );
+    checks.push({ name: 'YouTube 解析接口空输入返回 400' });
 
     const healthResponse = await app.inject({ method: 'GET', url: '/health' });
     assert(healthResponse.statusCode === 200, `/health returned ${healthResponse.statusCode}`);
