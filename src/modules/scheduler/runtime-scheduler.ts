@@ -3,6 +3,7 @@ import type { AppConfig } from '../../shared/config/types';
 import { runDeliveryWorkerJob, type DeliveryWorkerRunOnceResult } from '../delivery';
 import {
   createBrowserXSourceProvider,
+  createGithubTrendingSourceProvider,
   createRssSourceProvider,
   createSourceProviderRegistry,
   createXSourceProvider,
@@ -51,17 +52,18 @@ export function createRuntimeScheduler(options: RuntimeSchedulerOptions): Runtim
 }
 
 export interface RuntimeSourceProviders {
+  github: SourceProvider;
   rss: SourceProvider;
   x: SourceProvider;
 }
 
 export function createRuntimeSourceProviders(config: AppConfig): RuntimeSourceProviders {
+  const proxyOptions =
+    config.source.rss?.proxyUrl === undefined ? {} : { proxyUrl: config.source.rss.proxyUrl };
+
   return {
-    rss: createRssSourceProvider({
-      ...(config.source.rss?.proxyUrl === undefined
-        ? {}
-        : { proxyUrl: config.source.rss.proxyUrl }),
-    }),
+    github: createGithubTrendingSourceProvider(proxyOptions),
+    rss: createRssSourceProvider(proxyOptions),
     x: createRuntimeXSourceProvider(config),
   };
 }

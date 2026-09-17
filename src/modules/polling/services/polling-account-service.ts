@@ -45,12 +45,17 @@ export class PollingAccountService {
       excludeReplies: this.excludeReplies,
       excludeReposts: this.excludeReposts,
     });
+    const baselineAllOnFirstRun =
+      fetchCursor === undefined && sourceProvider.firstRunBaseline === 'all';
     const eligiblePosts = resolveEligiblePosts({
       cursor: fetchCursor,
+      includeAllWithoutCursor: baselineAllOnFirstRun,
       posts: filteredPosts,
     });
 
-    const persistResult = await this.persistPosts(eligiblePosts, deliveryTargets);
+    const persistResult = await this.persistPosts(eligiblePosts, deliveryTargets, {
+      createEvents: !baselineAllOnFirstRun,
+    });
 
     return {
       baselinePostId: account.baselinePostId ?? newestFetchedPostId ?? null,
@@ -65,6 +70,7 @@ export class PollingAccountService {
   private async persistPosts(
     posts: StandardizedPost[],
     deliveryTargets: DeliveryTarget[],
+    options: { createEvents: boolean },
   ): Promise<{
     eventsCreated: number;
     newPostsDetected: number;
@@ -73,7 +79,7 @@ export class PollingAccountService {
     let newPostsDetected = 0;
 
     for (const post of posts) {
-      const persistResult = await this.persistPost(post, deliveryTargets);
+      const persistResult = await this.persistPost(post, deliveryTargets, options);
 
       if (persistResult.isNewPost) {
         newPostsDetected += 1;
@@ -91,6 +97,7 @@ export class PollingAccountService {
   private async persistPost(
     post: StandardizedPost,
     deliveryTargets: DeliveryTarget[],
+    options: { createEvents: boolean },
   ): Promise<{
     eventsCreated: number;
     isNewPost: boolean;
@@ -123,15 +130,17 @@ export class PollingAccountService {
 
     let eventsCreated = 0;
 
-    for (const deliveryTarget of deliveryTargets) {
-      const deliveryEvent = await this.options.deliveryEvents.createIfAbsent({
-        status: 'pending',
-        targetKey: deliveryTarget.targetKey,
-        xPostId: post.xPostId,
-      });
+    if (options.createEvents) {
+      for (const deliveryTarget of deliveryTargets) {
+        const deliveryEvent = await this.options.deliveryEvents.createIfAbsent({
+          status: 'pending',
+          targetKey: deliveryTarget.targetKey,
+          xPostId: post.xPostId,
+        });
 
-      if (deliveryEvent.created) {
-        eventsCreated += 1;
+        if (deliveryEvent.created) {
+          eventsCreated += 1;
+        }
       }
     }
 
@@ -144,9 +153,14 @@ export class PollingAccountService {
 
 function resolveEligiblePosts(input: {
   cursor: string | undefined;
+  includeAllWithoutCursor?: boolean;
   posts: StandardizedPost[];
 }): StandardizedPost[] {
   if (input.cursor === undefined) {
+    if (input.includeAllWithoutCursor === true) {
+      return sortPostsAscending(input.posts);
+    }
+
     const newestPost = pickNewestPost(input.posts);
 
     return newestPost === undefined ? [] : [newestPost];

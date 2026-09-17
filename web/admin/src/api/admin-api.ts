@@ -13,7 +13,7 @@ export interface AdminErrorResponse {
 }
 
 export type WatchAccountPollStatus = 'failed' | 'pending' | 'success';
-export type WatchAccountSourceType = 'rss' | 'x';
+export type WatchAccountSourceType = 'github' | 'rss' | 'x';
 export type PollRunStatus = 'failed' | 'partial_failed' | 'running' | 'success';
 export type DeliveryEventStatus = 'dead' | 'failed' | 'pending' | 'retry_wait' | 'sending' | 'sent';
 export type PostBooleanFilter = 'all' | 'false' | 'true';
@@ -522,6 +522,7 @@ export async function listWatchAccounts(query?: WatchAccountPageQuery): Promise<
 }
 
 export type CreateWatchAccountInput =
+  | { sourceType: 'github'; sourceUrl: string }
   | { sourceType: 'rss'; sourceUrl: string }
   | { sourceType: 'x'; xUsername: string };
 

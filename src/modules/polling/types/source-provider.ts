@@ -1,4 +1,4 @@
-export type SourceType = 'rss' | 'x';
+export type SourceType = 'github' | 'rss' | 'x';
 
 export interface SourceDescriptor {
   sourceType: SourceType;
@@ -52,6 +52,7 @@ export interface SourceProviderFetchResult {
 
 export interface SourceProvider {
   readonly sourceType: SourceType;
+  readonly firstRunBaseline?: 'all';
   fetchPosts(input: SourceProviderFetchInput): Promise<SourceProviderFetchResult>;
   validateSource(input: SourceProviderValidateSourceInput): Promise<SourceProviderAccount>;
 }

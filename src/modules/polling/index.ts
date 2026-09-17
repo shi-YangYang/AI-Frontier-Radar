@@ -2,8 +2,10 @@ export {
   BrowserXSourceProvider,
   createBrowserXSourceProvider,
   createFetchWithProxy,
+  createGithubTrendingSourceProvider,
   createRssSourceProvider,
   createSourceProviderRegistry,
+  GithubTrendingSourceProvider,
   parseXTimelineFromPage,
   resolveYoutubeChannel,
   RssSourceProvider,
@@ -16,6 +18,7 @@ export {
 export type {
   BrowserXSourceProviderOptions,
   FetchImplementation,
+  GithubTrendingSourceProviderOptions,
   ResolvedYoutubeChannel,
   RssSourceProviderOptions,
   XResolvedAccount,

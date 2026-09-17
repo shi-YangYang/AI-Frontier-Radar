@@ -40,6 +40,15 @@ export async function startServer(options: StartServerOptions): Promise<void> {
           });
         }
 
+        if (input.sourceType === 'github') {
+          return sourceProviders.github.validateSource({
+            source: {
+              sourceType: 'github',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
         return sourceProviders.x.validateSource({
           source: {
             sourceType: 'x',

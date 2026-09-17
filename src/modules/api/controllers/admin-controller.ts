@@ -40,6 +40,7 @@ import type { XPostPageQuery, XPostRawWithDeliveryEvents, XPostSummary } from '.
 import { normalizeXUsername } from '../../storage/watch-account-repository';
 
 export type AdminWatchAccountValidationInput =
+  | { sourceType: 'github'; sourceUrl: string }
   | { sourceType: 'rss'; sourceUrl: string }
   | { sourceType: 'x'; xUsername: string };
 
@@ -165,11 +166,11 @@ export async function createAdminWatchAccount(
   const input = readCreateWatchAccountBody(body);
   const account = await validateWatchSource(input, options);
 
-  if (input.sourceType === 'rss') {
+  if (input.sourceType === 'rss' || input.sourceType === 'github') {
     const { created, watchAccount } = await options.storage.watchAccounts.createIfAbsentBySource({
       displayName: account.displayName ?? null,
       enabled: true,
-      sourceType: 'rss',
+      sourceType: input.sourceType,
       sourceUrl: normalizeRssSourceUrl(input.sourceUrl),
     });
 
@@ -1881,14 +1882,15 @@ function readCreateWatchAccountBody(body: unknown): AdminWatchAccountValidationI
   if (
     body.sourceType !== undefined &&
     body.sourceType !== 'x' &&
-    body.sourceType !== 'rss'
+    body.sourceType !== 'rss' &&
+    body.sourceType !== 'github'
   ) {
-    throw new AdminApiError(400, 'INVALID_REQUEST', 'sourceType 必须是 x 或 rss。');
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'sourceType 必须是 x、rss 或 github。');
   }
 
   const sourceType = body.sourceType ?? 'x';
 
-  if (sourceType === 'rss') {
+  if (sourceType === 'rss' || sourceType === 'github') {
     return {
       sourceType,
       sourceUrl: readRssSourceUrl(body.sourceUrl),

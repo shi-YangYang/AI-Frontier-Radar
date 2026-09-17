@@ -58,6 +58,42 @@
             :disabled="addingAccount"
             :options="hnPresetOptions"
           />
+          <template v-else-if="sourceKind === 'github'">
+            <SelectControl
+              v-model="githubMode"
+              :aria-label="t('accounts.githubModeLabel')"
+              :disabled="addingAccount"
+              :options="githubModeOptions"
+            />
+            <template v-if="githubMode === 'trending'">
+              <SelectControl
+                v-model="githubPeriod"
+                :aria-label="t('accounts.githubPeriodLabel')"
+                :disabled="addingAccount"
+                :options="githubPeriodOptions"
+              />
+              <input
+                v-model="githubLanguage"
+                autocomplete="off"
+                :disabled="addingAccount"
+                :placeholder="t('accounts.githubLanguagePlaceholder')"
+              />
+            </template>
+            <input
+              v-else-if="githubMode === 'releases'"
+              v-model="githubRepo"
+              autocomplete="off"
+              :disabled="addingAccount"
+              :placeholder="t('accounts.githubRepoPlaceholder')"
+            />
+            <input
+              v-else
+              v-model="githubUser"
+              autocomplete="off"
+              :disabled="addingAccount"
+              :placeholder="t('accounts.githubUserPlaceholder')"
+            />
+          </template>
           <span v-else class="muted source-add-inline-hint">
             {{ t('accounts.producthuntHint') }}
           </span>
@@ -167,9 +203,19 @@ import ToastNotice from '../components/ToastNotice.vue';
 import { t } from '../i18n';
 import { DEFAULT_PAGE_SIZE, dash, formatDateTime } from '../utils';
 
-type SourceKind = 'x' | 'rss' | 'youtube' | 'reddit' | 'arxiv' | 'hackernews' | 'producthunt';
+type SourceKind =
+  | 'x'
+  | 'rss'
+  | 'youtube'
+  | 'reddit'
+  | 'arxiv'
+  | 'hackernews'
+  | 'producthunt'
+  | 'github';
 type RedditSort = 'hot' | 'new' | 'top';
 type HackerNewsPreset = 'frontpage' | 'newest' | 'points100' | 'points300';
+type GithubMode = 'trending' | 'releases' | 'activity';
+type GithubPeriod = 'daily' | 'weekly' | 'monthly';
 
 const HN_PRESET_URLS: Record<HackerNewsPreset, string> = {
   frontpage: 'https://hnrss.org/frontpage',
@@ -204,6 +250,11 @@ const redditName = ref('');
 const redditSort = ref<RedditSort>('hot');
 const arxivCategory = ref('cs.AI');
 const hnPreset = ref<HackerNewsPreset>('frontpage');
+const githubMode = ref<GithubMode>('trending');
+const githubPeriod = ref<GithubPeriod>('daily');
+const githubLanguage = ref('');
+const githubRepo = ref('');
+const githubUser = ref('');
 
 const sourceKindOptions = computed<{ label: string; value: SourceKind }[]>(() => [
   { label: t('accounts.sourceKind.x'), value: 'x' },
@@ -213,6 +264,7 @@ const sourceKindOptions = computed<{ label: string; value: SourceKind }[]>(() =>
   { label: t('accounts.sourceKind.arxiv'), value: 'arxiv' },
   { label: t('accounts.sourceKind.hackernews'), value: 'hackernews' },
   { label: t('accounts.sourceKind.producthunt'), value: 'producthunt' },
+  { label: t('accounts.sourceKind.github'), value: 'github' },
 ]);
 const redditSortOptions = computed<{ label: string; value: RedditSort }[]>(() => [
   { label: t('accounts.redditSort.hot'), value: 'hot' },
@@ -232,6 +284,16 @@ const hnPresetOptions = computed<{ label: string; value: HackerNewsPreset }[]>((
   { label: t('accounts.hnPreset.newest'), value: 'newest' },
   { label: t('accounts.hnPreset.points100'), value: 'points100' },
   { label: t('accounts.hnPreset.points300'), value: 'points300' },
+]);
+const githubModeOptions = computed<{ label: string; value: GithubMode }[]>(() => [
+  { label: t('accounts.githubMode.trending'), value: 'trending' },
+  { label: t('accounts.githubMode.releases'), value: 'releases' },
+  { label: t('accounts.githubMode.activity'), value: 'activity' },
+]);
+const githubPeriodOptions = computed<{ label: string; value: GithubPeriod }[]>(() => [
+  { label: t('accounts.githubPeriod.daily'), value: 'daily' },
+  { label: t('accounts.githubPeriod.weekly'), value: 'weekly' },
+  { label: t('accounts.githubPeriod.monthly'), value: 'monthly' },
 ]);
 const pendingFeedUrl = computed<string | null>(() => {
   switch (sourceKind.value) {
@@ -254,6 +316,8 @@ const pendingFeedUrl = computed<string | null>(() => {
     }
     case 'producthunt':
       return 'https://www.producthunt.com/feed';
+    case 'github':
+      return buildGithubSourceUrl();
     default:
       return null;
   }
@@ -328,7 +392,9 @@ async function addAccount(): Promise<void> {
 }
 
 async function toCreateInput(): Promise<
-  { sourceType: 'x'; xUsername: string } | { sourceType: 'rss'; sourceUrl: string }
+  | { sourceType: 'x'; xUsername: string }
+  | { sourceType: 'rss'; sourceUrl: string }
+  | { sourceType: 'github'; sourceUrl: string }
 > {
   switch (sourceKind.value) {
     case 'x':
@@ -366,7 +432,72 @@ async function toCreateInput(): Promise<
       return { sourceType: 'rss', sourceUrl: HN_PRESET_URLS[hnPreset.value] };
     case 'producthunt':
       return { sourceType: 'rss', sourceUrl: 'https://www.producthunt.com/feed' };
+    case 'github': {
+      if (githubMode.value === 'trending') {
+        const language = normalizeGithubLanguage(githubLanguage.value);
+
+        if (language.length > 0 && !/^[\w .-]{1,30}$/u.test(language)) {
+          throw new Error(t('accounts.error.githubLanguageInvalid'));
+        }
+
+        const base =
+          language.length === 0
+            ? 'https://github.com/trending'
+            : `https://github.com/trending/${encodeURIComponent(language)}`;
+
+        return { sourceType: 'github', sourceUrl: `${base}?since=${githubPeriod.value}` };
+      }
+
+      if (githubMode.value === 'releases') {
+        const repo = githubRepo.value.trim();
+
+        if (!/^[\w.-]+\/[\w.-]+$/u.test(repo)) {
+          throw new Error(t('accounts.error.githubRepoInvalid'));
+        }
+
+        return { sourceType: 'rss', sourceUrl: `https://github.com/${repo}/releases.atom` };
+      }
+
+      const user = githubUser.value.trim().replace(/^@/u, '');
+
+      if (!/^[\w-]{1,39}$/u.test(user)) {
+        throw new Error(t('accounts.error.githubUserInvalid'));
+      }
+
+      return { sourceType: 'rss', sourceUrl: `https://github.com/${user}.atom` };
+    }
   }
+}
+
+function normalizeGithubLanguage(value: string): string {
+  return value.trim().replace(/^\/+/u, '');
+}
+
+function buildGithubSourceUrl(): string | null {
+  if (githubMode.value === 'trending') {
+    const language = normalizeGithubLanguage(githubLanguage.value);
+
+    if (language.length > 0 && !/^[\w .-]{1,30}$/u.test(language)) {
+      return null;
+    }
+
+    const base =
+      language.length === 0
+        ? 'https://github.com/trending'
+        : `https://github.com/trending/${encodeURIComponent(language)}`;
+
+    return `${base}?since=${githubPeriod.value}`;
+  }
+
+  if (githubMode.value === 'releases') {
+    const repo = githubRepo.value.trim();
+
+    return /^[\w.-]+\/[\w.-]+$/u.test(repo) ? `https://github.com/${repo}/releases.atom` : null;
+  }
+
+  const user = githubUser.value.trim().replace(/^@/u, '');
+
+  return /^[\w-]{1,39}$/u.test(user) ? `https://github.com/${user}.atom` : null;
 }
 
 function extractYoutubeChannelId(value: string): string | null {
@@ -387,6 +518,9 @@ function resetSourceForm(): void {
   youtubeInput.value = '';
   youtubeResolved.value = null;
   redditName.value = '';
+  githubLanguage.value = '';
+  githubRepo.value = '';
+  githubUser.value = '';
 }
 
 function askDelete(account: WatchAccount): void {
@@ -419,7 +553,8 @@ function setNotice(message: string, danger = false): void {
 
 function toAccountCreateErrorMessage(error: unknown): string {
   if (error instanceof AdminApiRequestError) {
-    const isRss = sourceKind.value !== 'x';
+    const isGithub = sourceKind.value === 'github' && githubMode.value === 'trending';
+    const isRss = sourceKind.value !== 'x' && !isGithub;
 
     if (error.code === 'YOUTUBE_RESOLVE_FAILED') {
       return t('accounts.error.youtubeResolveFailed');
@@ -430,7 +565,13 @@ function toAccountCreateErrorMessage(error: unknown): string {
     }
 
     if (error.code === 'SOURCE_REQUEST_FAILED') {
-      return t(isRss ? 'accounts.error.rssNetwork' : 'accounts.error.network');
+      return t(
+        isGithub
+          ? 'accounts.error.githubNetwork'
+          : isRss
+            ? 'accounts.error.rssNetwork'
+            : 'accounts.error.network',
+      );
     }
 
     if (error.code === 'SOURCE_AUTH_FAILED') {
@@ -442,7 +583,13 @@ function toAccountCreateErrorMessage(error: unknown): string {
     }
 
     if (error.code === 'SOURCE_RESPONSE_INVALID') {
-      return t(isRss ? 'accounts.error.rssPageUnreadable' : 'accounts.error.pageUnreadable');
+      return t(
+        isGithub
+          ? 'accounts.error.githubPageUnreadable'
+          : isRss
+            ? 'accounts.error.rssPageUnreadable'
+            : 'accounts.error.pageUnreadable',
+      );
     }
 
     if (error.code === 'SOURCE_ACCOUNT_NOT_FOUND') {
@@ -466,11 +613,19 @@ function toAccountCreateErrorMessage(error: unknown): string {
 }
 
 function sourceBadge(account: WatchAccount): string {
-  if (account.sourceType !== 'rss') {
+  if (account.sourceType === 'x') {
     return 'X';
   }
 
+  if (account.sourceType === 'github') {
+    return 'GitHub';
+  }
+
   const url = account.sourceUrl ?? '';
+
+  if (url.includes('github.com')) {
+    return 'GitHub';
+  }
 
   if (url.includes('youtube.com')) {
     return 'YouTube';

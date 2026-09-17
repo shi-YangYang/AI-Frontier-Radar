@@ -8,7 +8,7 @@ import { toPrismaSqliteDatabaseUrl } from '../src/shared/config';
 import { loadAppConfig } from '../src/config';
 import { createLogger } from '../src/lib/logger';
 import { createApp } from '../src/app/create-app';
-import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createRssSourceProvider, createSourceProviderRegistry, createXSourceProvider, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
+import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createGithubTrendingSourceProvider, createRssSourceProvider, createSourceProviderRegistry, createXSourceProvider, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
 import { runDeliveryWorkerJob } from '../src/modules/delivery';
 import { createRuntimeSourceProviders } from '../src/modules/scheduler';
 import { createPrismaClient, createStorage, DEFAULT_WATCH_SOURCES, importDefaultWatchSources } from '../src/modules/storage';
@@ -89,7 +89,11 @@ async function main(): Promise<void> {
   const rssProvider = createRssSourceProvider({
     timeoutMs: 5_000,
   });
+  const githubProvider = createGithubTrendingSourceProvider({
+    timeoutMs: 5_000,
+  });
   const sourceProviders = createSourceProviderRegistry({
+    github: githubProvider,
     rss: rssProvider,
     x: sourceProvider,
   });
@@ -100,6 +104,15 @@ async function main(): Promise<void> {
           return rssProvider.validateSource({
             source: {
               sourceType: 'rss',
+              sourceUrl: input.sourceUrl,
+            },
+          });
+        }
+
+        if (input.sourceType === 'github') {
+          return githubProvider.validateSource({
+            source: {
+              sourceType: 'github',
               sourceUrl: input.sourceUrl,
             },
           });
@@ -726,6 +739,140 @@ async function main(): Promise<void> {
     );
     checks.push({ name: 'RSS 代理不可用时请求失败' });
 
+    const trendingPath = '/trending';
+    const trendingUrl = `${rssApi.url}${trendingPath}`;
+    rssApi.setFeed(trendingPath, {
+      body: createTrendingHtml([
+        {
+          description: 'A high-throughput and memory-efficient inference engine.',
+          language: 'Python',
+          name: 'vllm',
+          owner: 'vllm-project',
+          stars: '60,123',
+          starsToday: '652',
+        },
+        {
+          description: 'Collection of transformer implementations.',
+          language: 'Python',
+          name: 'annotated_deep_learning_paper_implementations',
+          owner: 'labmlai',
+          stars: '50,000',
+          starsToday: '120',
+        },
+      ]),
+      contentType: 'text/html; charset=utf-8',
+      statusCode: 200,
+    });
+
+    const directTrending = await githubProvider.fetchPosts({
+      limit: 10,
+      source: { sourceType: 'github', sourceUrl: trendingUrl },
+    });
+    assert(
+      directTrending.posts.length === 2,
+      `trending provider should parse 2 repos, got ${directTrending.posts.length}`,
+    );
+    assert(
+      directTrending.posts[0]?.textContent.includes('vllm-project/vllm'),
+      'trending post should contain the repo full name',
+    );
+    assert(
+      directTrending.posts[0]?.textContent.includes('今日 +652'),
+      'trending post should contain stars today',
+    );
+    assert(
+      directTrending.posts[0]?.textContent.includes('A high-throughput') &&
+        !directTrending.posts[0]?.textContent.includes('Star '),
+      'trending post should strip star-button noise from the description',
+    );
+    checks.push({ name: 'GitHub Trending 解析（仓库/星数/描述）' });
+
+    const createGithubResponse = await app.inject({
+      method: 'POST',
+      payload: { sourceType: 'github', sourceUrl: trendingUrl },
+      url: '/admin/api/watch-accounts',
+    });
+    assert(
+      createGithubResponse.statusCode === 200,
+      `github source create returned ${createGithubResponse.statusCode}`,
+    );
+    const githubAccount = await storage.watchAccounts.findBySource({
+      sourceType: 'github',
+      sourceUrl: trendingUrl,
+    });
+    assert(githubAccount !== null, 'github watch account was not stored');
+
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const githubAccountAfterPoll = await storage.watchAccounts.findById(githubAccount.id);
+    const githubAuthorId = githubAccountAfterPoll?.xUserId ?? '';
+    const githubPostsAfterFirstPoll = await prisma.xPostRaw.count({
+      where: { authorUserId: githubAuthorId },
+    });
+    assert(
+      githubPostsAfterFirstPoll === 2,
+      `first github poll should store both baseline repos, got ${githubPostsAfterFirstPoll}`,
+    );
+
+    const baselineRepoPost = await storage.xPosts.findByDedupeKey('github:trending:vllm-project/vllm');
+    assert(baselineRepoPost !== null, 'baseline repo post was not stored');
+    const baselineRepoEvent = await storage.deliveryEvents.findByPostAndTarget(
+      baselineRepoPost.xPostId,
+      TARGET_KEY,
+    );
+    assert(baselineRepoEvent === null, 'baseline repos must not create delivery events');
+    checks.push({ name: 'GitHub Trending 首次基线全量入库且不投递' });
+
+    rssApi.setFeed(trendingPath, {
+      body: createTrendingHtml([
+        {
+          description: 'A high-throughput and memory-efficient inference engine.',
+          language: 'Python',
+          name: 'vllm',
+          owner: 'vllm-project',
+          stars: '60,123',
+          starsToday: '652',
+        },
+        {
+          description: 'Collection of transformer implementations.',
+          language: 'Python',
+          name: 'annotated_deep_learning_paper_implementations',
+          owner: 'labmlai',
+          stars: '50,000',
+          starsToday: '120',
+        },
+        {
+          description: 'LLM inference in C/C++.',
+          language: 'C++',
+          name: 'llama.cpp',
+          owner: 'ggml-org',
+          stars: '80,000',
+          starsToday: '900',
+        },
+      ]),
+      contentType: 'text/html; charset=utf-8',
+      statusCode: 200,
+    });
+
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const newRepoPost = await storage.xPosts.findByDedupeKey('github:trending:ggml-org/llama.cpp');
+    assert(newRepoPost !== null, 'newly trending repo was not stored');
+    const newRepoEvent = await storage.deliveryEvents.findByPostAndTarget(
+      newRepoPost.xPostId,
+      TARGET_KEY,
+    );
+    assert(newRepoEvent !== null, 'newly trending repo should create a delivery event');
+    checks.push({ name: 'GitHub Trending 新仓库增量入库并投递' });
+
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const githubPostsAfterThirdPoll = await prisma.xPostRaw.count({
+      where: { authorUserId: githubAuthorId },
+    });
+    assert(
+      githubPostsAfterThirdPoll === 3,
+      `repeat github poll should not store duplicates, got ${githubPostsAfterThirdPoll}`,
+    );
+    checks.push({ name: 'GitHub Trending 重复轮询不重复入库' });
+
     const youtubeHtml = [
       '<!doctype html><html><head>',
       '<meta property="og:title" content="OpenAI - YouTube">',
@@ -1039,6 +1186,39 @@ function createAtomDocument(title: string, entries: string[]): string {
     ...entries,
     '</feed>',
   ].join('');
+}
+
+interface MockTrendingRepo {
+  description?: string;
+  language?: string;
+  name: string;
+  owner: string;
+  stars: string;
+  starsToday?: string;
+}
+
+function createTrendingHtml(repos: MockTrendingRepo[]): string {
+  const articles = repos.map((repo) => {
+    const repoPath = `${repo.owner}/${repo.name}`;
+
+    return [
+      '<article class="Box-row">',
+      `<h2 class="h3 lh-condensed"><a href="/${repoPath}">${repo.owner} / ${repo.name}</a></h2>`,
+      repo.description === undefined
+        ? ''
+        : `<p class="col-9 color-fg-muted my-1 pr-4"><span class="sr-only">Star ${repo.owner} / ${repo.name}</span>${repo.description}</p>`,
+      repo.language === undefined
+        ? ''
+        : `<span itemprop="programmingLanguage">${repo.language}</span>`,
+      `<a href="/${repoPath}/stargazers"><svg class="octicon"></svg>${repo.stars}</a>`,
+      repo.starsToday === undefined
+        ? ''
+        : `<span class="d-inline-block float-sm-right">${repo.starsToday} stars today</span>`,
+      '</article>',
+    ].join('');
+  });
+
+  return `<!doctype html><html><body>${articles.join('')}</body></html>`;
 }
 
 function escapeXml(value: string): string {

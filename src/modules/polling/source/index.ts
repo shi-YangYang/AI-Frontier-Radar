@@ -10,6 +10,11 @@ export { createXSourceProvider, XSourceProvider } from './x-source-provider';
 export type { XSourceProviderOptions } from './x-source-provider';
 export { createRssSourceProvider, RssSourceProvider } from './rss-source-provider';
 export type { RssSourceProviderOptions } from './rss-source-provider';
+export {
+  createGithubTrendingSourceProvider,
+  GithubTrendingSourceProvider,
+} from './github-trending-source-provider';
+export type { GithubTrendingSourceProviderOptions } from './github-trending-source-provider';
 export { createSourceProviderRegistry } from './source-provider-registry';
 export { createFetchWithProxy } from './fetch-with-proxy';
 export type { FetchImplementation } from './fetch-with-proxy';

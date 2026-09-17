@@ -21,6 +21,7 @@ export const DEFAULT_WATCH_SOURCES: readonly DefaultWatchSource[] = [
   { sourceType: 'rss', sourceUrl: 'https://blog.google/technology/ai/rss/' },
   { sourceType: 'rss', sourceUrl: 'https://deepmind.google/blog/rss.xml' },
   { sourceType: 'rss', sourceUrl: 'https://www.qbitai.com/feed' },
+  { sourceType: 'github', sourceUrl: 'https://github.com/trending?since=daily' },
 ];
 
 const DEFAULT_SOURCES_MARKER_KEY = 'sources.defaultsImportedAt';

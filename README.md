@@ -307,7 +307,7 @@ RSS 与 X 走同一条基线 / 增量 / 去重 / 入库 / 投递链路：首次�
 
 需要出网代理时，在 `/settings -> RSS 源` 保存代理（优先级：Web 控制台 > `.env` 的 `RSS_PROXY_URL`）。仅支持 `http://` 与 `https://`，不支持 `socks5://`。
 
-首次初始化（监听源表为空）时，服务会自动导入一组推荐源：arXiv cs.AI / cs.CL / cs.LG / cs.CV、Techmeme、Hacker News、Product Hunt、Reddit r/LocalLLaMA、OpenAI News、Google AI、Google DeepMind、量子位。默认源只导入一次，删除后不会恢复；导入发生在首次启动，不阻塞服务启动。
+首次初始化（监听源表为空）时，服务会自动导入一组推荐源：arXiv cs.AI / cs.CL / cs.LG / cs.CV、Techmeme、Hacker News、Product Hunt、Reddit r/LocalLLaMA、OpenAI News、Google AI、Google DeepMind、量子位、GitHub Trending（每日）。默认源只导入一次，删除后不会恢复；导入发生在首次启动，不阻塞服务启动。
 
 ### 按来源添加（预设）
 
@@ -321,8 +321,11 @@ RSS 与 X 走同一条基线 / 增量 / 去重 / 入库 / 投递链路：首次�
 | arXiv | 分类（cs.AI / cs.CL / cs.CV / cs.LG / cs.RO / stat.ML） | `export.arxiv.org/rss/<category>` |
 | Hacker News | 首页 / 最新 / ≥100 分 / ≥300 分 | `hnrss.org/...` |
 | Product Hunt | 无需输入 | `producthunt.com/feed` |
+| GitHub 热门仓库 | 周期（每日/每周/每月）+ 可选语言 | `github.com/trending[/<lang>]?since=...`（服务端解析页面） |
+| GitHub 仓库发布 | `owner/repo` | `github.com/<owner>/<repo>/releases.atom` |
+| GitHub 用户动态 | 用户名 | `github.com/<user>.atom` |
 
-YouTube 解析遵循 RSS 代理配置；解析失败时可改为直接粘贴频道 RSS 地址。
+YouTube 解析与 GitHub 页面抓取遵循“RSS 源”页签里的代理配置；GitHub 热门仓库首次接入会把当前榜单整体作为基线入库（不推送），之后只有新进入榜单的仓库才会推送。
 
 ## 常用命令
 
