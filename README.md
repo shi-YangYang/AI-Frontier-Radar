@@ -307,7 +307,7 @@ RSS 与 X 走同一条基线 / 增量 / 去重 / 入库 / 投递链路：首次�
 
 需要出网代理时，在 `/settings -> RSS 源` 保存代理（优先级：Web 控制台 > `.env` 的 `RSS_PROXY_URL`）。仅支持 `http://` 与 `https://`，不支持 `socks5://`。
 
-首次初始化（监听源表为空）时，服务会自动导入一组推荐源：arXiv cs.AI / cs.CL / cs.LG / cs.CV、Techmeme、Hacker News、Product Hunt、Reddit r/LocalLLaMA、OpenAI News、Google AI、Google DeepMind、量子位、GitHub Trending（每日）、HF Daily Papers。默认源只导入一次，删除后不会恢复；导入发生在首次启动，不阻塞服务启动。
+初始化后监听源为空，默认不监听任何内容。可在 `/accounts` 顶部的“监听组合”中一键添加常用源（当前提供「AI 消息」组：arXiv 四分类、HF Daily Papers、Techmeme、Hacker News、Reddit r/LocalLLaMA、Product Hunt、OpenAI、Google AI、DeepMind、量子位、GitHub Trending 热门仓库）；重复应用会自动跳过已存在的源。
 
 ### 按来源添加（预设）
 
@@ -327,6 +327,16 @@ RSS 与 X 走同一条基线 / 增量 / 去重 / 入库 / 投递链路：首次�
 | GitHub 用户动态 | 用户名 | `github.com/<user>.atom` |
 
 YouTube 解析与 GitHub 页面抓取遵循“RSS 源”页签里的代理配置；GitHub 热门仓库首次接入会把当前榜单整体作为基线入库（不推送），之后只有新进入榜单的仓库才会推送。
+
+## 监听组合
+
+`/accounts` 顶部提供内置监听组合，一键添加一组常用源（已存在的自动跳过）：
+
+| 组合 | 内容 |
+| --- | --- |
+| AI 消息 | arXiv cs.AI / cs.CL / cs.LG / cs.CV、HF Daily Papers、Techmeme、Hacker News、Reddit r/LocalLLaMA、Product Hunt、OpenAI News、Google AI、Google DeepMind、量子位、GitHub Trending（每日） |
+
+初始化后监听源为空，不会自动添加任何源；首次轮询只建立基线，不推送历史内容。
 
 ## 订阅规则（推送过滤）
 

@@ -405,6 +405,29 @@ export interface ResolvedYoutubeChannel {
   label?: string;
 }
 
+export interface SourceGroupStatus {
+  description: string;
+  id: string;
+  installedCount: number;
+  name: string;
+  sourceCount: number;
+}
+
+export async function getSourceGroups(): Promise<SourceGroupStatus[]> {
+  const data = await requestJson<{ groups: SourceGroupStatus[] }>('/admin/api/source-groups');
+
+  return data.groups;
+}
+
+export async function applySourceGroup(
+  id: string,
+): Promise<{ created: number; existing: number; group: string }> {
+  return requestJson<{ created: number; existing: number; group: string }>(
+    `/admin/api/source-groups/${encodeURIComponent(id)}/apply`,
+    { method: 'POST' },
+  );
+}
+
 export type SubscriptionRuleMode = 'all' | 'any';
 
 export interface SubscriptionRule {

@@ -38,6 +38,12 @@ import type {
   SaveXBrowserSettingsInput,
 } from '../../storage/runtime-settings-service';
 import type { XPostPageQuery, XPostRawWithDeliveryEvents, XPostSummary } from '../../storage/types';
+import { SOURCE_GROUPS, findSourceGroup } from '../../../config/source-groups';
+import {
+  applySourceGroup,
+  getSourceGroupStatuses,
+  type SourceGroupStatus,
+} from '../../storage';
 import { normalizeXUsername } from '../../storage/watch-account-repository';
 
 export type AdminWatchAccountValidationInput =
@@ -485,6 +491,40 @@ export async function updateAdminRssSettings(
   return {
     ok: true,
     data: settings,
+  };
+}
+
+export async function getAdminSourceGroups(
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { groups: SourceGroupStatus[] } }> {
+  const groups = await getSourceGroupStatuses(options.storage.watchAccounts, SOURCE_GROUPS);
+
+  return {
+    ok: true,
+    data: { groups },
+  };
+}
+
+export async function applyAdminSourceGroup(
+  params: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { created: number; existing: number; group: string } }> {
+  const id = readIdParam(params);
+  const group = findSourceGroup(id);
+
+  if (group === undefined) {
+    throw new AdminApiError(404, 'NOT_FOUND', `监听组合不存在：${id}`);
+  }
+
+  const result = await applySourceGroup(options.storage.watchAccounts, group);
+
+  return {
+    ok: true,
+    data: {
+      created: result.created,
+      existing: result.existing,
+      group: group.id,
+    },
   };
 }
 

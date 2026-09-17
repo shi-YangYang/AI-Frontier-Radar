@@ -19,8 +19,10 @@ import {
   deleteAdminPollRun,
   deleteAdminWatchAccount,
   checkAdminXSourceLogin,
+  applyAdminSourceGroup,
   getAdminRssSettings,
   getAdminSettings,
+  getAdminSourceGroups,
   getAdminSubscriptionRules,
   getAdminSummary,
   getAdminXSourceSettings,
@@ -153,6 +155,27 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     },
     async (request, reply) =>
       sendAdminResponse(reply, () => updateAdminRssSettings(request.body, options)),
+  );
+
+  app.get(
+    '/admin/api/source-groups',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => getAdminSourceGroups(options)),
+  );
+
+  app.post(
+    '/admin/api/source-groups/:id/apply',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => applyAdminSourceGroup(request.params, options)),
   );
 
   app.get(

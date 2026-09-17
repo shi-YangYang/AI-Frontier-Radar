@@ -112,6 +112,40 @@
 
     <ToastNotice :message="notice" :danger="noticeDanger" />
 
+    <div v-if="sourceGroups.length > 0" class="panel source-groups-panel">
+      <header class="panel-header">
+        <div>
+          <h2>{{ t('accounts.groups.title') }}</h2>
+          <p>{{ t('accounts.groups.description') }}</p>
+        </div>
+      </header>
+      <div class="source-group-list">
+        <div v-for="group in sourceGroups" :key="group.id" class="source-group-row">
+          <div class="source-group-info">
+            <strong>
+              {{ group.name }}
+              <span class="status-badge neutral">
+                {{ group.installedCount }} / {{ group.sourceCount }}
+              </span>
+            </strong>
+            <p class="muted">{{ group.description }}</p>
+          </div>
+          <button
+            class="primary"
+            type="button"
+            :disabled="busy || group.installedCount >= group.sourceCount"
+            @click="applyGroup(group)"
+          >
+            {{
+              group.installedCount >= group.sourceCount
+                ? t('accounts.groups.added')
+                : t('accounts.groups.apply')
+            }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div class="panel">
       <form class="query-form" @submit.prevent="applyQuery">
         <label>
@@ -191,10 +225,13 @@ import {
   AdminApiRequestError,
   createWatchAccount,
   deleteWatchAccount,
+  getSourceGroups,
   listWatchAccounts,
+  applySourceGroup,
   resolveYoutubeChannel,
   type AdminPagination,
   type ResolvedYoutubeChannel,
+  type SourceGroupStatus,
   type WatchAccount,
 } from '../api/admin-api';
 import ConfirmModal from '../components/ConfirmModal.vue';
@@ -232,6 +269,7 @@ const YOUTUBE_CHANNEL_ID_PATTERN = /^UC[A-Za-z0-9_-]{20,}$/u;
 const REDDIT_NAME_PATTERN = /^[A-Za-z0-9_]{2,21}$/u;
 
 const accounts = ref<WatchAccount[]>([]);
+const sourceGroups = ref<SourceGroupStatus[]>([]);
 const activeQuery = ref('');
 const addingAccount = ref(false);
 const busy = ref(false);
@@ -340,6 +378,7 @@ watch([redditName, redditSort, arxivCategory, hnPreset], () => {
 
 onMounted(() => {
   void loadAccounts(1, { silent: true });
+  void loadSourceGroups();
 });
 
 async function loadAccounts(page: number, options: { silent?: boolean } = {}): Promise<void> {
@@ -534,6 +573,39 @@ function resetSourceForm(): void {
   githubLanguage.value = '';
   githubRepo.value = '';
   githubUser.value = '';
+}
+
+async function loadSourceGroups(): Promise<void> {
+  try {
+    sourceGroups.value = await getSourceGroups();
+  } catch {
+    sourceGroups.value = [];
+  }
+}
+
+async function applyGroup(group: SourceGroupStatus): Promise<void> {
+  busy.value = true;
+
+  try {
+    const result = await applySourceGroup(group.id);
+    await loadAccounts(1, { silent: true });
+    await loadSourceGroups();
+    setNotice(
+      t('notice.sourceGroupApplied', {
+        created: result.created,
+        existing: result.existing,
+      }),
+    );
+  } catch (error) {
+    setNotice(
+      t('notice.sourceGroupFailed', {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+      true,
+    );
+  } finally {
+    busy.value = false;
+  }
 }
 
 function askDelete(account: WatchAccount): void {

@@ -1995,3 +1995,41 @@ tr:last-child td {
     grid-template-columns: 1fr;
   }
 }
+
+.source-groups-panel {
+  margin-bottom: 16px;
+}
+
+.source-group-list {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.source-group-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.source-group-info {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.source-group-info p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 680px) {
+  .source-group-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

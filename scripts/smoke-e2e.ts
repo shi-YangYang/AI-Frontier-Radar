@@ -11,7 +11,8 @@ import { createApp } from '../src/app/create-app';
 import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createGithubTrendingSourceProvider, createHfDailyPapersSourceProvider, createRssSourceProvider, createSourceProviderRegistry, createSubscriptionRuleMatcher, createXSourceProvider, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
 import { runDeliveryWorkerJob } from '../src/modules/delivery';
 import { createRuntimeSourceProviders } from '../src/modules/scheduler';
-import { createPrismaClient, createStorage, DEFAULT_WATCH_SOURCES, importDefaultWatchSources } from '../src/modules/storage';
+import { applySourceGroup, createPrismaClient, createStorage, getSourceGroupStatuses } from '../src/modules/storage';
+import { SOURCE_GROUPS } from '../src/config/source-groups';
 import { ConfigValidationError } from '../src/shared/env/config-validation-error';
 
 type SmokeCheck = {
@@ -156,34 +157,68 @@ async function main(): Promise<void> {
     assert(seededAccount.enabled, 'seed watch account should be enabled');
     checks.push({ name: 'seed watch account 写入数据库' });
 
-    const defaultsSqlitePath = join(tempDir, 'defaults.sqlite');
-    const defaultsStorage = createStorage({
-      databaseUrl: toPrismaSqliteDatabaseUrl(defaultsSqlitePath),
-      sqlitePath: defaultsSqlitePath,
+    const groupsSqlitePath = join(tempDir, 'groups.sqlite');
+    const groupsStorage = createStorage({
+      databaseUrl: toPrismaSqliteDatabaseUrl(groupsSqlitePath),
+      sqlitePath: groupsSqlitePath,
       watchAccountsSource: { items: [], type: 'database' },
     });
 
     try {
-      await defaultsStorage.initialize();
+      await groupsStorage.initialize();
 
-      const firstImport = await importDefaultWatchSources(defaultsStorage);
+      const aiGroup = SOURCE_GROUPS.find((group) => group.id === 'ai-news');
+      assert(aiGroup !== undefined, 'ai-news source group should exist');
+
+      const beforeStatuses = await getSourceGroupStatuses(
+        groupsStorage.watchAccounts,
+        SOURCE_GROUPS,
+      );
       assert(
-        firstImport.importedCount === DEFAULT_WATCH_SOURCES.length,
-        `fresh database should import ${DEFAULT_WATCH_SOURCES.length} default sources, got ${firstImport.importedCount}`,
+        beforeStatuses[0]?.installedCount === 0,
+        `fresh database should have no group sources installed, got ${beforeStatuses[0]?.installedCount}`,
       );
 
-      const secondImport = await importDefaultWatchSources(defaultsStorage);
-      assert(secondImport.skipped, 'second default-source import should be skipped by the marker');
-
-      const defaultsCount = await defaultsStorage.watchAccounts.countAll();
+      const firstApply = await applySourceGroup(groupsStorage.watchAccounts, aiGroup);
       assert(
-        defaultsCount === DEFAULT_WATCH_SOURCES.length,
-        `default sources should not be duplicated, got ${defaultsCount}`,
+        firstApply.created === aiGroup.sources.length,
+        `group apply should create ${aiGroup.sources.length} sources, got ${firstApply.created}`,
       );
-      checks.push({ name: '首次初始化导入默认源且只导入一次' });
+
+      const secondApply = await applySourceGroup(groupsStorage.watchAccounts, aiGroup);
+      assert(secondApply.created === 0, 'second group apply should not create duplicates');
+      assert(
+        secondApply.existing === aiGroup.sources.length,
+        `second apply should report ${aiGroup.sources.length} existing, got ${secondApply.existing}`,
+      );
+
+      const afterStatuses = await getSourceGroupStatuses(
+        groupsStorage.watchAccounts,
+        SOURCE_GROUPS,
+      );
+      assert(
+        afterStatuses[0]?.installedCount === aiGroup.sources.length,
+        'group status should report all sources installed',
+      );
+      checks.push({ name: '监听组合：一键添加且重复应用不重复' });
     } finally {
-      await defaultsStorage.close();
+      await groupsStorage.close();
     }
+
+    const groupsResponse = await app.inject({ method: 'GET', url: '/admin/api/source-groups' });
+    assert(
+      groupsResponse.statusCode === 200,
+      `GET source-groups returned ${groupsResponse.statusCode}`,
+    );
+    const missingGroupResponse = await app.inject({
+      method: 'POST',
+      url: '/admin/api/source-groups/not-exist/apply',
+    });
+    assert(
+      missingGroupResponse.statusCode === 404,
+      `unknown group should return 404, got ${missingGroupResponse.statusCode}`,
+    );
+    checks.push({ name: '监听组合 API：查询与未知组合 404' });
 
     const emptyPoll = await runPollingJob({
       config,
