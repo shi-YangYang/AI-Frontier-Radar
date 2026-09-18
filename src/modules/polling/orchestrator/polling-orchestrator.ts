@@ -58,6 +58,7 @@ export class PollingOrchestrator {
   }
 
   public async runOnce(): Promise<PollingRunResult> {
+    const previousRun = await this.options.storage.pollRuns.findLatest();
     const pollRun = await this.options.storage.pollRuns.create({
       startedAt: createTimestamp(),
       status: 'running',
@@ -102,6 +103,37 @@ export class PollingOrchestrator {
         newPostsDetected,
         status,
       });
+
+      if (status === 'success' && newPostsDetected === 0) {
+        await this.options.storage.pollRuns.delete(pollRun.id);
+        this.logger?.debug?.(
+          {
+            pollRunId: pollRun.id,
+          },
+          'empty polling run was not recorded',
+        );
+      } else if (status !== 'success') {
+        if (
+          previousRun !== null &&
+          previousRun.status === status &&
+          (previousRun.errorSummary ?? '') === (errorSummary ?? '') &&
+          previousRun.errorSummary !== null
+        ) {
+          await this.options.storage.pollRuns.update(previousRun.id, {
+            finishedAt: createTimestamp(),
+            repeatCount: previousRun.repeatCount + 1,
+          });
+          await this.options.storage.pollRuns.delete(pollRun.id);
+          this.logger?.debug?.(
+            {
+              mergedIntoPollRunId: previousRun.id,
+              pollRunId: pollRun.id,
+              repeatCount: previousRun.repeatCount + 1,
+            },
+            'identical polling failure merged into previous run',
+          );
+        }
+      }
 
       this.logger?.info(
         {

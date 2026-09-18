@@ -816,6 +816,31 @@ async function main(): Promise<void> {
     );
     checks.push({ name: '单个源失败不影响其他源并记录错误' });
 
+    const runCountBeforeRepeatFailure = await prisma.pollRun.count();
+    const repeatFailingPoll = await runPollingJob({
+      config,
+      logger,
+      sourceProviders,
+      storage,
+    });
+    assert(
+      repeatFailingPoll.status === 'partial_failed',
+      `repeat failing poll status should stay partial_failed, got ${repeatFailingPoll.status}`,
+    );
+    const runCountAfterRepeatFailure = await prisma.pollRun.count();
+    assert(
+      runCountAfterRepeatFailure === runCountBeforeRepeatFailure,
+      `identical failure should merge instead of adding a run: ${runCountBeforeRepeatFailure} -> ${runCountAfterRepeatFailure}`,
+    );
+    const mergedFailingRun = await prisma.pollRun.findFirst({
+      orderBy: { startedAt: 'desc' },
+    });
+    assert(
+      mergedFailingRun !== null && mergedFailingRun.repeatCount >= 2,
+      `consecutive identical failures should increment repeatCount, got ${mergedFailingRun?.repeatCount}`,
+    );
+    checks.push({ name: '连续相同失败合并为一条记录' });
+
     const proxyFeedUrl = `${rssApi.url}${RSS_FEED_PATH}`;
     rssApi.setFeed(RSS_FEED_PATH, {
       body: createRssDocument('Proxy Feed', [

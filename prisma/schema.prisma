@@ -106,6 +106,7 @@ model PollRun {
   newPostsDetected  Int    @default(0) @map("new_posts_detected")
   eventsCreated     Int    @default(0) @map("events_created")
   errorSummary      String? @map("error_summary")
+  repeatCount       Int    @default(1) @map("repeat_count")
   createdAt         String @map("created_at")
 
   @@index([startedAt])

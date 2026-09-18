@@ -212,41 +212,44 @@ export interface UpdateDeliveryEventInput {
 }
 
 export interface PollRun {
-  id: string;
-  startedAt: string;
-  finishedAt: string | null;
-  status: PollRunStatus;
-  accountsTotal: number;
-  accountsSucceeded: number;
-  accountsFailed: number;
-  newPostsDetected: number;
-  eventsCreated: number;
-  errorSummary: string | null;
   createdAt: string;
+  errorSummary: string | null;
+  eventsCreated: number;
+  finishedAt: string | null;
+  id: string;
+  newPostsDetected: number;
+  accountsFailed: number;
+  accountsSucceeded: number;
+  accountsTotal: number;
+  repeatCount: number;
+  startedAt: string;
+  status: PollRunStatus;
 }
 
 export interface CreatePollRunInput {
-  id?: string;
-  startedAt?: string;
-  finishedAt?: string | null;
-  status?: PollRunStatus;
-  accountsTotal?: number;
-  accountsSucceeded?: number;
   accountsFailed?: number;
-  newPostsDetected?: number;
-  eventsCreated?: number;
+  accountsSucceeded?: number;
+  accountsTotal?: number;
   errorSummary?: string | null;
+  eventsCreated?: number;
+  finishedAt?: string | null;
+  id?: string;
+  newPostsDetected?: number;
+  repeatCount?: number;
+  startedAt?: string;
+  status?: PollRunStatus;
 }
 
 export interface UpdatePollRunInput {
-  finishedAt?: string | null;
-  status?: PollRunStatus;
-  accountsTotal?: number;
-  accountsSucceeded?: number;
   accountsFailed?: number;
-  newPostsDetected?: number;
-  eventsCreated?: number;
+  accountsSucceeded?: number;
+  accountsTotal?: number;
   errorSummary?: string | null;
+  eventsCreated?: number;
+  finishedAt?: string | null;
+  newPostsDetected?: number;
+  repeatCount?: number;
+  status?: PollRunStatus;
 }
 
 export interface DefaultDeliveryTargetInput {

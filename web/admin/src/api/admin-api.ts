@@ -74,6 +74,7 @@ export interface PollRun {
   newPostsDetected: number;
   eventsCreated: number;
   errorSummary: string | null;
+  repeatCount: number;
   createdAt: string;
 }
 
