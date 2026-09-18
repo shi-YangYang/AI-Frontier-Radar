@@ -59,7 +59,7 @@ export class HfDailyPapersSourceProvider implements SourceProvider {
     if (entries.length === 0) {
       throw new SourceProviderError(
         'SOURCE_RESPONSE_INVALID',
-        'Hugging Face Daily Papers API returned no papers.',
+        'HF Daily Papers 接口未返回论文。',
         {
           endpoint: sourceUrl,
           operation: 'fetch-timeline',
@@ -77,7 +77,7 @@ export class HfDailyPapersSourceProvider implements SourceProvider {
     if (posts.length === 0) {
       throw new SourceProviderError(
         'SOURCE_RESPONSE_INVALID',
-        'Hugging Face Daily Papers API entries could not be normalized.',
+        'HF Daily Papers 条目无法解析。',
         {
           endpoint: sourceUrl,
           operation: 'fetch-timeline',
@@ -110,7 +110,7 @@ export class HfDailyPapersSourceProvider implements SourceProvider {
     if (entries.length === 0) {
       throw new SourceProviderError(
         'SOURCE_RESPONSE_INVALID',
-        'Hugging Face Daily Papers API returned no papers.',
+        'HF Daily Papers 接口未返回论文。',
         {
           endpoint: sourceUrl,
           operation: 'resolve-account',
@@ -140,7 +140,7 @@ export class HfDailyPapersSourceProvider implements SourceProvider {
       if (response.status === 404 || response.status === 410) {
         throw new SourceProviderError(
           'SOURCE_ACCOUNT_NOT_FOUND',
-          `Hugging Face Daily Papers API was not found (HTTP ${response.status}).`,
+          `HF Daily Papers 接口不存在（HTTP ${response.status}）。`,
           {
             endpoint: sourceUrl,
             operation: 'fetch-timeline',
@@ -154,7 +154,7 @@ export class HfDailyPapersSourceProvider implements SourceProvider {
       if (!response.ok) {
         throw new SourceProviderError(
           'SOURCE_REQUEST_FAILED',
-          `Hugging Face Daily Papers API request failed (HTTP ${response.status}).`,
+          `HF Daily Papers 接口请求失败（HTTP ${response.status}）。`,
           {
             endpoint: sourceUrl,
             operation: 'fetch-timeline',
@@ -170,7 +170,7 @@ export class HfDailyPapersSourceProvider implements SourceProvider {
       if (!Array.isArray(payload)) {
         throw new SourceProviderError(
           'SOURCE_RESPONSE_INVALID',
-          'Hugging Face Daily Papers API did not return a JSON array.',
+          'HF Daily Papers 接口未返回 JSON 数组。',
           {
             endpoint: sourceUrl,
             operation: 'fetch-timeline',
@@ -188,7 +188,7 @@ export class HfDailyPapersSourceProvider implements SourceProvider {
 
       throw new SourceProviderError(
         'SOURCE_REQUEST_FAILED',
-        'Hugging Face Daily Papers API request failed.',
+        'HF Daily Papers 接口请求失败。',
         {
           causeMessage: error instanceof Error ? error.message : String(error),
           endpoint: sourceUrl,
@@ -216,7 +216,7 @@ function normalizeApiUrl(rawUrl: string | undefined): string {
   if (value.length === 0) {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'Hugging Face Daily Papers source requires a sourceUrl.',
+      'HF Daily Papers 源需要 sourceUrl。',
       {
         operation: 'resolve-account',
         provider: 'hf_papers',
@@ -235,7 +235,7 @@ function normalizeApiUrl(rawUrl: string | undefined): string {
   } catch {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'Hugging Face Daily Papers source requires a valid http/https URL.',
+      'HF Daily Papers 源需要有效的 http/https URL。',
       {
         operation: 'resolve-account',
         provider: 'hf_papers',

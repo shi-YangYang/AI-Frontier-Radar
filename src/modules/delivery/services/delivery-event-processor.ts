@@ -123,7 +123,7 @@ export class DeliveryEventProcessor {
       if (updatedEvent === null) {
         this.options.logger?.warn(
           { deliveryEventId: claimedEvent.id },
-          'delivery event was sent but could not be marked as sent',
+          '投递事件已发送，但未能标记为已发送',
         );
       }
 
@@ -169,7 +169,7 @@ export class DeliveryEventProcessor {
     if (updatedEvent === null) {
       this.options.logger?.warn(
         { deliveryEventId: event.id },
-        'delivery event failure could not be recorded because it is no longer sending',
+        '投递失败未能记录（该事件已不在发送中）',
       );
     }
 

@@ -41,7 +41,7 @@ export class BackupService {
     const entry = await this.describeEntry(path.basename(targetPath));
     this.options.logger?.info?.(
       { name: entry.name, sizeBytes: entry.sizeBytes },
-      'database backup created',
+      '数据库备份已创建',
     );
 
     return entry;
@@ -71,7 +71,7 @@ export class BackupService {
 
   public resolvePath(name: string): string {
     if (!BACKUP_NAME_PATTERN.test(name)) {
-      throw new Error('Invalid backup name.');
+      throw new Error('备份文件名无效。');
     }
 
     return path.join(this.options.backupsDir, name);

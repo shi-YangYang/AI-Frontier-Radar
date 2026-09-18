@@ -1,5 +1,7 @@
 import { computed, ref } from 'vue';
 
+import { translateBackendMessageToEnglish } from './backend-messages';
+
 export type AdminLanguage = 'zh-CN' | 'en-US';
 
 const DEFAULT_LANGUAGE: AdminLanguage = 'zh-CN';
@@ -503,6 +505,13 @@ const messages = {
     'settings.tabs.xSource.description': '代理、匿名测试与登录态',
     'settings.tabs.xSource.label': 'X 数据源',
     'settings.tabsAria': '配置页分类',
+    'logs.module.adminApi': '管理接口',
+    'logs.module.delivery': '投递',
+    'logs.module.deliveryProcessor': '投递处理',
+    'logs.module.polling': '轮询',
+    'logs.module.retention': '数据清理',
+    'logs.module.scheduler': '调度器',
+    'logs.module.wechat': '微信桥',
     'logs.title': '运行日志',
     'logs.subtitle': '当前进程最近 500 条日志（内存缓冲，重启后清空）。',
     'logs.autoRefreshOff': '自动刷新：关',
@@ -1137,6 +1146,13 @@ const messages = {
     'settings.tabs.xSource.description': 'Proxy, anonymous test, and login state',
     'settings.tabs.xSource.label': 'X source',
     'settings.tabsAria': 'Settings sections',
+    'logs.module.adminApi': 'Admin API',
+    'logs.module.delivery': 'Delivery',
+    'logs.module.deliveryProcessor': 'Delivery processor',
+    'logs.module.polling': 'Polling',
+    'logs.module.retention': 'Retention',
+    'logs.module.scheduler': 'Scheduler',
+    'logs.module.wechat': 'WeChat bridge',
     'logs.title': 'Runtime logs',
     'logs.subtitle': 'Latest 500 log entries of the current process (in-memory, cleared on restart).',
     'logs.autoRefreshOff': 'Auto refresh: off',
@@ -1284,6 +1300,18 @@ export function useI18n() {
     t,
     toggleLanguage,
   };
+}
+
+export function tBackend(message: string | null | undefined): string {
+  if (message === null || message === undefined || message.length === 0) {
+    return '';
+  }
+
+  if (language.value !== 'en-US') {
+    return message;
+  }
+
+  return translateBackendMessageToEnglish(message);
 }
 
 export function t(key: MessageKey, params: Record<string, string | number> = {}): string {

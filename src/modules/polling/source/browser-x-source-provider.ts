@@ -96,7 +96,7 @@ export class BrowserXSourceProvider implements SourceProvider {
     if (xUsername === undefined) {
       throw new SourceProviderError(
         'SOURCE_INVALID_INPUT',
-        'BrowserXSourceProvider requires xUsername because X profile URLs are username based.',
+        'X 浏览器源需要 xUsername（主页地址基于用户名）。',
         buildDiagnostics(input, 'resolve-account'),
       );
     }
@@ -148,7 +148,7 @@ export class BrowserXSourceProvider implements SourceProvider {
 
       throw new SourceProviderError(
         'SOURCE_REQUEST_FAILED',
-        'Browser X source request failed.',
+        'X 浏览器源请求失败。',
         buildDiagnostics(input, 'fetch-timeline', {
           causeMessage: error instanceof Error ? error.message : String(error),
         }),
@@ -166,7 +166,7 @@ export class BrowserXSourceProvider implements SourceProvider {
     if (xUsername === undefined) {
       throw new SourceProviderError(
         'SOURCE_INVALID_INPUT',
-        'BrowserXSourceProvider requires xUsername.',
+        'X 浏览器源需要 xUsername。',
         buildDiagnostics(input, 'resolve-account'),
       );
     }
@@ -202,7 +202,7 @@ export class BrowserXSourceProvider implements SourceProvider {
 
       throw new SourceProviderError(
         'SOURCE_REQUEST_FAILED',
-        'Browser X source account validation failed.',
+        'X 浏览器源账号校验失败。',
         buildDiagnostics(input, 'resolve-account', {
           causeMessage: error instanceof Error ? error.message : String(error),
           xUsername,
@@ -326,7 +326,7 @@ export async function parseXTimelineFromPage(
   if (normalizedUsername === undefined) {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'Browser X parser requires xUsername.',
+      'X 浏览器解析需要 xUsername。',
       {
         operation: 'fetch-timeline',
         provider: 'x',
@@ -450,7 +450,7 @@ function validateBrowserFetchInput(input: SourceProviderFetchInput): void {
   if (!isPresent(input.source.xUsername)) {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'BrowserXSourceProvider requires xUsername.',
+      'X 浏览器源需要 xUsername。',
       buildDiagnostics(input, 'resolve-account'),
     );
   }
@@ -458,7 +458,7 @@ function validateBrowserFetchInput(input: SourceProviderFetchInput): void {
   if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'BrowserXSourceProvider limit must be an integer between 1 and 100.',
+      'X 浏览器源 limit 必须是 1-100 的整数。',
       buildDiagnostics(input, 'fetch-timeline'),
     );
   }
@@ -498,7 +498,7 @@ async function waitForProfileOrKnownFailure(
   ) {
     throw new SourceProviderError(
       'SOURCE_AUTH_FAILED',
-      'Browser X source is not logged in. Open with headless=false and sign in with the user account.',
+      'X 浏览器源未登录：请以 headless=false 打开并登录账号。',
       buildDiagnostics(options.input, options.operation, {
         endpoint: options.profileUrl,
         xUsername: options.xUsername,
@@ -509,7 +509,7 @@ async function waitForProfileOrKnownFailure(
   if (RATE_LIMIT_PATTERN.test(pageText)) {
     throw new SourceProviderError(
       'SOURCE_RATE_LIMITED',
-      'Browser X source was rate limited.',
+      'X 浏览器源被限流。',
       buildDiagnostics(options.input, options.operation, {
         endpoint: options.profileUrl,
         responseBodySnippet: pageText.slice(0, 500),
@@ -521,7 +521,7 @@ async function waitForProfileOrKnownFailure(
   if (ACCOUNT_NOT_FOUND_PATTERN.test(pageText)) {
     throw new SourceProviderError(
       'SOURCE_ACCOUNT_NOT_FOUND',
-      'The requested X account was not found.',
+      '未找到指定的 X 账号。',
       buildDiagnostics(options.input, 'resolve-account', {
         endpoint: options.profileUrl,
         responseBodySnippet: pageText.slice(0, 500),
@@ -559,7 +559,7 @@ function classifyBrowserPageError(
   if (RATE_LIMIT_PATTERN.test(pageText)) {
     return new SourceProviderError(
       'SOURCE_RATE_LIMITED',
-      'Browser X source was rate limited.',
+      'X 浏览器源被限流。',
       buildDiagnostics(input, context.operation, {
         endpoint: context.endpoint,
         responseBodySnippet: pageText.slice(0, 500),
@@ -572,7 +572,7 @@ function classifyBrowserPageError(
   if (ACCOUNT_NOT_FOUND_PATTERN.test(pageText)) {
     return new SourceProviderError(
       'SOURCE_ACCOUNT_NOT_FOUND',
-      'The requested X account was not found.',
+      '未找到指定的 X 账号。',
       buildDiagnostics(input, 'resolve-account', {
         endpoint: context.endpoint,
         responseBodySnippet: pageText.slice(0, 500),
@@ -584,7 +584,7 @@ function classifyBrowserPageError(
 
   return new SourceProviderError(
     'SOURCE_RESPONSE_INVALID',
-    'Browser X source did not render a readable profile.',
+    'X 浏览器源未能渲染可读的主页。',
     buildDiagnostics(input, context.operation, {
       endpoint: context.endpoint,
       responseBodySnippet: pageText.slice(0, 500),

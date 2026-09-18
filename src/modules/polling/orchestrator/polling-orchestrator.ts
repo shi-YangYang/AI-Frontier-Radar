@@ -110,7 +110,7 @@ export class PollingOrchestrator {
           {
             pollRunId: pollRun.id,
           },
-          'empty polling run was not recorded',
+          '空轮询未记录（无新帖）',
         );
       } else if (status !== 'success') {
         if (
@@ -130,7 +130,7 @@ export class PollingOrchestrator {
               pollRunId: pollRun.id,
               repeatCount: previousRun.repeatCount + 1,
             },
-            'identical polling failure merged into previous run',
+            '连续相同失败已合并到上一条记录',
           );
         }
       }
@@ -145,7 +145,7 @@ export class PollingOrchestrator {
           pollRunId: pollRun.id,
           status,
         },
-        'Polling run finished.',
+        '轮询完成。',
       );
 
       return {
@@ -178,7 +178,7 @@ export class PollingOrchestrator {
           err: error,
           pollRunId: pollRun.id,
         },
-        'Polling run failed before completion.',
+        '轮询在完成前失败。',
       );
 
       throw error;
@@ -230,7 +230,7 @@ export class PollingOrchestrator {
           sourceLabel,
           watchAccountId: watchAccount.id,
         },
-        'Polling account failed.',
+        '轮询账号失败。',
       );
 
       return {

@@ -52,7 +52,7 @@ export class Ai2BlogSourceProvider implements SourceProvider {
     if (entries.length === 0) {
       throw new SourceProviderError(
         'SOURCE_RESPONSE_INVALID',
-        'AI2 blog page did not contain any posts.',
+        'AI2 博客页未解析到文章。',
         {
           endpoint: sourceUrl,
           operation: 'fetch-timeline',
@@ -91,7 +91,7 @@ export class Ai2BlogSourceProvider implements SourceProvider {
     if (parseAi2BlogHtml(html, new Date().toISOString()).length === 0) {
       throw new SourceProviderError(
         'SOURCE_RESPONSE_INVALID',
-        'AI2 blog page did not contain any posts.',
+        'AI2 博客页未解析到文章。',
         {
           endpoint: sourceUrl,
           operation: 'resolve-account',
@@ -123,7 +123,7 @@ export class Ai2BlogSourceProvider implements SourceProvider {
       if (response.status === 404 || response.status === 410) {
         throw new SourceProviderError(
           'SOURCE_ACCOUNT_NOT_FOUND',
-          `AI2 blog page was not found (HTTP ${response.status}).`,
+          `AI2 博客页不存在（HTTP ${response.status}）。`,
           {
             endpoint: sourceUrl,
             operation: 'fetch-timeline',
@@ -137,7 +137,7 @@ export class Ai2BlogSourceProvider implements SourceProvider {
       if (!response.ok) {
         throw new SourceProviderError(
           'SOURCE_REQUEST_FAILED',
-          `AI2 blog page request failed (HTTP ${response.status}).`,
+          `AI2 博客页请求失败（HTTP ${response.status}）。`,
           {
             endpoint: sourceUrl,
             operation: 'fetch-timeline',
@@ -156,7 +156,7 @@ export class Ai2BlogSourceProvider implements SourceProvider {
 
       throw new SourceProviderError(
         'SOURCE_REQUEST_FAILED',
-        'AI2 blog page request failed.',
+        'AI2 博客页请求失败。',
         {
           causeMessage: error instanceof Error ? error.message : String(error),
           endpoint: sourceUrl,
@@ -218,7 +218,7 @@ function normalizeSourceUrl(rawUrl: string | undefined): string {
   const value = rawUrl?.trim() ?? '';
 
   if (value.length === 0) {
-    throw new SourceProviderError('SOURCE_INVALID_INPUT', 'AI2 blog source requires a sourceUrl.', {
+    throw new SourceProviderError('SOURCE_INVALID_INPUT', 'AI2 博客源需要 sourceUrl。', {
       operation: 'resolve-account',
       provider: 'ai2_blog',
     });
@@ -235,7 +235,7 @@ function normalizeSourceUrl(rawUrl: string | undefined): string {
   } catch {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'AI2 blog source requires a valid http/https URL.',
+      'AI2 博客源需要有效的 http/https URL。',
       {
         operation: 'resolve-account',
         provider: 'ai2_blog',

@@ -63,7 +63,7 @@ export class DingtalkWebhookSender implements DeliveryChannelSender {
           channel: this.channelType,
           code: 'DINGTALK_RESPONSE_ERROR',
           diagnostics: { providerCode: response.errcode, providerMessage: response.errmsg },
-          message: `DingTalk webhook rejected the message (errcode=${String(response.errcode)}).`,
+          message: `钉钉返回错误（errcode=${String(response.errcode)}）。`,
           retryable: false,
           targetKey: input.targetKey,
         });
@@ -71,7 +71,7 @@ export class DingtalkWebhookSender implements DeliveryChannelSender {
 
       return createChannelSuccess({
         channel: this.channelType,
-        message: 'DingTalk webhook accepted the message.',
+        message: '钉钉已接收消息。',
         ...(response.errcode === undefined ? {} : { providerCode: response.errcode }),
         ...(response.errmsg === undefined ? {} : { providerMessage: response.errmsg }),
         targetKey: input.targetKey,

@@ -52,7 +52,7 @@ export class RetentionService {
     const retentionDays = input.retentionDays;
 
     if (!Number.isSafeInteger(retentionDays) || retentionDays < 0 || retentionDays > MAX_RETENTION_DAYS) {
-      throw new Error(`retentionDays must be an integer from 0 to ${MAX_RETENTION_DAYS}.`);
+      throw new Error(`保留天数必须是 0-${MAX_RETENTION_DAYS} 的整数。`);
     }
 
     await this.options.storage.appSettings.setJson(RETENTION_DAYS_KEY, retentionDays);
@@ -121,7 +121,7 @@ export class RetentionService {
     await this.options.storage.appSettings.setJson(LAST_CLEANUP_AT_KEY, new Date().toISOString());
     this.options.logger?.info?.(
       { deletedEvents, deletedPosts, retentionDays },
-      'retention cleanup completed',
+      '数据保留清理完成',
     );
 
     return { deletedEvents, deletedPosts };

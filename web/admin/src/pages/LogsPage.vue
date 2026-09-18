@@ -59,7 +59,7 @@ import PageHeader from '../components/PageHeader.vue';
 import SelectControl from '../components/SelectControl.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import ToastNotice from '../components/ToastNotice.vue';
-import { t } from '../i18n';
+import { t, tBackend, type MessageKey } from '../i18n';
 import { formatRelativeTime } from '../utils';
 
 const AUTO_REFRESH_INTERVAL_MS = 5_000;
@@ -121,16 +121,33 @@ function syncAutoRefreshTimer(): void {
   }
 }
 
+const MODULE_LABEL_KEYS: Record<string, MessageKey> = {
+  'admin-api': 'logs.module.adminApi',
+  'delivery-event-processor': 'logs.module.deliveryProcessor',
+  'delivery-worker': 'logs.module.delivery',
+  'polling-account': 'logs.module.polling',
+  'polling-orchestrator': 'logs.module.polling',
+  'retention': 'logs.module.retention',
+  'runtime-scheduler': 'logs.module.scheduler',
+  'wechat-bridge': 'logs.module.wechat',
+};
+
 function moduleOf(entry: LogBufferEntry): string {
   const value = entry.module;
 
-  return typeof value === 'string' && value.length > 0 ? value : '-';
+  if (typeof value !== 'string' || value.length === 0) {
+    return '-';
+  }
+
+  const key = MODULE_LABEL_KEYS[value];
+
+  return key === undefined ? value : t(key);
 }
 
 function messageOf(entry: LogBufferEntry): string {
   const value = entry.msg ?? entry.message;
 
-  return typeof value === 'string' ? value : JSON.stringify(value ?? '');
+  return tBackend(typeof value === 'string' ? value : JSON.stringify(value ?? ''));
 }
 
 function fullMessage(entry: LogBufferEntry): string {

@@ -55,7 +55,7 @@ export class MetaAiBlogSourceProvider implements SourceProvider {
     if (entries.length === 0) {
       throw new SourceProviderError(
         'SOURCE_RESPONSE_INVALID',
-        'AI at Meta blog page did not render any posts.',
+        'AI at Meta 博客页未渲染出文章。',
         {
           endpoint: sourceUrl,
           operation: 'fetch-timeline',
@@ -94,7 +94,7 @@ export class MetaAiBlogSourceProvider implements SourceProvider {
     if (normalizeMetaBlogRawEntries(rawEntries, new Date().toISOString()).length === 0) {
       throw new SourceProviderError(
         'SOURCE_RESPONSE_INVALID',
-        'AI at Meta blog page did not render any posts.',
+        'AI at Meta 博客页未渲染出文章。',
         {
           endpoint: sourceUrl,
           operation: 'resolve-account',
@@ -134,7 +134,7 @@ export class MetaAiBlogSourceProvider implements SourceProvider {
 
       throw new SourceProviderError(
         'SOURCE_REQUEST_FAILED',
-        'AI at Meta blog page render failed.',
+        'AI at Meta 博客页渲染失败。',
         {
           causeMessage: error instanceof Error ? error.message : String(error),
           endpoint: sourceUrl,
@@ -206,7 +206,7 @@ function normalizeSourceUrl(rawUrl: string | undefined): string {
   if (value.length === 0) {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'AI at Meta blog source requires a sourceUrl.',
+      'AI at Meta 博客源需要 sourceUrl。',
       {
         operation: 'resolve-account',
         provider: 'meta_ai_blog',
@@ -225,7 +225,7 @@ function normalizeSourceUrl(rawUrl: string | undefined): string {
   } catch {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'AI at Meta blog source requires a valid http/https URL.',
+      'AI at Meta 博客源需要有效的 http/https URL。',
       {
         operation: 'resolve-account',
         provider: 'meta_ai_blog',

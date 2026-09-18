@@ -35,7 +35,7 @@ export class DeliveryWorker {
     if (restoredCount > 0) {
       this.options.logger?.warn(
         { restoredCount },
-        'restored timed out sending delivery events',
+        '已恢复超时未完成的投递事件',
       );
     }
 

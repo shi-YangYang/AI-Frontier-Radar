@@ -50,7 +50,7 @@ export class MoonshotBlogSourceProvider implements SourceProvider {
     if (entries.length === 0) {
       throw new SourceProviderError(
         'SOURCE_RESPONSE_INVALID',
-        'Moonshot blog page did not contain any posts.',
+        'Moonshot 博客页未解析到文章。',
         {
           endpoint: sourceUrl,
           operation: 'fetch-timeline',
@@ -89,7 +89,7 @@ export class MoonshotBlogSourceProvider implements SourceProvider {
     if (parseMoonshotBlogHtml(html, new Date().toISOString()).length === 0) {
       throw new SourceProviderError(
         'SOURCE_RESPONSE_INVALID',
-        'Moonshot blog page did not contain any posts.',
+        'Moonshot 博客页未解析到文章。',
         {
           endpoint: sourceUrl,
           operation: 'resolve-account',
@@ -121,7 +121,7 @@ export class MoonshotBlogSourceProvider implements SourceProvider {
       if (response.status === 404 || response.status === 410) {
         throw new SourceProviderError(
           'SOURCE_ACCOUNT_NOT_FOUND',
-          `Moonshot blog page was not found (HTTP ${response.status}).`,
+          `Moonshot 博客页不存在（HTTP ${response.status}）。`,
           {
             endpoint: sourceUrl,
             operation: 'fetch-timeline',
@@ -135,7 +135,7 @@ export class MoonshotBlogSourceProvider implements SourceProvider {
       if (!response.ok) {
         throw new SourceProviderError(
           'SOURCE_REQUEST_FAILED',
-          `Moonshot blog page request failed (HTTP ${response.status}).`,
+          `Moonshot 博客页请求失败（HTTP ${response.status}）。`,
           {
             endpoint: sourceUrl,
             operation: 'fetch-timeline',
@@ -154,7 +154,7 @@ export class MoonshotBlogSourceProvider implements SourceProvider {
 
       throw new SourceProviderError(
         'SOURCE_REQUEST_FAILED',
-        'Moonshot blog page request failed.',
+        'Moonshot 博客页请求失败。',
         {
           causeMessage: error instanceof Error ? error.message : String(error),
           endpoint: sourceUrl,
@@ -209,7 +209,7 @@ function normalizeSourceUrl(rawUrl: string | undefined): string {
   if (value.length === 0) {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'Moonshot blog source requires a sourceUrl.',
+      'Moonshot 博客源需要 sourceUrl。',
       {
         operation: 'resolve-account',
         provider: 'moonshot_blog',
@@ -228,7 +228,7 @@ function normalizeSourceUrl(rawUrl: string | undefined): string {
   } catch {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'Moonshot blog source requires a valid http/https URL.',
+      'Moonshot 博客源需要有效的 http/https URL。',
       {
         operation: 'resolve-account',
         provider: 'moonshot_blog',

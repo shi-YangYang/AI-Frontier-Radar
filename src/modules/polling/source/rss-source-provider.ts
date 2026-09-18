@@ -135,7 +135,7 @@ export class RssSourceProvider implements SourceProvider {
       } catch (error) {
         throw new SourceProviderError(
           'SOURCE_REQUEST_FAILED',
-          'RSS feed request failed.',
+          'RSS 抓取失败。',
           {
             causeMessage: toErrorMessage(error),
             endpoint: sourceUrl,
@@ -186,7 +186,7 @@ function validateFetchInput(input: SourceProviderFetchInput): string {
   if (!Number.isInteger(input.limit) || input.limit < MIN_LIMIT || input.limit > MAX_LIMIT) {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      `RSS provider limit must be an integer between ${MIN_LIMIT} and ${MAX_LIMIT}.`,
+      `RSS 源 limit 必须是 ${MIN_LIMIT}-${MAX_LIMIT} 的整数。`,
       {
         limit: input.limit,
         operation: 'fetch-timeline',
@@ -223,7 +223,7 @@ function normalizeSourceUrl(
   if (value.length === 0) {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'RSS provider requires sourceUrl.',
+      'RSS 源需要 sourceUrl。',
       {
         ...diagnostics,
         provider: 'rss',
@@ -239,7 +239,7 @@ function normalizeSourceUrl(
   } catch {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'RSS provider requires a valid absolute URL.',
+      'RSS 源需要有效的绝对 URL。',
       {
         ...diagnostics,
         provider: 'rss',
@@ -251,7 +251,7 @@ function normalizeSourceUrl(
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'RSS provider only supports http and https URLs.',
+      'RSS 源仅支持 http/https URL。',
       {
         ...diagnostics,
         provider: 'rss',
@@ -279,14 +279,14 @@ function createHttpStatusError(
   if (statusCode === 404 || statusCode === 410) {
     return new SourceProviderError(
       'SOURCE_ACCOUNT_NOT_FOUND',
-      `RSS feed was not found (HTTP ${statusCode}).`,
+      `RSS 源不存在（HTTP ${statusCode}）。`,
       diagnostics,
     );
   }
 
   return new SourceProviderError(
     'SOURCE_REQUEST_FAILED',
-    `RSS feed request failed with status ${statusCode}.`,
+    `RSS 抓取失败（HTTP ${statusCode}）。`,
     diagnostics,
   );
 }
@@ -305,7 +305,7 @@ function parseFeedDocument(
   }
 
   if (!isRecord(document)) {
-    throw createResponseInvalidError(sourceUrl, operation, 'RSS feed root element is not an object.');
+    throw createResponseInvalidError(sourceUrl, operation, 'RSS 根节点不是对象。');
   }
 
   const rss = isRecord(document.rss) ? document.rss : undefined;
@@ -314,7 +314,7 @@ function parseFeedDocument(
     const channel = isRecord(rss.channel) ? rss.channel : undefined;
 
     if (channel === undefined) {
-      throw createResponseInvalidError(sourceUrl, operation, 'RSS channel element is missing.');
+      throw createResponseInvalidError(sourceUrl, operation, 'RSS 缺少 channel 节点。');
     }
 
     return {
@@ -360,7 +360,7 @@ function createResponseInvalidError(
 ): SourceProviderError {
   return new SourceProviderError(
     'SOURCE_RESPONSE_INVALID',
-    'RSS feed content could not be parsed.',
+    'RSS 内容无法解析。',
     {
       causeMessage,
       endpoint: sourceUrl,
@@ -763,7 +763,7 @@ function isPresent(value: string | undefined): value is string {
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) {
-    return error.name === 'AbortError' ? 'Request timed out.' : error.message;
+    return error.name === 'AbortError' ? '请求超时。' : error.message;
   }
 
   return String(error);

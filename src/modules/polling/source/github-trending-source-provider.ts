@@ -54,7 +54,7 @@ export class GithubTrendingSourceProvider implements SourceProvider {
     if (repos.length === 0) {
       throw new SourceProviderError(
         'SOURCE_RESPONSE_INVALID',
-        'GitHub Trending page did not contain any repositories.',
+        'GitHub Trending 页面未解析到仓库。',
         {
           endpoint: sourceUrl,
           operation: 'fetch-timeline',
@@ -91,7 +91,7 @@ export class GithubTrendingSourceProvider implements SourceProvider {
     if (repos.length === 0) {
       throw new SourceProviderError(
         'SOURCE_RESPONSE_INVALID',
-        'GitHub Trending page did not contain any repositories.',
+        'GitHub Trending 页面未解析到仓库。',
         {
           endpoint: sourceUrl,
           operation: 'resolve-account',
@@ -123,7 +123,7 @@ export class GithubTrendingSourceProvider implements SourceProvider {
       if (response.status === 404 || response.status === 410) {
         throw new SourceProviderError(
           'SOURCE_ACCOUNT_NOT_FOUND',
-          `GitHub Trending page was not found (HTTP ${response.status}).`,
+          `GitHub Trending 页面不存在（HTTP ${response.status}）。`,
           {
             endpoint: sourceUrl,
             operation: 'fetch-timeline',
@@ -137,7 +137,7 @@ export class GithubTrendingSourceProvider implements SourceProvider {
       if (!response.ok) {
         throw new SourceProviderError(
           'SOURCE_REQUEST_FAILED',
-          `GitHub Trending page request failed (HTTP ${response.status}).`,
+          `GitHub Trending 页面请求失败（HTTP ${response.status}）。`,
           {
             endpoint: sourceUrl,
             operation: 'fetch-timeline',
@@ -156,7 +156,7 @@ export class GithubTrendingSourceProvider implements SourceProvider {
 
       throw new SourceProviderError(
         'SOURCE_REQUEST_FAILED',
-        'GitHub Trending page request failed.',
+        'GitHub Trending 页面请求失败。',
         {
           causeMessage: error instanceof Error ? error.message : String(error),
           endpoint: sourceUrl,
@@ -184,7 +184,7 @@ function normalizeTrendingUrl(rawUrl: string | undefined): string {
   if (value.length === 0) {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'GitHub Trending source requires a sourceUrl.',
+      'GitHub Trending 源需要 sourceUrl。',
       {
         operation: 'resolve-account',
         provider: 'github',
@@ -203,7 +203,7 @@ function normalizeTrendingUrl(rawUrl: string | undefined): string {
   } catch {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'GitHub Trending source requires a valid http/https URL.',
+      'GitHub Trending 源需要有效的 http/https URL。',
       {
         operation: 'resolve-account',
         provider: 'github',

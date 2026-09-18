@@ -97,7 +97,7 @@ export class XTimelineClient {
 
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'SourceProvider requires xUsername or xUserId.',
+      'X 源需要 xUsername 或 xUserId。',
       {
         operation: 'resolve-account',
         provider: 'x',
@@ -139,7 +139,7 @@ function normalizeResolvedAccount(
   if (response.data === undefined) {
     throw new SourceProviderError(
       'SOURCE_RESPONSE_INVALID',
-      'X account lookup response did not include account data.',
+      'X 账号查询响应缺少数据。',
       {
         ...context,
         provider: 'x',
@@ -150,7 +150,7 @@ function normalizeResolvedAccount(
   if (!isPresent(response.data.id) || !isPresent(response.data.username)) {
     throw new SourceProviderError(
       'SOURCE_RESPONSE_INVALID',
-      'X account lookup response did not include id and username.',
+      'X 账号查询响应缺少 id/username。',
       {
         ...context,
         provider: 'x',
@@ -184,7 +184,7 @@ function mapXRequestError(
     if (error.statusCode === 401 || error.statusCode === 403) {
       return new SourceProviderError(
         'SOURCE_AUTH_FAILED',
-        'X source authentication failed.',
+        'X 源认证失败。',
         {
           ...context,
           endpoint: error.url,
@@ -203,7 +203,7 @@ function mapXRequestError(
     if (error.statusCode === 404) {
       return new SourceProviderError(
         'SOURCE_ACCOUNT_NOT_FOUND',
-        'The requested X account was not found.',
+        '未找到指定的 X 账号。',
         {
           ...context,
           endpoint: error.url,
@@ -240,7 +240,7 @@ function mapXRequestError(
 
     return new SourceProviderError(
       'SOURCE_REQUEST_FAILED',
-      'The X source request failed.',
+      'X 源请求失败。',
       {
         ...context,
         causeMessage: error.message,
@@ -259,7 +259,7 @@ function mapXRequestError(
 
   return new SourceProviderError(
     'SOURCE_REQUEST_FAILED',
-    'The X source request failed.',
+    'X 源请求失败。',
     {
       ...context,
       causeMessage: error instanceof Error ? error.message : String(error),

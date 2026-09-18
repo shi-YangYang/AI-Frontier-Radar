@@ -1,3 +1,5 @@
+import { tBackend } from '../i18n';
+
 export interface AdminResponse<T> {
   ok: true;
   data: T;
@@ -911,6 +913,10 @@ export async function runDeliveryNow(): Promise<RunNowResult> {
   return requestJson<RunNowResult>('/admin/api/actions/delivery-now', { method: 'POST' });
 }
 
+function localizeErrorMessage(message: string): string {
+  return tBackend(message);
+}
+
 async function requestJson<T>(url: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(url, {
     headers: {
@@ -928,7 +934,7 @@ async function requestJson<T>(url: string, options: RequestInit = {}): Promise<T
       throw new AdminApiRequestError({
         code: payload.error.code,
         details: payload.error.details,
-        message: payload.error.message,
+        message: localizeErrorMessage(payload.error.message),
         statusCode: response.status,
       });
     }

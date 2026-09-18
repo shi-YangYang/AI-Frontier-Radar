@@ -52,7 +52,7 @@ export class BarkSender implements DeliveryChannelSender {
           channel: this.channelType,
           code: 'BARK_RESPONSE_ERROR',
           diagnostics: { providerCode: response.code, providerMessage: response.message },
-          message: `Bark rejected the notification (code=${String(response.code)}).`,
+          message: `Bark 返回错误（code=${String(response.code)}）。`,
           retryable: false,
           targetKey: input.targetKey,
         });
@@ -60,7 +60,7 @@ export class BarkSender implements DeliveryChannelSender {
 
       return createChannelSuccess({
         channel: this.channelType,
-        message: 'Bark accepted the notification.',
+        message: 'Bark 已接收通知。',
         ...(response.code === undefined ? {} : { providerCode: response.code }),
         ...(response.message === undefined ? {} : { providerMessage: response.message }),
         targetKey: input.targetKey,

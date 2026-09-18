@@ -39,7 +39,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
       .catch((error) =>
         options.logger.warn(
           { err: error },
-          'initial wechat delivery target sync failed',
+          '启动时同步微信投递通道失败',
         ),
       );
   }
@@ -154,12 +154,12 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     }
 
     closing = true;
-    options.logger.info({ signal }, 'server shutdown requested');
+    options.logger.info({ signal }, '收到服务关闭请求');
     try {
       await app.close();
       await wechatBridge.stop();
     } catch (error) {
-      options.logger.error({ err: error, signal }, 'server shutdown failed');
+      options.logger.error({ err: error, signal }, '服务关闭失败');
       process.exitCode = 1;
     }
   };
@@ -191,7 +191,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
       {
         config: toStartupConfigLogContext(options.config),
       },
-      'server listening',
+      '服务已启动',
     );
     scheduler.start();
 
@@ -199,7 +199,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     process.once('SIGTERM', handleSigterm);
     signalHandlersRegistered = true;
   } catch (error) {
-    options.logger.error({ err: error }, 'server failed to start');
+    options.logger.error({ err: error }, '服务启动失败');
     await app.close();
     throw error;
   }

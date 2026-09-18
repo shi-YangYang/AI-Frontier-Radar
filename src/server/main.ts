@@ -20,7 +20,7 @@ async function main(): Promise<void> {
 
     await startServer({ config, logger });
   } catch (error) {
-    bootstrapLogger.fatal({ err: error }, 'server startup failed');
+    bootstrapLogger.fatal({ err: error }, '服务启动失败');
     process.exitCode = 1;
   }
 }

@@ -53,7 +53,7 @@ export class XaiNewsSourceProvider implements SourceProvider {
     if (entries.length === 0) {
       throw new SourceProviderError(
         'SOURCE_RESPONSE_INVALID',
-        'xAI news page did not render any posts.',
+        'xAI 新闻页未渲染出文章。',
         {
           endpoint: sourceUrl,
           operation: 'fetch-timeline',
@@ -92,7 +92,7 @@ export class XaiNewsSourceProvider implements SourceProvider {
     if (parseXaiNewsHtml(html, new Date().toISOString()).length === 0) {
       throw new SourceProviderError(
         'SOURCE_RESPONSE_INVALID',
-        'xAI news page did not render any posts.',
+        'xAI 新闻页未渲染出文章。',
         {
           endpoint: sourceUrl,
           operation: 'resolve-account',
@@ -136,7 +136,7 @@ export class XaiNewsSourceProvider implements SourceProvider {
 
       throw new SourceProviderError(
         'SOURCE_REQUEST_FAILED',
-        'xAI news page render failed.',
+        'xAI 新闻页渲染失败。',
         {
           causeMessage: error instanceof Error ? error.message : String(error),
           endpoint: sourceUrl,
@@ -248,7 +248,7 @@ function normalizeSourceUrl(rawUrl: string | undefined): string {
   const value = rawUrl?.trim() ?? '';
 
   if (value.length === 0) {
-    throw new SourceProviderError('SOURCE_INVALID_INPUT', 'xAI news source requires a sourceUrl.', {
+    throw new SourceProviderError('SOURCE_INVALID_INPUT', 'xAI 新闻源需要 sourceUrl。', {
       operation: 'resolve-account',
       provider: 'xai_news',
     });
@@ -265,7 +265,7 @@ function normalizeSourceUrl(rawUrl: string | undefined): string {
   } catch {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'xAI news source requires a valid http/https URL.',
+      'xAI 新闻源需要有效的 http/https URL。',
       {
         operation: 'resolve-account',
         provider: 'xai_news',
