@@ -538,10 +538,14 @@ export async function submitWechatLoginCode(code: string): Promise<void> {
   });
 }
 
-export async function testWechatBridge(): Promise<{ messageId?: string; ok: true }> {
-  return requestJson<{ messageId?: string; ok: true }>('/admin/api/wechat/test', {
-    method: 'POST',
-  });
+export async function testWechatBridge(): Promise<{
+  failed: Array<{ accountId: string; error: string }>;
+  sent: number;
+}> {
+  return requestJson<{ failed: Array<{ accountId: string; error: string }>; sent: number }>(
+    '/admin/api/wechat/test',
+    { method: 'POST' },
+  );
 }
 
 export async function updateWechatAccountPush(

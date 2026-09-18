@@ -1178,9 +1178,18 @@ async function sendWechatTest(): Promise<void> {
   busy.value = true;
 
   try {
-    await testWechatBridge();
-    notice.value = t('settings.wechat.testSent');
-    noticeDanger.value = false;
+    const result = await testWechatBridge();
+
+    if (result.failed.length > 0) {
+      notice.value = t('settings.wechat.testPartial', {
+        count: result.sent,
+        failed: result.failed.map((entry) => entry.accountId).join('、'),
+      });
+      noticeDanger.value = true;
+    } else {
+      notice.value = t('settings.wechat.testSent', { count: result.sent });
+      noticeDanger.value = false;
+    }
   } catch (error) {
     showSettingsError(error);
   } finally {

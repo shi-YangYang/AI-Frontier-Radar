@@ -930,33 +930,57 @@ export async function submitAdminWechatLoginCode(
 
 export async function testAdminWechat(options: AdminControllerOptions): Promise<{
   ok: true;
-  data: { messageId?: string; ok: true };
+  data: { failed: Array<{ accountId: string; error: string }>; ok: true; sent: number };
 }> {
   const service = requireWechatBridge(options);
 
-  try {
-    const result = await service.sendMessage({
-      author: 'AI 前沿雷达',
-      postedAt: new Date().toISOString(),
-      text: 'AI 前沿消息本地配置测试：微信桥可用。',
-      title: '【AI前沿消息】配置测试',
-      url: 'http://127.0.0.1:3000',
-    });
+  let accounts: Awaited<ReturnType<WechatBridgeService['getAccounts']>>;
 
-    return {
-      ok: true,
-      data: {
-        ...(result.messageId === undefined ? {} : { messageId: result.messageId }),
-        ok: true,
-      },
-    };
+  try {
+    accounts = await service.getAccounts();
   } catch (error) {
     throw new AdminApiError(
       502,
       'WECHAT_BRIDGE_FAILED',
-      error instanceof Error ? error.message : '微信桥测试发送失败。',
+      error instanceof Error ? error.message : '读取微信账号失败。',
     );
   }
+
+  if (accounts.length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '还没有绑定任何微信号，请先扫码添加。');
+  }
+
+  const failed: Array<{ accountId: string; error: string }> = [];
+  let sent = 0;
+
+  for (const account of accounts) {
+    try {
+      await service.sendMessage({
+        accountId: account.accountId,
+        author: 'AI 前沿雷达',
+        postedAt: new Date().toISOString(),
+        text: 'AI 前沿消息本地配置测试：微信桥可用。',
+        title: '【AI前沿消息】配置测试',
+        url: 'http://127.0.0.1:3000',
+      });
+      sent += 1;
+    } catch (error) {
+      failed.push({
+        accountId: account.accountId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (sent === 0) {
+    throw new AdminApiError(
+      502,
+      'WECHAT_BRIDGE_FAILED',
+      `全部账号发送失败：${failed.map((entry) => `${entry.accountId}（${entry.error}）`).join('；')}`,
+    );
+  }
+
+  return { ok: true, data: { failed, ok: true, sent } };
 }
 
 function requireWechatBridge(options: AdminControllerOptions): WechatBridgeService {
