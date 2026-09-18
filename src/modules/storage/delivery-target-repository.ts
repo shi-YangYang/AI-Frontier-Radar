@@ -39,6 +39,7 @@ export class DeliveryTargetRepository {
         displayName: input.displayName,
         enabled: input.enabled ?? true,
         id: input.id ?? createDatabaseId(),
+        ownerUserId: input.ownerUserId ?? null,
         targetKey: input.targetKey,
         updatedAt: now,
         webhookUrl: input.webhookUrl,
@@ -46,6 +47,15 @@ export class DeliveryTargetRepository {
     });
 
     return mapDeliveryTarget(deliveryTarget);
+  }
+
+  public async clearOwner(userId: string): Promise<number> {
+    const result = await this.prisma.deliveryTarget.updateMany({
+      data: { ownerUserId: null },
+      where: { ownerUserId: userId },
+    });
+
+    return result.count;
   }
 
   public async delete(id: string): Promise<DeleteDeliveryTargetResult> {
@@ -253,6 +263,7 @@ export class DeliveryTargetRepository {
         displayName: input.displayName,
         enabled: input.enabled ?? true,
         id: input.id ?? createDatabaseId(),
+        ownerUserId: input.ownerUserId ?? null,
         targetKey: input.targetKey,
         updatedAt: now,
         webhookUrl: input.webhookUrl,
@@ -293,6 +304,7 @@ function mapDeliveryTarget(
     displayName: deliveryTarget.displayName,
     enabled: deliveryTarget.enabled,
     id: deliveryTarget.id,
+    ownerUserId: deliveryTarget.ownerUserId,
     targetKey: deliveryTarget.targetKey,
     updatedAt: deliveryTarget.updatedAt,
     webhookUrl: deliveryTarget.webhookUrl,
@@ -318,6 +330,9 @@ function toDeliveryTargetUpdateData(
   }
   if (input.config !== undefined) {
     data.configJson = serializeDeliveryTargetConfig(input.config);
+  }
+  if (input.ownerUserId !== undefined) {
+    data.ownerUserId = input.ownerUserId;
   }
 
   return data;

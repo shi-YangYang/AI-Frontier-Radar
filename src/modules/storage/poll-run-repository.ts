@@ -19,6 +19,7 @@ export class PollRunRepository {
         finishedAt: input.finishedAt ?? null,
         id: input.id ?? createDatabaseId(),
         newPostsDetected: input.newPostsDetected ?? 0,
+        repeatCount: input.repeatCount ?? 1,
         startedAt: input.startedAt ?? createdAt,
         status: input.status ?? 'running',
       },
@@ -70,6 +71,14 @@ export class PollRunRepository {
   public async findById(id: string): Promise<PollRun | null> {
     const pollRun = await this.prisma.pollRun.findUnique({
       where: { id },
+    });
+
+    return pollRun === null ? null : mapPollRun(pollRun);
+  }
+
+  public async findLatest(): Promise<PollRun | null> {
+    const pollRun = await this.prisma.pollRun.findFirst({
+      orderBy: { startedAt: 'desc' },
     });
 
     return pollRun === null ? null : mapPollRun(pollRun);
@@ -150,6 +159,7 @@ function mapPollRun(pollRun: Prisma.PollRunGetPayload<Record<string, never>>): P
     finishedAt: pollRun.finishedAt,
     id: pollRun.id,
     newPostsDetected: pollRun.newPostsDetected,
+    repeatCount: pollRun.repeatCount,
     startedAt: pollRun.startedAt,
     status: pollRun.status as PollRun['status'],
   };
@@ -181,6 +191,9 @@ function toPollRunUpdateData(input: UpdatePollRunInput): Prisma.PollRunUpdateInp
   }
   if (input.errorSummary !== undefined) {
     data.errorSummary = input.errorSummary;
+  }
+  if (input.repeatCount !== undefined) {
+    data.repeatCount = input.repeatCount;
   }
 
   return data;

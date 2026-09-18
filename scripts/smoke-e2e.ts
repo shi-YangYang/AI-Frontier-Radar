@@ -9,6 +9,7 @@ import { toPrismaSqliteDatabaseUrl } from '../src/shared/config';
 import { loadAppConfig } from '../src/config';
 import { createLogger } from '../src/lib/logger';
 import { createApp } from '../src/app/create-app';
+import { createAuthService } from '../src/modules/auth';
 import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createAi2BlogSourceProvider, createAnthropicNewsSourceProvider, createGithubTrendingSourceProvider, createHfDailyPapersSourceProvider, createMoonshotBlogSourceProvider, createRssSourceProvider, createSourceProviderRegistry, createSubscriptionRuleMatcher, createXSourceProvider, normalizeMetaBlogRawEntries, parseAi2BlogHtml, parseMoonshotBlogHtml, parseXaiNewsHtml, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
 import { createV1TextMessageFormatter, runDeliveryWorkerJob } from '../src/modules/delivery';
 import { createRuntimeScheduler, createRuntimeSourceProviders } from '../src/modules/scheduler';
@@ -49,6 +50,8 @@ type MockFeedResponse = {
   statusCode: number;
 };
 
+const SMOKE_ADMIN_PASSWORD = 'smoke-admin-pass';
+const SMOKE_ADMIN_USERNAME = 'smoke-admin';
 const WATCH_USERNAME = 'mock_ai';
 const WATCH_USER_ID = '10001';
 const TARGET_KEY = 'feishu-main';
@@ -150,7 +153,13 @@ async function main(): Promise<void> {
     startLogin: async () => ({ status: 'pending' }),
     submitLoginCode: async () => undefined,
   };
+  const auth = createAuthService({
+    adminPassword: SMOKE_ADMIN_PASSWORD,
+    adminUsername: SMOKE_ADMIN_USERNAME,
+    storage,
+  });
   const app = createApp({
+    auth,
     wechatBridge: fakeWechatBridge as never,
     adminActions: {
       validateWatchAccount: async (input) => {
@@ -221,9 +230,36 @@ async function main(): Promise<void> {
     storage,
   });
 
+  let adminCookie = '';
+  let rawInject: typeof app.inject = app.inject.bind(app);
+
   try {
     await storage.initialize();
+    await auth.ensureSeedAdmin();
     await app.ready();
+
+    const adminLoginResponse = await app.inject({
+      method: 'POST',
+      payload: { password: SMOKE_ADMIN_PASSWORD, username: SMOKE_ADMIN_USERNAME },
+      url: '/auth/login',
+    });
+    assert(adminLoginResponse.statusCode === 200, `admin login returned ${adminLoginResponse.statusCode}`);
+    adminCookie = readSessionCookie(adminLoginResponse.headers['set-cookie']);
+    assert(adminCookie.length > 0, 'admin login should set a session cookie');
+
+    rawInject = app.inject.bind(app);
+    app.inject = ((options: string | Record<string, unknown>) => {
+      if (typeof options === 'string') {
+        return rawInject({ headers: { cookie: adminCookie }, method: 'GET', url: options });
+      }
+
+      const headers = (options.headers as Record<string, string> | undefined) ?? {};
+
+      return rawInject({
+        ...options,
+        headers: { cookie: adminCookie, ...headers },
+      } as never);
+    }) as typeof app.inject;
 
     await verifySourceModeConfig(checks, tempDir);
     verifyRuntimeSourceProviderFactory(checks, config);
@@ -815,6 +851,31 @@ async function main(): Promise<void> {
       'other sources should still succeed when one source fails',
     );
     checks.push({ name: '单个源失败不影响其他源并记录错误' });
+
+    const runCountBeforeRepeatFailure = await prisma.pollRun.count();
+    const repeatFailingPoll = await runPollingJob({
+      config,
+      logger,
+      sourceProviders,
+      storage,
+    });
+    assert(
+      repeatFailingPoll.status === 'partial_failed',
+      `repeat failing poll status should stay partial_failed, got ${repeatFailingPoll.status}`,
+    );
+    const runCountAfterRepeatFailure = await prisma.pollRun.count();
+    assert(
+      runCountAfterRepeatFailure === runCountBeforeRepeatFailure,
+      `identical failure should merge instead of adding a run: ${runCountBeforeRepeatFailure} -> ${runCountAfterRepeatFailure}`,
+    );
+    const mergedFailingRun = await prisma.pollRun.findFirst({
+      orderBy: { startedAt: 'desc' },
+    });
+    assert(
+      mergedFailingRun !== null && mergedFailingRun.repeatCount >= 2,
+      `consecutive identical failures should increment repeatCount, got ${mergedFailingRun?.repeatCount}`,
+    );
+    checks.push({ name: '连续相同失败合并为一条记录' });
 
     const proxyFeedUrl = `${rssApi.url}${RSS_FEED_PATH}`;
     rssApi.setFeed(RSS_FEED_PATH, {
@@ -2189,6 +2250,177 @@ async function main(): Promise<void> {
     );
     checks.push({ name: '一键清空消息（帖子 + 投递事件 + 榜单游标重置）' });
 
+    const unauthorizedResponse = await rawInject({ method: 'GET', url: '/admin/api/summary' });
+    assert(
+      unauthorizedResponse.statusCode === 401,
+      `unauthenticated admin api should return 401, got ${unauthorizedResponse.statusCode}`,
+    );
+    const unauthorizedMeResponse = await rawInject({ method: 'GET', url: '/auth/me' });
+    assert(unauthorizedMeResponse.statusCode === 401, '/auth/me should require a session');
+    checks.push({ name: '未登录访问管理 API 与 /auth/me 返回 401' });
+
+    const meResponse = await app.inject({ method: 'GET', url: '/auth/me' });
+    const mePayload = meResponse.json() as { data: { user: { id: string; role: string; username: string } } };
+    assert(
+      meResponse.statusCode === 200 &&
+        mePayload.data.user.username === SMOKE_ADMIN_USERNAME &&
+        mePayload.data.user.role === 'admin',
+      'admin session should resolve to the seeded admin',
+    );
+    checks.push({ name: '管理员会话可用（/auth/me）' });
+
+    const badLoginResponse = await rawInject({
+      method: 'POST',
+      payload: { password: 'wrong-password', username: SMOKE_ADMIN_USERNAME },
+      url: '/auth/login',
+    });
+    assert(badLoginResponse.statusCode === 401, 'wrong password should return 401');
+    checks.push({ name: '错误密码登录返回 401' });
+
+    const createUserResponse = await app.inject({
+      method: 'POST',
+      payload: { password: 'smoke-user-pass', role: 'user', username: 'smoke-user' },
+      url: '/admin/api/users',
+    });
+    assert(createUserResponse.statusCode === 200, `create user returned ${createUserResponse.statusCode}`);
+    const createdUser = (createUserResponse.json() as { data: { user: { id: string } } }).data.user;
+
+    const duplicateUserResponse = await app.inject({
+      method: 'POST',
+      payload: { password: 'smoke-user-pass', role: 'user', username: 'smoke-user' },
+      url: '/admin/api/users',
+    });
+    assert(duplicateUserResponse.statusCode === 400, 'duplicate username should be rejected');
+    checks.push({ name: '管理员创建普通用户且拒绝重复用户名' });
+
+    const userLoginResponse = await rawInject({
+      method: 'POST',
+      payload: { password: 'smoke-user-pass', username: 'smoke-user' },
+      url: '/auth/login',
+    });
+    assert(userLoginResponse.statusCode === 200, 'regular user should be able to log in');
+    const userCookie = readSessionCookie(userLoginResponse.headers['set-cookie']);
+    checks.push({ name: '普通用户可以登录' });
+
+    const forbiddenAdminResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: '/admin/api/summary',
+    });
+    assert(
+      forbiddenAdminResponse.statusCode === 403,
+      `regular user should get 403 on admin api, got ${forbiddenAdminResponse.statusCode}`,
+    );
+    checks.push({ name: '普通用户访问管理 API 返回 403' });
+
+    const userBindStartResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'POST',
+      url: '/user/api/wechat/bind',
+    });
+    assert(userBindStartResponse.statusCode === 200, 'user should be able to start wechat binding');
+    const userBindingResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: '/user/api/wechat',
+    });
+    assert(userBindingResponse.statusCode === 200, 'user wechat binding should return 200');
+    const userBinding = userBindingResponse.json() as {
+      data: { accounts: Array<{ accountId: string }> };
+    };
+    assert(
+      userBinding.data.accounts.length >= 1,
+      `binding accounts should include the claimed account, got ${JSON.stringify(userBinding.data.accounts)}`,
+    );
+    const boundAccountId = userBinding.data.accounts[0]?.accountId ?? '';
+    const claimedTargets = await storage.deliveryTargets.listAll();
+    assert(
+      claimedTargets.some(
+        (target) => target.config.accountId === boundAccountId && target.ownerUserId === createdUser.id,
+      ),
+      'bound wechat account should be owned by the binding user',
+    );
+    checks.push({ name: '普通用户绑定微信并写入归属' });
+
+    const otherUserResponse = await app.inject({
+      method: 'POST',
+      payload: { password: 'smoke-user-2-pass', role: 'user', username: 'smoke-user-2' },
+      url: '/admin/api/users',
+    });
+    assert(otherUserResponse.statusCode === 200, 'second user should be created');
+    const otherUser = (otherUserResponse.json() as { data: { user: { id: string } } }).data.user;
+    const otherLoginResponse = await rawInject({
+      method: 'POST',
+      payload: { password: 'smoke-user-2-pass', username: 'smoke-user-2' },
+      url: '/auth/login',
+    });
+    const otherCookie = readSessionCookie(otherLoginResponse.headers['set-cookie']);
+    const otherBindingResponse = await rawInject({
+      headers: { cookie: otherCookie },
+      method: 'GET',
+      url: '/user/api/wechat',
+    });
+    const otherBinding = otherBindingResponse.json() as { data: { accounts: unknown[] } };
+    assert(
+      otherBinding.data.accounts.length === 0,
+      'other users must not see bindings they do not own',
+    );
+
+    const overreachUnbindResponse = await rawInject({
+      headers: { cookie: otherCookie },
+      method: 'DELETE',
+      url: `/user/api/wechat/accounts/${encodeURIComponent(boundAccountId)}`,
+    });
+    assert(
+      overreachUnbindResponse.statusCode === 404,
+      `unbinding another user's account should return 404, got ${overreachUnbindResponse.statusCode}`,
+    );
+    checks.push({ name: '用户只能看到并解绑自己的微信绑定' });
+
+    const selfDeleteResponse = await app.inject({
+      method: 'DELETE',
+      url: `/admin/api/users/${mePayload.data.user.id}`,
+    });
+    assert(selfDeleteResponse.statusCode === 400, 'admin should not delete the current account');
+    const lastAdminDeleteResponse = await app.inject({
+      method: 'DELETE',
+      url: `/admin/api/users/${mePayload.data.user.id}`,
+    });
+    assert(lastAdminDeleteResponse.statusCode === 400, 'last admin must not be deleted');
+    const deleteUserResponse = await app.inject({
+      method: 'DELETE',
+      url: `/admin/api/users/${createdUser.id}`,
+    });
+    assert(deleteUserResponse.statusCode === 200, 'admin should delete a regular user');
+    const sessionAfterDeleteResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: '/auth/me',
+    });
+    assert(
+      sessionAfterDeleteResponse.statusCode === 401,
+      'deleted user session should be invalidated immediately',
+    );
+    const orphanedTargets = await storage.deliveryTargets.listAll();
+    assert(
+      orphanedTargets.some(
+        (target) => target.config.accountId === boundAccountId && target.ownerUserId === null,
+      ),
+      'deleting a user should release their wechat binding ownership',
+    );
+    checks.push({ name: '删除用户：拒绝删除自己/最后管理员、会话失效、绑定归属释放' });
+
+    const usersListResponse = await app.inject({ method: 'GET', url: '/admin/api/users' });
+    const usersList = (usersListResponse.json() as { data: { users: Array<{ username: string }> } }).data
+      .users;
+    assert(
+      usersListResponse.statusCode === 200 &&
+        !usersList.some((user) => user.username === 'smoke-user') &&
+        usersList.some((user) => user.username === 'smoke-user-2'),
+      `user list should reflect deletions: ${JSON.stringify(usersList.map((user) => user.username))}`,
+    );
+    checks.push({ name: '用户列表 API 与删除结果一致' });
+
     printSuccess(checks);
   } finally {
     await app.close();
@@ -2733,6 +2965,16 @@ function readJsonBody(request: IncomingMessage): Promise<unknown> {
     });
     request.on('error', reject);
   });
+}
+
+function readSessionCookie(setCookieHeader: string | string[] | undefined): string {
+  const header = Array.isArray(setCookieHeader) ? setCookieHeader[0] : setCookieHeader;
+
+  if (header === undefined) {
+    return '';
+  }
+
+  return header.split(';')[0] ?? '';
 }
 
 function comparePostIds(left: string, right: string): number {

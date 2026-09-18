@@ -73,7 +73,7 @@ class JsonConsoleLogger implements AppLogger {
         return;
       }
 
-      const entry = buildLogEntry(level, this.bindings, args);
+      const entry = localizeLogEntry(buildLogEntry(level, this.bindings, args));
       const serializedEntry = toSerializableLogValue(entry, undefined, new WeakSet<object>());
       const output = JSON.stringify(serializedEntry);
       const stream = level === 'warn' || level === 'error' || level === 'fatal' ? process.stderr : process.stdout;
@@ -129,6 +129,22 @@ function buildLogEntry(
   }
 
   entry.msg = format(...(args as []));
+  return entry;
+}
+
+function localizeLogEntry(entry: Record<string, unknown>): Record<string, unknown> {
+  const message = typeof entry.msg === 'string' ? entry.msg : undefined;
+
+  if (message === undefined) {
+    return entry;
+  }
+
+  const listeningMatch = /^Server listening at (.+)$/u.exec(message);
+
+  if (listeningMatch !== null) {
+    return { ...entry, msg: `服务已启动，监听 ${listeningMatch[1]}` };
+  }
+
   return entry;
 }
 

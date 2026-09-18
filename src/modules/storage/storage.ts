@@ -11,6 +11,8 @@ import type { WatchAccountsSourceConfig } from '../../shared/config/types';
 import type { DefaultDeliveryTargetInput } from './types';
 import { WatchAccountRepository } from './watch-account-repository';
 import { syncWatchAccountSeeds, type WatchAccountSeedSyncResult } from './watch-account-seed-sync';
+import { UserRepository } from './user-repository';
+import { UserSessionRepository } from './user-session-repository';
 import { XPostRepository } from './x-post-repository';
 
 export interface StorageContext {
@@ -20,6 +22,8 @@ export interface StorageContext {
   deliveryTargets: DeliveryTargetRepository;
   initialize(): Promise<void>;
   pollRuns: PollRunRepository;
+  userSessions: UserSessionRepository;
+  users: UserRepository;
   watchAccounts: WatchAccountRepository;
   xPosts: XPostRepository;
 }
@@ -36,6 +40,8 @@ class PrismaStorageContext implements StorageContext {
   public readonly deliveryEvents: DeliveryEventRepository;
   public readonly deliveryTargets: DeliveryTargetRepository;
   public readonly pollRuns: PollRunRepository;
+  public readonly userSessions: UserSessionRepository;
+  public readonly users: UserRepository;
   public readonly watchAccounts: WatchAccountRepository;
   public readonly xPosts: XPostRepository;
 
@@ -50,6 +56,8 @@ class PrismaStorageContext implements StorageContext {
     this.deliveryTargets = new DeliveryTargetRepository(this.prisma);
     this.deliveryEvents = new DeliveryEventRepository(this.prisma);
     this.pollRuns = new PollRunRepository(this.prisma);
+    this.users = new UserRepository(this.prisma);
+    this.userSessions = new UserSessionRepository(this.prisma);
   }
 
   public async close(): Promise<void> {

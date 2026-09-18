@@ -57,7 +57,7 @@ export class GenericWebhookSender implements DeliveryChannelSender {
             endpoint: input.webhookUrl,
             httpStatusCode: response.status,
           },
-          message: `Generic webhook returned HTTP ${response.status}.`,
+          message: `通用 Webhook 返回 HTTP ${response.status}。`,
           retryable: response.status >= 500,
           targetKey: input.targetKey,
         });
@@ -65,7 +65,7 @@ export class GenericWebhookSender implements DeliveryChannelSender {
 
       return createChannelSuccess({
         channel: this.channelType,
-        message: `Generic webhook accepted the message (HTTP ${response.status}).`,
+        message: `通用 Webhook 已接收消息（HTTP ${response.status}）。`,
         providerCode: response.status,
         targetKey: input.targetKey,
       });

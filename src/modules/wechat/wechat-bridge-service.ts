@@ -85,7 +85,7 @@ export class WechatBridgeService {
     if (!this.isInstalled()) {
       this.logger?.warn?.(
         { rootDir: this.rootDir },
-        'wechat bridge is not installed; run "npm run wechat:install" to enable the WeChat channel',
+        '微信桥未安装：运行 npm run wechat:install 后生效',
       );
 
       return;
@@ -109,17 +109,21 @@ export class WechatBridgeService {
 
     this.child = child;
     child.stdout.on('data', (chunk: Buffer) => {
-      const text = chunk.toString().trim();
+      for (const line of chunk.toString().split('\n')) {
+        const text = line.trim().replace(/^\[wechat-bridge\]\s*/u, '');
 
-      if (text.length > 0) {
-        this.logger?.debug?.({ module: 'wechat-bridge' }, text.slice(0, 500));
+        if (text.length > 0) {
+          this.logger?.debug?.({ module: 'wechat-bridge' }, text.slice(0, 500));
+        }
       }
     });
     child.stderr.on('data', (chunk: Buffer) => {
-      const text = chunk.toString().trim();
+      for (const line of chunk.toString().split('\n')) {
+        const text = line.trim();
 
-      if (text.length > 0) {
-        this.logger?.warn?.({ module: 'wechat-bridge' }, text.slice(0, 500));
+        if (text.length > 0) {
+          this.logger?.warn?.({ module: 'wechat-bridge' }, text.slice(0, 500));
+        }
       }
     });
     child.on('exit', (code, signal) => {
@@ -131,11 +135,11 @@ export class WechatBridgeService {
 
       this.logger?.warn?.(
         { code, signal },
-        'wechat bridge process exited; scheduling restart',
+        '微信桥进程已退出，计划重启',
       );
 
       if (this.restartAttempts >= MAX_RESTART_ATTEMPTS) {
-        this.logger?.error?.({ attempts: this.restartAttempts }, 'wechat bridge restart limit reached');
+        this.logger?.error?.({ attempts: this.restartAttempts }, '微信桥重启次数已达上限');
 
         return;
       }
@@ -145,7 +149,7 @@ export class WechatBridgeService {
       this.restartTimer = setTimeout(() => this.start(), delayMs);
     });
 
-    this.logger?.info?.({ port: this.port }, 'wechat bridge process started');
+    this.logger?.info?.({ port: this.port }, '微信桥进程已启动');
   }
 
   public async stop(): Promise<void> {

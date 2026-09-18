@@ -126,6 +126,19 @@ npm run local
 http://127.0.0.1:3000/
 ```
 
+首次启动会自动创建管理员账号：
+
+- 在 `.env` 配置 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 时按其创建；
+- 未配置时生成随机密码并打印在启动日志中（`未配置 ADMIN_PASSWORD，已生成初始管理员密码：...`）。
+
+所有页面（包括本机）都需要登录：
+
+| 入口 | 说明 |
+| --- | --- |
+| `/login` | 登录页；管理员登录后进入管理台，普通用户登录后进入 `/portal` |
+| `/portal` | 普通用户页：只能绑定/解绑自己的微信，查看推送状态 |
+| `/settings` -> 用户 | 管理员创建/删除用户、重置密码（首个管理员由 `.env` 种子创建） |
+
 首次进入 Web 控制台后建议按这个顺序配置：
 
 | 步骤 | 位置 | 做什么 |
@@ -218,6 +231,8 @@ npm run dev
 | `PORT` | `3000` | 服务端口 |
 | `REDIS_URL` | `redis://127.0.0.1:1` | 就绪检查使用；本地核心功能不强依赖 |
 | `FEISHU_WEBHOOK_URL` | 空 | 可选启动种子，推荐在 Web 控制台配置 |
+| `ADMIN_USERNAME` | `admin` | 首个管理员用户名；仅在用户表为空时生效 |
+| `ADMIN_PASSWORD` | 随机生成 | 首个管理员密码；未配置时随机密码打印在启动日志 |
 | `WATCH_ACCOUNTS_SOURCE` | `database` | X 账号启动种子来源，推荐保持数据库 |
 | `POLL_INTERVAL_SECONDS` | `300` | 轮询间隔（秒）；Web 控制台按分钟配置（1-3600 分钟） |
 | `FETCH_LIMIT_PER_ACCOUNT` | `5` | 每账号单次抓取数量 |

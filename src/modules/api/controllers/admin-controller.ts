@@ -52,7 +52,7 @@ import {
   type RetentionSettings,
 } from '../../maintenance';
 import { sharedLogBuffer, type LogBufferEntry } from '../../../lib/logger';
-import { syncWechatDeliveryTargets, type WechatAccount, type WechatBridgeService } from '../../wechat';
+import { syncWechatDeliveryTargets, type WechatAccount, type WechatBindCoordinator, type WechatBridgeService } from '../../wechat';
 import { SOURCE_GROUPS, findSourceGroup } from '../../../config/source-groups';
 import {
   applySourceGroup,
@@ -84,6 +84,7 @@ export interface AdminControllerOptions {
   config: AppConfig;
   runtimeSettings?: RuntimeSettingsService;
   storage: StorageContext;
+  wechatBindCoordinator?: WechatBindCoordinator;
   wechatBridge?: WechatBridgeService;
 }
 
@@ -770,11 +771,17 @@ export async function getAdminWechatStatus(options: AdminControllerOptions): Pro
   const accounts = status.running ? await service.getAccounts().catch(() => []) : [];
 
   if (status.running && accounts.length >= 0) {
-    await syncWechatDeliveryTargets({
+    const pendingOwner = options.wechatBindCoordinator?.getPendingUserId() ?? undefined;
+    const syncResult = await syncWechatDeliveryTargets({
       accounts,
       bridgeBaseUrl: `http://127.0.0.1:${status.port}/send`,
       deliveryTargets: options.storage.deliveryTargets,
+      ...(pendingOwner === undefined ? {} : { ownerUserIdForNewAccounts: pendingOwner }),
     }).catch(() => undefined);
+
+    if (syncResult !== undefined) {
+      options.wechatBindCoordinator?.clearIfCreated(syncResult.created);
+    }
   }
 
   const wechatTargets = (await options.storage.deliveryTargets.listAll()).filter(
@@ -787,6 +794,7 @@ export async function getAdminWechatStatus(options: AdminControllerOptions): Pro
 
     return {
       ...account,
+      ownerUserId: target?.ownerUserId ?? null,
       pushEnabled: target?.enabled === true,
     };
   });

@@ -425,7 +425,7 @@ function resolveProxyUrlSetting(
   const value = values[key];
 
   if (typeof value !== 'string') {
-    throw new Error(`App setting "${key}" must be a string or null.`);
+    throw new Error(`配置项 "${key}" 必须是字符串或 null。`);
   }
 
   const proxyUrl = normalizeOptionalProxyUrl(value, protocols);
@@ -457,11 +457,11 @@ function normalizeOptionalProxyUrl(
   try {
     url = new URL(value);
   } catch {
-    throw new Error('Proxy URL must be a valid URL.');
+    throw new Error('代理地址必须是有效 URL。');
   }
 
   if (!protocols.includes(url.protocol)) {
-    throw new Error(`Proxy URL must use one of these protocols: ${protocols.join(', ')}.`);
+    throw new Error(`代理地址必须使用以下协议之一：${protocols.join(', ')}。`);
   }
 
   return url.toString();
@@ -479,7 +479,7 @@ function resolveBooleanSetting(
   const value = values[key];
 
   if (typeof value !== 'boolean') {
-    throw new Error(`App setting "${key}" must be a boolean.`);
+    throw new Error(`配置项 "${key}" 必须是布尔值。`);
   }
 
   return value;
@@ -499,7 +499,7 @@ function resolveIntegerSetting(
   const value = values[key];
 
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min || value > max) {
-    throw new Error(`App setting "${key}" must be an integer from ${min} to ${max}.`);
+    throw new Error(`配置项 "${key}" 必须是 ${min}-${max} 的整数。`);
   }
 
   return value;

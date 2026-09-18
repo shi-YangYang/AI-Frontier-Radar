@@ -149,7 +149,7 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
         deliveryIntervalMs: this.deliveryIntervalMs,
         pollingIntervalMs: this.pollingIntervalMs,
       },
-      'runtime scheduler starting',
+      '运行时调度器启动中',
     );
 
     void this.runDeliveryWorkerNow({
@@ -183,7 +183,7 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
         {
           pollingIntervalMs: this.pollingIntervalMs,
         },
-        'runtime scheduler polling interval updated before start',
+        '启动前已更新轮询间隔',
       );
       return;
     }
@@ -200,7 +200,7 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
       {
         pollingIntervalMs: this.pollingIntervalMs,
       },
-      'runtime scheduler polling interval updated',
+      '轮询间隔已更新',
     );
   }
 
@@ -216,7 +216,7 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
     }
 
     this.started = false;
-    this.logger.info('runtime scheduler stopped');
+    this.logger.info('运行时调度器已停止');
 
     await Promise.allSettled([
       this.pollingRunPromise ?? Promise.resolve(),
@@ -235,7 +235,7 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
           job: 'polling',
           trigger,
         },
-        'scheduler skipped polling tick because previous run is still active',
+        '上一轮轮询仍在运行，本次跳过',
       );
       return {
         job: 'polling',
@@ -264,7 +264,7 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
           job: 'delivery-worker',
           trigger,
         },
-        'scheduler skipped delivery worker tick because previous run is still active',
+        '上一轮投递仍在运行，本次跳过',
       );
       return {
         job: 'delivery-worker',
@@ -291,7 +291,7 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
         job: 'polling',
         trigger,
       },
-      'scheduler job started',
+      '调度任务开始',
     );
 
     const enabledAccounts = await this.options.storage.watchAccounts.listEnabled();
@@ -302,7 +302,7 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
           job: 'polling',
           trigger,
         },
-        'scheduler skipped polling tick because no enabled sources are configured',
+        '没有启用的监听源，本次轮询跳过',
       );
       return {
         job: 'polling',
@@ -340,7 +340,7 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
           job: 'polling',
           trigger,
         },
-        'scheduler job failed',
+        '调度任务失败',
       );
 
       return {
@@ -362,7 +362,7 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
         recoverStartupState: input.recoverStartupState,
         trigger: input.trigger,
       },
-      'scheduler job started',
+      '调度任务开始',
     );
 
     try {
@@ -386,7 +386,7 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
           recoverStartupState: input.recoverStartupState,
           trigger: input.trigger,
         },
-        'scheduler job failed',
+        '调度任务失败',
       );
 
       return {
@@ -411,7 +411,7 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
           err: error,
           job: 'retention',
         },
-        'retention cleanup failed',
+        '数据保留清理失败',
       );
     }
   }
@@ -430,7 +430,7 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
         status: result.status,
         trigger,
       },
-      'scheduler job completed',
+      '调度任务完成',
     );
     this.logger.info(
       {
@@ -473,7 +473,7 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
         statusCounts,
         trigger: input.trigger,
       },
-      'scheduler job completed',
+      '调度任务完成',
     );
   }
 }

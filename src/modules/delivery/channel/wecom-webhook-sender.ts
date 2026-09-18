@@ -52,7 +52,7 @@ export class WecomWebhookSender implements DeliveryChannelSender {
           channel: this.channelType,
           code: 'WECOM_RESPONSE_ERROR',
           diagnostics: { providerCode: response.errcode, providerMessage: response.errmsg },
-          message: `WeCom webhook rejected the message (errcode=${String(response.errcode)}).`,
+          message: `企业微信返回错误（errcode=${String(response.errcode)}）。`,
           retryable: false,
           targetKey: input.targetKey,
         });
@@ -60,7 +60,7 @@ export class WecomWebhookSender implements DeliveryChannelSender {
 
       return createChannelSuccess({
         channel: this.channelType,
-        message: 'WeCom webhook accepted the message.',
+        message: '企业微信已接收消息。',
         ...(response.errcode === undefined ? {} : { providerCode: response.errcode }),
         ...(response.errmsg === undefined ? {} : { providerMessage: response.errmsg }),
         targetKey: input.targetKey,

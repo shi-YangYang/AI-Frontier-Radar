@@ -57,7 +57,7 @@ function normalizeMaxRetries(value: number | undefined): number {
   }
 
   if (!Number.isInteger(value) || value < 0) {
-    throw new Error('Delivery retry maxRetries must be a non-negative integer.');
+    throw new Error('投递重试 maxRetries 必须是非负整数。');
   }
 
   return value;
@@ -70,7 +70,7 @@ function normalizeRetryDelays(
   const delays = value ?? DEFAULT_RETRY_DELAYS_MS;
 
   if (delays.length < maxRetries) {
-    throw new Error('Delivery retry delays must contain at least maxRetries entries.');
+    throw new Error('投递重试间隔数量不能少于 maxRetries。');
   }
 
   for (const delay of delays) {

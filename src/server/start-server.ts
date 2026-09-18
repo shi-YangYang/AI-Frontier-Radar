@@ -2,8 +2,9 @@ import { toStartupConfigLogContext } from '../shared/config';
 import type { AppConfig } from '../shared/config/types';
 import { createApp } from '../app/create-app';
 import type { AppLogger } from '../lib/logger';
+import { createAuthService } from '../modules/auth';
 import { createRetentionService } from '../modules/maintenance';
-import { createWechatBridgeService, syncWechatDeliveryTargets } from '../modules/wechat';
+import { createWechatBridgeService, syncWechatDeliveryTargets, WechatBindCoordinator } from '../modules/wechat';
 import { createRuntimeScheduler, createRuntimeSourceProviders } from '../modules/scheduler';
 import { createRuntimeSettingsService, createStorageFromConfig } from '../modules/storage';
 
@@ -14,6 +15,14 @@ export interface StartServerOptions {
 
 export async function startServer(options: StartServerOptions): Promise<void> {
   const storage = createStorageFromConfig(options.config);
+  const auth = createAuthService({
+    adminPassword: process.env.ADMIN_PASSWORD,
+    adminUsername: process.env.ADMIN_USERNAME,
+    logger: options.logger,
+    storage,
+  });
+
+  await auth.ensureSeedAdmin();
   const runtimeSettings = createRuntimeSettingsService({
     config: options.config,
     storage,
@@ -39,7 +48,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
       .catch((error) =>
         options.logger.warn(
           { err: error },
-          'initial wechat delivery target sync failed',
+          '启动时同步微信投递通道失败',
         ),
       );
   }
@@ -51,6 +60,8 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     storage,
   });
   const app = createApp({
+    auth,
+    wechatBindCoordinator: new WechatBindCoordinator(),
     wechatBridge,
     adminActions: {
       runDeliveryWorkerNow: (runOptions) => scheduler.runDeliveryWorkerNow(runOptions),
@@ -154,12 +165,12 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     }
 
     closing = true;
-    options.logger.info({ signal }, 'server shutdown requested');
+    options.logger.info({ signal }, '收到服务关闭请求');
     try {
       await app.close();
       await wechatBridge.stop();
     } catch (error) {
-      options.logger.error({ err: error, signal }, 'server shutdown failed');
+      options.logger.error({ err: error, signal }, '服务关闭失败');
       process.exitCode = 1;
     }
   };
@@ -191,7 +202,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
       {
         config: toStartupConfigLogContext(options.config),
       },
-      'server listening',
+      '服务已启动',
     );
     scheduler.start();
 
@@ -199,7 +210,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     process.once('SIGTERM', handleSigterm);
     signalHandlersRegistered = true;
   } catch (error) {
-    options.logger.error({ err: error }, 'server failed to start');
+    options.logger.error({ err: error }, '服务启动失败');
     await app.close();
     throw error;
   }

@@ -27,6 +27,8 @@ export type {
   SubscriptionRule,
   SubscriptionRuleMode,
 } from './subscription-rule-service';
+export { UserRepository } from './user-repository';
+export { UserSessionRepository } from './user-session-repository';
 export { XPostRepository } from './x-post-repository';
 export type {
   RuntimeFeishuSettings,
@@ -43,6 +45,7 @@ export type {
   CreateDeliveryEventInput,
   CreateDeliveryTargetInput,
   CreatePollRunInput,
+  CreateUserInput,
   CreateWatchAccountInput,
   CreateXPostRawInput,
   DefaultDeliveryTargetInput,
@@ -57,6 +60,10 @@ export type {
   UpdateDeliveryTargetInput,
   UpdatePollRunInput,
   UpdateWatchAccountInput,
+  User,
+  UserRole,
+  UserSession,
+  UserWithPassword,
   WatchAccount,
   WatchAccountPollStatus,
   XPostRaw,

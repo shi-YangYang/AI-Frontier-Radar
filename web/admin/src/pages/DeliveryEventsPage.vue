@@ -1,6 +1,6 @@
 <template>
   <section>
-    <PageHeader :title="t('delivery.title')" :subtitle="t('delivery.subtitle')">
+    <PageHeader :subtitle="t('delivery.subtitle')">
       <form class="filter-form" @submit.prevent="applyFilters">
         <label>
           <span>{{ t('form.fromTime') }}</span>

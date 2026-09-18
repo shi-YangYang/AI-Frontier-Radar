@@ -6,6 +6,7 @@ import fastifyStatic from '@fastify/static';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import type { AppConfig } from '../../../shared/config/types';
+import type { AuthService } from '../../auth';
 import type { AdminActions } from '../controllers/admin-controller';
 import {
   batchDeleteAdminDeliveryEvents,
@@ -63,15 +64,24 @@ import {
   updateAdminXBrowserSettings,
   updateAdminPollingSettings,
 } from '../controllers/admin-controller';
+import {
+  createAdminUser,
+  deleteAdminUser,
+  listAdminUsers,
+  resetAdminUserPassword,
+} from '../controllers/user-controller';
 import { adminJsonResponseSchema } from '../schemas/admin';
-import type { WechatBridgeService } from '../../wechat';
+import { resolveRequestUser } from './auth-routes';
+import type { WechatBindCoordinator, WechatBridgeService } from '../../wechat';
 import type { RuntimeSettingsService, StorageContext } from '../../storage';
 
 interface RegisterAdminRoutesOptions {
   actions?: AdminActions;
+  auth: AuthService;
   config: AppConfig;
   runtimeSettings?: RuntimeSettingsService;
   storage: StorageContext;
+  wechatBindCoordinator?: WechatBindCoordinator;
   wechatBridge?: WechatBridgeService;
 }
 
@@ -80,24 +90,37 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
   const adminIndexHtmlPath = path.join(adminWebRoot, 'index.html');
 
   app.addHook('onRequest', async (request, reply) => {
-    if (!isProtectedAdminPath(request.url) || isLocalRequest(request)) {
+    if (!isAdminApiPath(request.url)) {
       return;
     }
 
-    reply.code(403);
+    const user = await resolveRequestUser(request, options.auth);
 
-    if (isAdminApiPath(request.url)) {
+    if (user === null) {
+      reply.code(401);
+
       await reply.send({
         ok: false,
         error: {
-          code: 'FORBIDDEN',
-          message: '管理页只允许从本机访问。',
+          code: 'UNAUTHORIZED',
+          message: '请先登录。',
         },
       });
       return;
     }
 
-    await reply.type('text/plain; charset=utf-8').send('管理页只允许从本机访问。');
+    if (user.role !== 'admin') {
+      reply.code(403);
+
+      await reply.send({
+        ok: false,
+        error: {
+          code: 'FORBIDDEN',
+          message: '需要管理员权限。',
+        },
+      });
+      return;
+    }
   });
 
   if (existsSync(adminWebRoot)) {
@@ -110,6 +133,8 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
 
   for (const pageRoute of [
     '/',
+    '/login',
+    '/portal',
     '/accounts',
     '/poll-runs',
     '/posts',
@@ -536,6 +561,53 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
   );
 
   app.get(
+    '/admin/api/users',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => listAdminUsers(options)),
+  );
+
+  app.post(
+    '/admin/api/users',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => createAdminUser(request.body, options)),
+  );
+
+  app.delete(
+    '/admin/api/users/:id',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, async () => {
+        const currentUser = await resolveRequestUser(request, options.auth);
+
+        return deleteAdminUser(request.params, options, currentUser?.id ?? '');
+      }),
+  );
+
+  app.put(
+    '/admin/api/users/:id/password',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => resetAdminUserPassword(request.params, request.body, options)),
+  );
+
+  app.get(
     '/admin/api/wechat/status',
     {
       schema: {
@@ -564,7 +636,15 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
       },
     },
     async (request, reply) =>
-      sendAdminResponse(reply, () => startAdminWechatLogin(request.body, options)),
+      sendAdminResponse(reply, async () => {
+        const user = await resolveRequestUser(request, options.auth);
+
+        if (user !== null) {
+          options.wechatBindCoordinator?.begin(user.id);
+        }
+
+        return startAdminWechatLogin(request.body, options);
+      }),
   );
 
   app.post(
@@ -699,7 +779,10 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
 async function sendAdminIndexHtml(reply: FastifyReply, adminIndexHtmlPath: string): Promise<FastifyReply> {
   try {
     const html = await readFile(adminIndexHtmlPath, 'utf8');
-    return reply.type('text/html; charset=utf-8').send(html);
+    return reply
+      .header('cache-control', 'no-cache')
+      .type('text/html; charset=utf-8')
+      .send(html);
   } catch {
     reply.code(503);
     return reply.type('text/plain; charset=utf-8').send('管理前端尚未构建。请先运行 npm run build。');
@@ -719,47 +802,6 @@ async function sendAdminResponse<T>(
   }
 }
 
-function isProtectedAdminPath(url: string): boolean {
-  return (
-    url === '/' ||
-    url.startsWith('/?') ||
-    url === '/accounts' ||
-    url.startsWith('/accounts?') ||
-    url === '/poll-runs' ||
-    url.startsWith('/poll-runs?') ||
-    url === '/posts' ||
-    url.startsWith('/posts?') ||
-    url === '/delivery-events' ||
-    url.startsWith('/delivery-events?') ||
-    url === '/settings' ||
-    url.startsWith('/settings?') ||
-    url === '/admin' ||
-    url.startsWith('/admin?') ||
-    url.startsWith('/admin/') ||
-    url === '/admin-assets' ||
-    url.startsWith('/admin-assets?') ||
-    url.startsWith('/admin-assets/')
-  );
-}
-
 function isAdminApiPath(url: string): boolean {
   return url === '/admin/api' || url.startsWith('/admin/api?') || url.startsWith('/admin/api/');
-}
-
-function isLocalRequest(request: FastifyRequest): boolean {
-  return isLocalAddress(request.ip) || isLocalAddress(request.socket.remoteAddress);
-}
-
-function isLocalAddress(address: string | undefined): boolean {
-  if (address === undefined) {
-    return false;
-  }
-
-  const normalizedAddress = address.trim().toLowerCase();
-
-  return (
-    normalizedAddress === '127.0.0.1' ||
-    normalizedAddress === '::1' ||
-    normalizedAddress === '::ffff:127.0.0.1'
-  );
 }

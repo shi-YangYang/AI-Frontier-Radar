@@ -56,6 +56,7 @@ model DeliveryTarget {
   displayName    String          @map("display_name")
   webhookUrl     String          @map("webhook_url")
   configJson     String          @default("{}") @map("config_json")
+  ownerUserId    String?         @map("owner_user_id")
   enabled        Boolean         @default(true)
   createdAt      String          @map("created_at")
   updatedAt      String          @map("updated_at")
@@ -106,8 +107,32 @@ model PollRun {
   newPostsDetected  Int    @default(0) @map("new_posts_detected")
   eventsCreated     Int    @default(0) @map("events_created")
   errorSummary      String? @map("error_summary")
+  repeatCount       Int    @default(1) @map("repeat_count")
   createdAt         String @map("created_at")
 
   @@index([startedAt])
   @@map("poll_runs")
+}
+
+model User {
+  id           String        @id
+  username     String        @unique
+  passwordHash String        @map("password_hash")
+  role         String        @default("user")
+  createdAt    String        @map("created_at")
+  updatedAt    String        @map("updated_at")
+  sessions     UserSession[]
+
+  @@map("users")
+}
+
+model UserSession {
+  id        String @id
+  userId    String @map("user_id")
+  expiresAt String @map("expires_at")
+  createdAt String @map("created_at")
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("user_sessions")
 }

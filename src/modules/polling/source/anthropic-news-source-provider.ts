@@ -53,7 +53,7 @@ export class AnthropicNewsSourceProvider implements SourceProvider {
     if (entries.length === 0) {
       throw new SourceProviderError(
         'SOURCE_RESPONSE_INVALID',
-        'Anthropic news page did not contain any articles.',
+        'Anthropic 新闻页未解析到文章。',
         {
           endpoint: sourceUrl,
           operation: 'fetch-timeline',
@@ -91,7 +91,7 @@ export class AnthropicNewsSourceProvider implements SourceProvider {
     if (entries.length === 0) {
       throw new SourceProviderError(
         'SOURCE_RESPONSE_INVALID',
-        'Anthropic news page did not contain any articles.',
+        'Anthropic 新闻页未解析到文章。',
         {
           endpoint: sourceUrl,
           operation: 'resolve-account',
@@ -123,7 +123,7 @@ export class AnthropicNewsSourceProvider implements SourceProvider {
       if (response.status === 404 || response.status === 410) {
         throw new SourceProviderError(
           'SOURCE_ACCOUNT_NOT_FOUND',
-          `Anthropic news page was not found (HTTP ${response.status}).`,
+          `Anthropic 新闻页不存在（HTTP ${response.status}）。`,
           {
             endpoint: sourceUrl,
             operation: 'fetch-timeline',
@@ -137,7 +137,7 @@ export class AnthropicNewsSourceProvider implements SourceProvider {
       if (!response.ok) {
         throw new SourceProviderError(
           'SOURCE_REQUEST_FAILED',
-          `Anthropic news page request failed (HTTP ${response.status}).`,
+          `Anthropic 新闻页请求失败（HTTP ${response.status}）。`,
           {
             endpoint: sourceUrl,
             operation: 'fetch-timeline',
@@ -156,7 +156,7 @@ export class AnthropicNewsSourceProvider implements SourceProvider {
 
       throw new SourceProviderError(
         'SOURCE_REQUEST_FAILED',
-        'Anthropic news page request failed.',
+        'Anthropic 新闻页请求失败。',
         {
           causeMessage: error instanceof Error ? error.message : String(error),
           endpoint: sourceUrl,
@@ -184,7 +184,7 @@ function normalizeSourceUrl(rawUrl: string | undefined): string {
   if (value.length === 0) {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'Anthropic news source requires a sourceUrl.',
+      'Anthropic 新闻源需要 sourceUrl。',
       {
         operation: 'resolve-account',
         provider: 'anthropic_news',
@@ -203,7 +203,7 @@ function normalizeSourceUrl(rawUrl: string | undefined): string {
   } catch {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'Anthropic news source requires a valid http/https URL.',
+      'Anthropic 新闻源需要有效的 http/https URL。',
       {
         operation: 'resolve-account',
         provider: 'anthropic_news',

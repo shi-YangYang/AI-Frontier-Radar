@@ -1,6 +1,6 @@
 <template>
   <section>
-    <PageHeader :title="t('accounts.title')" :subtitle="t('accounts.subtitle')">
+    <PageHeader :subtitle="t('accounts.subtitle')">
       <form class="source-add-form" @submit.prevent="addAccount">
         <div class="source-add-fields">
           <SelectControl

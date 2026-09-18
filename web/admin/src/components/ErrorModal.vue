@@ -40,7 +40,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted } from 'vue';
 
-import { t } from '../i18n';
+import { t, tBackend } from '../i18n';
 
 const props = defineProps<{
   errorSummary: string | null;
@@ -71,11 +71,11 @@ function parseErrorSummary(raw: string | null): Array<{ account: null | string; 
     const separatorIndex = entry.indexOf(':');
 
     if (separatorIndex <= 0) {
-      return { account: null, error: entry };
+      return { account: null, error: tBackend(entry) };
     }
 
     const account = entry.slice(0, separatorIndex).trim();
-    const error = entry.slice(separatorIndex + 1).trim();
+    const error = tBackend(entry.slice(separatorIndex + 1).trim());
 
     if (account.length === 0 || error.length === 0) {
       return { account: null, error: entry };

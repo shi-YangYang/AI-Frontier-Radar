@@ -58,6 +58,7 @@ export class PollingOrchestrator {
   }
 
   public async runOnce(): Promise<PollingRunResult> {
+    const previousRun = await this.options.storage.pollRuns.findLatest();
     const pollRun = await this.options.storage.pollRuns.create({
       startedAt: createTimestamp(),
       status: 'running',
@@ -103,6 +104,37 @@ export class PollingOrchestrator {
         status,
       });
 
+      if (status === 'success' && newPostsDetected === 0) {
+        await this.options.storage.pollRuns.delete(pollRun.id);
+        this.logger?.debug?.(
+          {
+            pollRunId: pollRun.id,
+          },
+          '空轮询未记录（无新帖）',
+        );
+      } else if (status !== 'success') {
+        if (
+          previousRun !== null &&
+          previousRun.status === status &&
+          (previousRun.errorSummary ?? '') === (errorSummary ?? '') &&
+          previousRun.errorSummary !== null
+        ) {
+          await this.options.storage.pollRuns.update(previousRun.id, {
+            finishedAt: createTimestamp(),
+            repeatCount: previousRun.repeatCount + 1,
+          });
+          await this.options.storage.pollRuns.delete(pollRun.id);
+          this.logger?.debug?.(
+            {
+              mergedIntoPollRunId: previousRun.id,
+              pollRunId: pollRun.id,
+              repeatCount: previousRun.repeatCount + 1,
+            },
+            '连续相同失败已合并到上一条记录',
+          );
+        }
+      }
+
       this.logger?.info(
         {
           accountsFailed,
@@ -113,7 +145,7 @@ export class PollingOrchestrator {
           pollRunId: pollRun.id,
           status,
         },
-        'Polling run finished.',
+        '轮询完成。',
       );
 
       return {
@@ -146,7 +178,7 @@ export class PollingOrchestrator {
           err: error,
           pollRunId: pollRun.id,
         },
-        'Polling run failed before completion.',
+        '轮询在完成前失败。',
       );
 
       throw error;
@@ -198,7 +230,7 @@ export class PollingOrchestrator {
           sourceLabel,
           watchAccountId: watchAccount.id,
         },
-        'Polling account failed.',
+        '轮询账号失败。',
       );
 
       return {

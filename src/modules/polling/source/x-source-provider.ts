@@ -79,7 +79,7 @@ function validateFetchInput(input: SourceProviderFetchInput): void {
   if (!isPresent(input.source.xUsername) && !isPresent(input.source.xUserId)) {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'SourceProvider requires xUsername or xUserId.',
+      'X 源需要 xUsername 或 xUserId。',
       {
         limit: input.limit,
         operation: 'resolve-account',
@@ -94,7 +94,7 @@ function validateFetchInput(input: SourceProviderFetchInput): void {
   if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'SourceProvider limit must be an integer between 1 and 100.',
+      'X 源 limit 必须是 1-100 的整数。',
       {
         limit: input.limit,
         operation: 'fetch-timeline',
@@ -111,7 +111,7 @@ function validateSourceInput(input: SourceProviderValidateSourceInput): void {
   if (!isPresent(input.source.xUsername)) {
     throw new SourceProviderError(
       'SOURCE_INVALID_INPUT',
-      'SourceProvider requires xUsername.',
+      'X 源需要 xUsername。',
       {
         operation: 'resolve-account',
         provider: 'x',
@@ -136,7 +136,7 @@ function normalizeTweet(tweet: XApiTweet, account: SourceProviderAccount): Stand
   if (!isPresent(tweet.id) || !isPresent(tweet.text) || !isPresent(tweet.created_at)) {
     throw new SourceProviderError(
       'SOURCE_RESPONSE_INVALID',
-      'X timeline response did not include required tweet fields.',
+      'X 时间线响应缺少必要字段。',
       {
         operation: 'fetch-timeline',
         provider: 'x',

@@ -6,6 +6,7 @@ export interface SyncWechatDeliveryTargetsOptions {
   bridgeBaseUrl?: string;
   deliveryTargets: DeliveryTargetRepository;
   accounts: WechatAccount[];
+  ownerUserIdForNewAccounts?: string | null;
 }
 
 export interface SyncWechatDeliveryTargetsResult {
@@ -40,6 +41,7 @@ export async function syncWechatDeliveryTargets(
         config,
         displayName,
         enabled: true,
+        ownerUserId: options.ownerUserIdForNewAccounts ?? null,
         targetKey,
         webhookUrl,
       });
@@ -47,16 +49,23 @@ export async function syncWechatDeliveryTargets(
       continue;
     }
 
+    const shouldClaimOwner =
+      existing.ownerUserId === null &&
+      options.ownerUserIdForNewAccounts !== undefined &&
+      options.ownerUserIdForNewAccounts !== null;
+
     if (
       existing.displayName !== displayName ||
       existing.webhookUrl !== webhookUrl ||
       existing.config.accountId !== config.accountId ||
-      existing.config.target !== config.target
+      existing.config.target !== config.target ||
+      shouldClaimOwner
     ) {
       await options.deliveryTargets.update(existing.id, {
         config,
         displayName,
         webhookUrl,
+        ...(shouldClaimOwner ? { ownerUserId: options.ownerUserIdForNewAccounts ?? null } : {}),
       });
       result.updated += 1;
     }

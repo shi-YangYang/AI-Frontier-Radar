@@ -1,6 +1,6 @@
 <template>
   <section>
-    <PageHeader :title="t('poll.title')" :subtitle="t('poll.subtitle')">
+    <PageHeader :subtitle="t('poll.subtitle')">
       <form class="filter-form" @submit.prevent="applyFilters">
         <label>
           <span>{{ t('form.fromTime') }}</span>
@@ -67,7 +67,16 @@
                 />
               </td>
               <td :title="formatDateTime(run.startedAt)">{{ formatRelativeTime(run.startedAt) }}</td>
-              <td><StatusBadge :status="run.status" /></td>
+              <td>
+                <StatusBadge :status="run.status" />
+                <span
+                  v-if="run.repeatCount > 1"
+                  class="repeat-badge"
+                  :title="t('poll.repeatHint', { count: run.repeatCount })"
+                >
+                  ×{{ run.repeatCount }}
+                </span>
+              </td>
               <td :title="pollProgress(run)">
                 <span :class="{ 'warn-text': run.accountsFailed > 0 }">
                   {{ run.accountsSucceeded }}/{{ run.accountsTotal }}
