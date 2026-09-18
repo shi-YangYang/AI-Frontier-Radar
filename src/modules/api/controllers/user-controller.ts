@@ -98,18 +98,32 @@ export async function getUserWechatBinding(
 ): Promise<{
   ok: true;
   data: {
-    accounts: Array<{ accountId: string; displayName: string; enabled: boolean; userId?: string }>;
+    accounts: Array<{
+      accountId: string;
+      displayName: string;
+      enabled: boolean;
+      sourceIds: string[];
+      userId?: string;
+    }>;
     login: {
       loggedIn: boolean;
       qrcodeDataUrl?: string;
       qrcodeUrl?: string;
       status: string;
     };
+    sources: Array<{
+      displayName: string;
+      id: string;
+      sourceType: string;
+      sourceUrl: string | null;
+      xUsername: string | null;
+    }>;
   };
 }> {
   const state = await readSyncedWechatState(options);
   const ownTargets = state.wechatTargets.filter((target) => target.ownerUserId === user.id);
   const isOwnBindPending = options.wechatBindCoordinator?.getPendingUserId() === user.id;
+  const watchAccounts = await options.storage.watchAccounts.listAll();
 
   return {
     ok: true,
@@ -118,6 +132,7 @@ export async function getUserWechatBinding(
         accountId: target.config.accountId ?? '',
         displayName: target.displayName,
         enabled: target.enabled,
+        sourceIds: target.config.sourceIds ?? [],
         ...(target.config.target === undefined ? {} : { userId: target.config.target }),
       })),
       login: isOwnBindPending
@@ -132,8 +147,59 @@ export async function getUserWechatBinding(
             status: state.loginState.status,
           }
         : { loggedIn: state.loginState.loggedIn, status: 'idle' },
+      sources: watchAccounts.map((account) => ({
+        displayName: account.displayName ?? account.sourceUrl ?? account.xUsername ?? account.id,
+        id: account.id,
+        sourceType: account.sourceType,
+        sourceUrl: account.sourceUrl,
+        xUsername: account.xUsername,
+      })),
     },
   };
+}
+
+export async function updateUserWechatSources(
+  user: User,
+  params: unknown,
+  body: unknown,
+  options: UserControllerOptions,
+): Promise<{ ok: true; data: { sourceIds: string[] } }> {
+  if (!isRecord(params) || typeof params.accountId !== 'string' || params.accountId.trim().length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'accountId 无效。');
+  }
+
+  if (!isRecord(body) || !Array.isArray(body.sourceIds)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'sourceIds 必须是数组。');
+  }
+
+  const accountId = params.accountId.trim();
+  const target = await findOwnWechatTarget(options.storage, user, accountId);
+
+  if (target === null) {
+    throw new AdminApiError(404, 'NOT_FOUND', '未找到属于你的微信绑定。');
+  }
+
+  const watchAccounts = await options.storage.watchAccounts.listAll();
+  const knownSourceIds = new Set(watchAccounts.map((account) => account.id));
+  const sourceIds = [
+    ...new Set(
+      body.sourceIds
+        .filter((entry): entry is string => typeof entry === 'string')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0 && knownSourceIds.has(entry)),
+    ),
+  ];
+  const nextConfig = { ...target.config };
+
+  if (sourceIds.length === 0) {
+    delete nextConfig.sourceIds;
+  } else {
+    nextConfig.sourceIds = sourceIds;
+  }
+
+  await options.storage.deliveryTargets.update(target.id, { config: nextConfig });
+
+  return { ok: true, data: { sourceIds } };
 }
 
 export async function startUserWechatBind(
@@ -141,6 +207,18 @@ export async function startUserWechatBind(
   options: UserControllerOptions,
 ): Promise<{ ok: true; data: { qrcodeDataUrl?: string; qrcodeUrl?: string; status: string } }> {
   const service = requireWechatBridge(options);
+  const existingTargets = (await options.storage.deliveryTargets.listAll()).filter(
+    (target) => target.channelType === 'wechat_clawbot' && target.ownerUserId === user.id,
+  );
+
+  if (existingTargets.length > 0) {
+    throw new AdminApiError(
+      409,
+      'BINDING_LIMIT',
+      '每个账号只能绑定一个微信号，请先解绑当前微信。',
+    );
+  }
+
   const loginState = await service.getLoginState().catch(() => undefined);
   const pendingUserId = options.wechatBindCoordinator?.getPendingUserId() ?? null;
 

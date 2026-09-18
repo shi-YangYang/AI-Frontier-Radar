@@ -125,6 +125,7 @@ export interface CreateXPostRawInput {
 export interface DeliveryTargetConfig {
   accountId?: string;
   secret?: string;
+  sourceIds?: string[];
   target?: string;
 }
 

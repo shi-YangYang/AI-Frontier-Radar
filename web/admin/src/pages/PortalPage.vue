@@ -35,12 +35,13 @@
           <button
             class="primary"
             type="button"
-            :disabled="busy || qrVisible"
+            :disabled="busy || qrVisible || hasBinding"
             @click="startBind"
           >
             {{ t('portal.bindAction') }}
           </button>
         </header>
+        <p v-if="hasBinding" class="portal-binding-hint muted">{{ t('portal.oneBindingHint') }}</p>
 
         <div v-if="binding === null" class="empty-panel">{{ t('portal.loading') }}</div>
 
@@ -52,9 +53,11 @@
 
         <div v-else class="portal-account-list">
           <article v-for="account in binding.accounts" :key="account.accountId" class="portal-account">
-            <div>
-              <strong>{{ account.userId ?? account.accountId }}</strong>
-              <small class="muted">{{ t('portal.accountId') }}：{{ account.accountId }}</small>
+            <div class="portal-account-main">
+              <strong class="portal-account-name">{{ t('portal.boundWechat') }}</strong>
+              <small class="muted portal-account-id" :title="account.accountId">
+                {{ t('portal.accountId') }}：{{ account.accountId }}
+              </small>
             </div>
             <div class="portal-account-actions">
               <span class="status-badge" :class="account.enabled ? 'good' : 'neutral'">
@@ -63,6 +66,76 @@
               <button class="danger" type="button" :disabled="busy" @click="accountToUnbind = account">
                 {{ t('portal.unbindAction') }}
               </button>
+            </div>
+
+            <div class="portal-account-sources">
+              <div class="portal-sources-head">
+                <span class="portal-sources-label">{{ t('portal.sourcesLabel') }}</span>
+                <span class="muted">
+                  {{
+                    account.sourceIds.length === 0
+                      ? t('portal.sourcesAll')
+                      : t('portal.sourcesSelected', { count: account.sourceIds.length })
+                  }}
+                </span>
+                <button
+                  class="portal-sources-toggle"
+                  type="button"
+                  @click="toggleSourcesEditor(account)"
+                >
+                  {{ editingAccountId === account.accountId ? t('portal.sourcesCancel') : t('portal.sourcesEdit') }}
+                </button>
+              </div>
+
+              <div v-if="editingAccountId === account.accountId" class="portal-sources-editor">
+                <div class="portal-source-modes">
+                  <label class="portal-source-mode">
+                    <input v-model="draftSourceMode" type="radio" value="all" />
+                    <span>{{ t('portal.sourcesModeAll') }}</span>
+                  </label>
+                  <label class="portal-source-mode">
+                    <input v-model="draftSourceMode" type="radio" value="selected" />
+                    <span>{{ t('portal.sourcesModeSelected') }}</span>
+                  </label>
+                  <button
+                    v-if="draftSourceMode === 'selected'"
+                    class="portal-sources-inline"
+                    type="button"
+                    @click="selectAllSources"
+                  >
+                    {{ t('portal.sourcesSelectAll') }}
+                  </button>
+                  <button
+                    v-if="draftSourceMode === 'selected'"
+                    class="portal-sources-inline"
+                    type="button"
+                    @click="draftSourceIds = []"
+                  >
+                    {{ t('portal.sourcesClear') }}
+                  </button>
+                </div>
+
+                <div v-if="draftSourceMode === 'selected'" class="portal-source-options">
+                  <p v-if="binding.sources.length === 0" class="muted">{{ t('portal.sourcesEmpty') }}</p>
+                  <section v-for="group in groupedSources" :key="group.key" class="portal-source-group">
+                    <p class="portal-source-group-title">{{ t(group.labelKey) }}</p>
+                    <div class="portal-source-group-grid">
+                      <label v-for="source in group.sources" :key="source.id" class="portal-source-option">
+                        <input v-model="draftSourceIds" type="checkbox" :value="source.id" />
+                        <span>{{ sourceLabel(source) }}</span>
+                      </label>
+                    </div>
+                  </section>
+                </div>
+
+                <p class="portal-sources-hint muted">{{ t('portal.sourcesHint') }}</p>
+                <div class="portal-sources-actions">
+                  <button class="primary" type="button" :disabled="busy" @click="saveSources(account.accountId)">
+                    {{ t('portal.sourcesSave') }}
+                  </button>
+                  <button type="button" @click="editingAccountId = null">{{ t('portal.sourcesCancel') }}</button>
+                </div>
+              </div>
             </div>
           </article>
         </div>
@@ -94,7 +167,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
 import {
@@ -103,10 +176,19 @@ import {
   startMyWechatBind,
   submitMyWechatLoginCode,
   unbindMyWechatAccount,
+  updateMyWechatSources,
   type MyWechatAccount,
   type MyWechatBinding,
+  type MyWechatSource,
 } from '../api/admin-api';
 import { signOut, useAuth } from '../auth';
+import {
+  SOURCE_GROUP_LABEL_KEYS,
+  SOURCE_GROUP_ORDER,
+  sourceGroup,
+  sourceLabel,
+  type SourceGroupKey,
+} from '../source-labels';
 import BrandLogo from '../components/BrandLogo.vue';
 import ConfirmModal from '../components/ConfirmModal.vue';
 import ToastNotice from '../components/ToastNotice.vue';
@@ -116,9 +198,36 @@ const { t, toggleLanguage } = useI18n();
 const { currentUser } = useAuth();
 const router = useRouter();
 const accountToUnbind = ref<MyWechatAccount | null>(null);
+const hasBinding = computed(() => (binding.value?.accounts.length ?? 0) > 0);
+const groupedSources = computed(() => {
+  const groups = new Map<SourceGroupKey, MyWechatSource[]>();
+
+  for (const source of binding.value?.sources ?? []) {
+    const key = sourceGroup(source);
+    const list = groups.get(key) ?? [];
+
+    list.push(source);
+    groups.set(key, list);
+  }
+
+  return [...groups.entries()]
+    .sort(
+      ([left], [right]) => SOURCE_GROUP_ORDER.indexOf(left) - SOURCE_GROUP_ORDER.indexOf(right),
+    )
+    .map(([key, sources]) => ({
+      key,
+      labelKey: SOURCE_GROUP_LABEL_KEYS[key],
+      sources: [...sources].sort((left, right) =>
+        sourceLabel(left).localeCompare(sourceLabel(right), 'zh-Hans-CN'),
+      ),
+    }));
+});
 const binding = ref<MyWechatBinding | null>(null);
 const busy = ref(false);
 const codeInput = ref('');
+const draftSourceIds = ref<string[]>([]);
+const draftSourceMode = ref<'all' | 'selected'>('all');
+const editingAccountId = ref<string | null>(null);
 const loginStatus = ref('idle');
 const notice = ref('');
 const noticeDanger = ref(false);
@@ -218,6 +327,47 @@ function cancelBind(): void {
   qrVisible.value = false;
   stopPolling();
   void cancelMyWechatBind().catch(() => undefined);
+}
+
+function toggleSourcesEditor(account: MyWechatAccount): void {
+  if (editingAccountId.value === account.accountId) {
+    editingAccountId.value = null;
+
+    return;
+  }
+
+  editingAccountId.value = account.accountId;
+  draftSourceMode.value = account.sourceIds.length === 0 ? 'all' : 'selected';
+  draftSourceIds.value = [...account.sourceIds];
+}
+
+function selectAllSources(): void {
+  draftSourceIds.value = binding.value?.sources.map((source) => source.id) ?? [];
+}
+
+async function saveSources(accountId: string): Promise<void> {
+  const sourceIds = draftSourceMode.value === 'all' ? [] : draftSourceIds.value;
+
+  if (draftSourceMode.value === 'selected' && sourceIds.length === 0) {
+    showError(t('portal.sourcesNeedOne'));
+
+    return;
+  }
+
+  busy.value = true;
+  notice.value = '';
+
+  try {
+    await updateMyWechatSources(accountId, sourceIds);
+    editingAccountId.value = null;
+    noticeDanger.value = false;
+    notice.value = t('portal.sourcesSaved');
+    await loadBinding();
+  } catch (error) {
+    showError(error);
+  } finally {
+    busy.value = false;
+  }
 }
 
 async function confirmUnbind(): Promise<void> {

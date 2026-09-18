@@ -2377,6 +2377,125 @@ async function main(): Promise<void> {
     );
     checks.push({ name: '用户只能看到并解绑自己的微信绑定' });
 
+    const wechatTargetKey = `wechat:${boundAccountId}`;
+    const setSourcesResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'PUT',
+      payload: { sourceIds: [seededAccount.id] },
+      url: `/user/api/wechat/accounts/${encodeURIComponent(boundAccountId)}/sources`,
+    });
+    assert(
+      setSourcesResponse.statusCode === 200,
+      `setting wechat sources returned ${setSourcesResponse.statusCode}`,
+    );
+    const bindingAfterFilter = (
+      await rawInject({ headers: { cookie: userCookie }, method: 'GET', url: '/user/api/wechat' })
+    ).json() as {
+      data: {
+        accounts: Array<{ accountId: string; sourceIds: string[] }>;
+        sources: Array<{ id: string }>;
+      };
+    };
+    assert(
+      bindingAfterFilter.data.accounts.some(
+        (account) => account.accountId === boundAccountId && account.sourceIds.includes(seededAccount.id),
+      ),
+      'saved source filter should be returned by the binding API',
+    );
+    assert(
+      bindingAfterFilter.data.sources.some((source) => source.id === seededAccount.id),
+      'binding API should expose available sources',
+    );
+    const overreachSourcesResponse = await rawInject({
+      headers: { cookie: otherCookie },
+      method: 'PUT',
+      payload: { sourceIds: [] },
+      url: `/user/api/wechat/accounts/${encodeURIComponent(boundAccountId)}/sources`,
+    });
+    assert(
+      overreachSourcesResponse.statusCode === 404,
+      `other user setting sources should return 404, got ${overreachSourcesResponse.statusCode}`,
+    );
+    checks.push({ name: '绑定端保存接收源并拒绝越权修改' });
+
+    const secondBindResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'POST',
+      url: '/user/api/wechat/bind',
+    });
+    assert(
+      secondBindResponse.statusCode === 409,
+      `second wechat bind should be rejected with 409, got ${secondBindResponse.statusCode}`,
+    );
+    checks.push({ name: '每个用户只能绑定一个微信号' });
+
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T03:00:00.000Z',
+        id: '1000000010000000001',
+        text: 'Source filter included post',
+      },
+    ]);
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const includedSourceEvent = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000001',
+      wechatTargetKey,
+    );
+    assert(
+      includedSourceEvent !== null,
+      'selected source should create a delivery event for the filtered target',
+    );
+
+    const excludedFeedPath = '/excluded-source.xml';
+    rssApi.setFeed(excludedFeedPath, {
+      body: createRssDocument('Excluded Source', [
+        createRssItem({
+          description: '<p>Excluded source body</p>',
+          guid: 'excluded-item-1',
+          link: 'https://example.com/excluded/1',
+          pubDate: 'Fri, 24 Apr 2026 03:30:00 GMT',
+          title: 'Excluded source post',
+        }),
+      ]),
+      contentType: 'application/rss+xml; charset=utf-8',
+      statusCode: 200,
+    });
+    const excludedCreateResponse = await app.inject({
+      method: 'POST',
+      payload: { sourceType: 'rss', sourceUrl: `${rssApi.url}${excludedFeedPath}` },
+      url: '/admin/api/watch-accounts',
+    });
+    assert(
+      excludedCreateResponse.statusCode === 200,
+      `excluded source create returned ${excludedCreateResponse.statusCode}`,
+    );
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const excludedAccountRow = await storage.watchAccounts.findBySource({
+      sourceType: 'rss',
+      sourceUrl: `${rssApi.url}${excludedFeedPath}`,
+    });
+    const excludedPosts = await prisma.xPostRaw.findMany({
+      where: { authorUserId: excludedAccountRow?.xUserId ?? '' },
+    });
+    assert(excludedPosts.length === 1, 'excluded source post should still be stored');
+    const excludedEvent = await storage.deliveryEvents.findByPostAndTarget(
+      excludedPosts[0]?.xPostId ?? '',
+      wechatTargetKey,
+    );
+    assert(
+      excludedEvent === null,
+      'post from an unselected source must not create a delivery event for the filtered target',
+    );
+    const unfilteredEvent = await storage.deliveryEvents.findByPostAndTarget(
+      excludedPosts[0]?.xPostId ?? '',
+      'wechat:wechat-b@im.bot',
+    );
+    assert(
+      unfilteredEvent !== null,
+      'wechat target without a source filter should still receive the post',
+    );
+    checks.push({ name: '源过滤生效：未选源不投递、其它绑定不受影响' });
+
     const selfDeleteResponse = await app.inject({
       method: 'DELETE',
       url: `/admin/api/users/${mePayload.data.user.id}`,
@@ -2420,6 +2539,29 @@ async function main(): Promise<void> {
       `user list should reflect deletions: ${JSON.stringify(usersList.map((user) => user.username))}`,
     );
     checks.push({ name: '用户列表 API 与删除结果一致' });
+
+    const deleteAllWatchResponse = await app.inject({
+      method: 'POST',
+      url: '/admin/api/watch-accounts/delete-all',
+    });
+    assert(
+      deleteAllWatchResponse.statusCode === 200,
+      `delete-all watch accounts returned ${deleteAllWatchResponse.statusCode}`,
+    );
+    const deleteAllWatchResult = (
+      deleteAllWatchResponse.json() as {
+        data: { deletedAccounts: number; deletedEvents: number; deletedPosts: number };
+      }
+    ).data;
+    const remainingWatchAccounts = await storage.watchAccounts.listAll();
+    assert(
+      deleteAllWatchResult.deletedAccounts > 0 && remainingWatchAccounts.length === 0,
+      `delete-all should remove every watch account, got ${JSON.stringify({ deleted: deleteAllWatchResult.deletedAccounts, remaining: remainingWatchAccounts.length })}`,
+    );
+    checks.push({
+      detail: `accounts=${deleteAllWatchResult.deletedAccounts}, posts=${deleteAllWatchResult.deletedPosts}, events=${deleteAllWatchResult.deletedEvents}`,
+      name: '一键删除全部监听源（级联清理消息与投递记录）',
+    });
 
     printSuccess(checks);
   } finally {
