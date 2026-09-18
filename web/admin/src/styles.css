@@ -621,7 +621,7 @@ tr:last-child td {
 
 .detail-list div {
   display: grid;
-  grid-template-columns: 140px minmax(0, 1fr);
+  grid-template-columns: 180px minmax(0, 1fr);
   gap: 12px;
   border-bottom: 1px solid #f2f4f7;
   padding: 11px 0;
@@ -674,6 +674,25 @@ tr:last-child td {
   padding: 18px;
 }
 
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.detail-list dd > * + * {
+  margin-left: 8px;
+}
+
+.settings-form-panel .settings-form:not(.wechat-form) {
+  max-width: 760px;
+}
+
+.wechat-delivery-hint {
+  margin: 0 0 4px;
+}
+
 .settings-form.inner-form {
   padding: 0;
 }
@@ -707,8 +726,22 @@ tr:last-child td {
 }
 
 .delivery-target-form {
-  grid-template-columns: minmax(180px, 1fr) minmax(260px, 2fr) minmax(150px, auto) auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: end;
+}
+
+.delivery-target-form .checkbox-row {
+  align-self: center;
+}
+
+.delivery-target-form .form-actions {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 900px) {
+  .delivery-target-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .polling-form {
@@ -1977,11 +2010,22 @@ tr:last-child td {
 
 .rule-add-form {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) minmax(0, 2fr) minmax(0, 2fr) minmax(150px, 1fr) auto;
-  align-items: end;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: 12px;
   border-top: 1px dashed var(--border);
   padding-top: 16px;
+}
+
+.rule-add-form .rule-channel-field,
+.rule-add-form .form-actions {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 900px) {
+  .rule-add-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .rule-add-form label {
@@ -2003,12 +2047,44 @@ tr:last-child td {
   }
 
   .rule-add-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.rule-add-form .rule-channel-field,
+.rule-add-form .form-actions {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 900px) {
+  .rule-add-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.rule-add-form-legacy {
     grid-template-columns: 1fr 1fr;
   }
 }
 
 @media (max-width: 680px) {
   .rule-add-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.rule-add-form .rule-channel-field,
+.rule-add-form .form-actions {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 900px) {
+  .rule-add-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.rule-add-form-legacy {
     grid-template-columns: 1fr;
   }
 }
