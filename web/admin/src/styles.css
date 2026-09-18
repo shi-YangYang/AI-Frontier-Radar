@@ -2498,12 +2498,64 @@ tr:last-child td {
 }
 
 .auth-brand {
-  background: linear-gradient(155deg, #312e81 0%, #4f46e5 48%, #7c3aed 100%);
+  align-items: center;
+  background:
+    radial-gradient(120% 100% at 100% 0%, rgba(139, 92, 246, 0.5) 0%, rgba(139, 92, 246, 0) 55%),
+    radial-gradient(100% 90% at 0% 100%, rgba(45, 212, 191, 0.16) 0%, rgba(45, 212, 191, 0) 55%),
+    linear-gradient(160deg, #1e1b4b 0%, #312e81 38%, #4f46e5 78%, #6d28d9 100%);
   color: #ffffff;
   display: flex;
   overflow: hidden;
-  padding: 56px 56px;
+  padding: 56px clamp(28px, 5vw, 64px);
   position: relative;
+}
+
+.auth-brand::before {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 46px 46px;
+  content: '';
+  inset: 0;
+  mask-image: radial-gradient(120% 100% at 25% 15%, #000 25%, transparent 78%);
+  pointer-events: none;
+  position: absolute;
+}
+
+.auth-brand-decor {
+  background: repeating-radial-gradient(
+    circle at center,
+    rgba(255, 255, 255, 0.14) 0 1px,
+    transparent 1px 58px
+  );
+  border-radius: 50%;
+  bottom: -150px;
+  height: 480px;
+  pointer-events: none;
+  position: absolute;
+  right: -150px;
+  width: 480px;
+}
+
+.auth-brand-decor::after {
+  animation: auth-radar-sweep 7s linear infinite;
+  background: conic-gradient(from 0deg, rgba(165, 180, 252, 0.5) 0deg, rgba(165, 180, 252, 0) 72deg);
+  border-radius: 50%;
+  content: '';
+  inset: 0;
+  position: absolute;
+}
+
+@keyframes auth-radar-sweep {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-brand-decor::after {
+    animation: none;
+  }
 }
 
 .auth-brand-inner {
@@ -2576,48 +2628,6 @@ tr:last-child td {
   position: absolute;
   top: 2px;
   width: 18px;
-}
-
-.auth-brand-foot {
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 12px;
-  margin-top: auto;
-  padding-top: 28px;
-}
-
-.auth-brand-decor {
-  inset: 0;
-  pointer-events: none;
-  position: absolute;
-}
-
-.auth-brand-decor span {
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 50%;
-  position: absolute;
-}
-
-.auth-brand-decor span:nth-child(1) {
-  height: 420px;
-  right: -160px;
-  top: -140px;
-  width: 420px;
-}
-
-.auth-brand-decor span:nth-child(2) {
-  height: 620px;
-  right: -260px;
-  top: -240px;
-  width: 620px;
-}
-
-.auth-brand-decor span:nth-child(3) {
-  background: radial-gradient(circle, rgba(129, 140, 248, 0.4) 0%, transparent 65%);
-  border: 0;
-  bottom: -220px;
-  height: 520px;
-  left: -180px;
-  width: 520px;
 }
 
 .auth-main {
