@@ -10,7 +10,7 @@ import { loadAppConfig } from '../src/config';
 import { createLogger } from '../src/lib/logger';
 import { createApp } from '../src/app/create-app';
 import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createAi2BlogSourceProvider, createAnthropicNewsSourceProvider, createGithubTrendingSourceProvider, createHfDailyPapersSourceProvider, createMoonshotBlogSourceProvider, createRssSourceProvider, createSourceProviderRegistry, createSubscriptionRuleMatcher, createXSourceProvider, normalizeMetaBlogRawEntries, parseAi2BlogHtml, parseMoonshotBlogHtml, parseXaiNewsHtml, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
-import { runDeliveryWorkerJob } from '../src/modules/delivery';
+import { createV1TextMessageFormatter, runDeliveryWorkerJob } from '../src/modules/delivery';
 import { createRuntimeScheduler, createRuntimeSourceProviders } from '../src/modules/scheduler';
 import { applySourceGroup, createPrismaClient, createStorage, getSourceGroupStatuses } from '../src/modules/storage';
 import { SOURCE_GROUPS } from '../src/config/source-groups';
@@ -1617,12 +1617,46 @@ async function main(): Promise<void> {
       wechatBridgeRequest?.headers.authorization === 'Bearer bridge-smoke-secret' &&
         wechatBridgeBody?.accountId === 'bot-account-1@im.bot' &&
         wechatBridgeBody?.to === 'user-1@im.wechat' &&
-        typeof wechatBridgeBody.title === 'string' &&
+        wechatBridgeBody?.title === undefined &&
         typeof wechatBridgeBody.text === 'string' &&
         typeof wechatBridgeBody.url === 'string',
       `wechat bridge payload mismatch: ${JSON.stringify({ body: wechatBridgeBody, headers: wechatBridgeRequest?.headers.authorization })}`,
     );
     checks.push({ name: '微信桥通道：payload 与 Bearer 鉴权正确' });
+
+    const formatter = createV1TextMessageFormatter();
+    const titledMessage = formatter.format({
+      authorUsername: 'OpenAI News',
+      permalinkUrl: 'https://openai.com/index/cooley-gopublic',
+      postedAt: '2026-09-17T12:00:00.000Z',
+      textContent:
+        'How Cooley is accelerating IPO work with ChatGPT\n\nCooley built GO Public with ChatGPT Work to bring intelligence to the IPO process.',
+      title: 'How Cooley is accelerating IPO work with ChatGPT',
+    });
+    assert(
+      titledMessage.text.includes('📌 标题：How Cooley is accelerating IPO work with ChatGPT') &&
+        titledMessage.text.includes(
+          '📝 内容：Cooley built GO Public with ChatGPT Work to bring intelligence to the IPO process.',
+        ) &&
+        titledMessage.text.includes('🔗 原文链接：https://openai.com/index/cooley-gopublic') &&
+        !titledMessage.text.includes('📝 内容：How Cooley') &&
+        titledMessage.title.includes('How Cooley is accelerating IPO work'),
+      `formatter titled output mismatch: ${titledMessage.text}`,
+    );
+
+    const untitledMessage = formatter.format({
+      authorUsername: 'mock_ai',
+      permalinkUrl: 'https://x.com/mock_ai/status/1000000000000000001',
+      postedAt: '2026-09-17T12:00:00.000Z',
+      textContent: 'hello from X',
+    });
+    assert(
+      !untitledMessage.text.includes('📌 标题') &&
+        untitledMessage.text.includes('📝 内容：hello from X') &&
+        untitledMessage.text.includes('🆔 帖子 ID：1000000000000000001'),
+      `formatter untitled output mismatch: ${untitledMessage.text}`,
+    );
+    checks.push({ name: '推送消息模板：标题/内容分行且 X 帖无标题行' });
 
     const barkTargetKey = channelTargetByKind.get('bark')?.targetKey ?? '';
     const routingRulesResponse = await app.inject({

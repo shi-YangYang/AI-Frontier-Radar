@@ -71,6 +71,7 @@ export interface XPostRaw {
   xPostId: string;
   dedupeKey: string | null;
   authorUsername: string;
+  title: string | null;
   authorUserId: string | null;
   postedAt: string;
   textContent: string;
@@ -114,6 +115,7 @@ export interface CreateXPostRawInput {
   postedAt: string;
   textContent: string;
   permalinkUrl: string;
+  title?: string;
   isReply?: boolean;
   isRepost?: boolean;
   rawPayloadJson: string;

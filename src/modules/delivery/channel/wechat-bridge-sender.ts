@@ -42,7 +42,6 @@ export class WechatBridgeSender implements DeliveryChannelSender {
           author: input.message.author,
           postedAt: input.message.postedAt,
           text: input.message.text,
-          title: input.message.title,
           ...(target.length === 0 ? {} : { to: target }),
           url: input.message.url,
         }),

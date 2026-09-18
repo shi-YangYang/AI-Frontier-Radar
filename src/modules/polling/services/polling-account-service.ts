@@ -127,6 +127,7 @@ export class PollingAccountService {
       postedAt: post.postedAt,
       rawPayloadJson: serializeRawPayload(post.rawPayload),
       textContent: post.textContent,
+      ...(post.title === undefined ? {} : { title: post.title }),
       xPostId: post.xPostId,
     });
 

@@ -89,6 +89,7 @@ export class DeliveryEventProcessor {
         permalinkUrl: xPost.permalinkUrl,
         postedAt: xPost.postedAt,
         textContent: xPost.textContent,
+        title: xPost.title,
       });
       const sendResult = await channelSender.send({
         config: target.config,

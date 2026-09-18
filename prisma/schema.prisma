@@ -32,6 +32,7 @@ model XPostRaw {
   id             String          @id
   xPostId        String          @unique @map("x_post_id")
   dedupeKey      String?         @unique @map("dedupe_key")
+  title          String?
   authorUsername String          @map("author_username")
   authorUserId   String?         @map("author_user_id")
   postedAt       String          @map("posted_at")

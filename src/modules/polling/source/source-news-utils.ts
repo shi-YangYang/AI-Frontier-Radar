@@ -83,6 +83,7 @@ export function toNewsPost(
     postedAt: entry.publishedAt,
     rawPayload: entry,
     textContent: buildTextContent(entry),
+    title: entry.title,
     xPostId: buildNumericPostId(entry.publishedAt, `${dedupePrefix}${entry.slug}`),
   };
 }

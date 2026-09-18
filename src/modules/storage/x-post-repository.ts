@@ -254,6 +254,7 @@ export class XPostRepository {
       create: {
         authorUserId: input.authorUserId ?? null,
         authorUsername: input.authorUsername,
+        title: input.title ?? null,
         createdAt,
         dedupeKey: input.dedupeKey ?? null,
         detectedAt: input.detectedAt ?? createdAt,
@@ -290,6 +291,7 @@ function mapXPostRaw(xPost: Prisma.XPostRawGetPayload<Record<string, never>>): X
     postedAt: xPost.postedAt,
     rawPayloadJson: xPost.rawPayloadJson,
     textContent: xPost.textContent,
+    title: xPost.title,
     xPostId: xPost.xPostId,
   };
 }
