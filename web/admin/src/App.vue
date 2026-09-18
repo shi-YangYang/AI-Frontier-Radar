@@ -1,5 +1,6 @@
 <template>
-  <div class="app-shell">
+  <RouterView v-if="isBareRoute" />
+  <div v-else class="app-shell">
     <aside class="sidebar">
       <RouterLink class="brand" to="/" :aria-label="t('brand.ariaLabel')">
         <BrandLogo :alt="t('brand.name')" />
@@ -17,6 +18,15 @@
           {{ t(item.label) }}
         </RouterLink>
       </nav>
+      <div class="sidebar-user" v-if="currentUser !== null">
+        <div class="sidebar-user-info">
+          <strong>{{ currentUser.username }}</strong>
+          <small>{{ currentUser.role === 'admin' ? t('auth.roleAdmin') : t('auth.roleUser') }}</small>
+        </div>
+        <button class="language-button" type="button" @click="handleLogout">
+          {{ t('auth.logout') }}
+        </button>
+      </div>
       <div class="sidebar-actions">
         <button class="language-button" type="button" @click="toggleLanguage">
           {{ t('language.switchTo') }}
@@ -69,6 +79,12 @@
           {{ t(item.label) }}
         </RouterLink>
       </nav>
+      <div class="drawer-user" v-if="currentUser !== null">
+        <strong>{{ currentUser.username }}</strong>
+        <button class="language-button" type="button" @click="handleLogout">
+          {{ t('auth.logout') }}
+        </button>
+      </div>
     </aside>
     <main class="content">
       <RouterView />
@@ -77,16 +93,20 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue';
-import { useRoute } from 'vue-router';
+import { computed, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 
+import { signOut, useAuth } from './auth';
 import BrandLogo from './components/BrandLogo.vue';
 import NavIcon from './components/NavIcon.vue';
 import { useI18n } from './i18n';
 
 const { htmlLanguage, t, toggleLanguage } = useI18n();
+const { currentUser } = useAuth();
 const route = useRoute();
+const router = useRouter();
 const isDrawerOpen = ref(false);
+const isBareRoute = computed(() => route.path === '/login' || route.path === '/portal');
 
 const navItems = [
   { icon: 'home', label: 'nav.overview', to: '/' },
@@ -112,11 +132,22 @@ watch(
 
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown);
+  window.addEventListener('auth:expired', handleAuthExpired);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown);
+  window.removeEventListener('auth:expired', handleAuthExpired);
 });
+
+function handleAuthExpired(): void {
+  void router.push({ path: '/login', query: { redirect: route.fullPath } });
+}
+
+async function handleLogout(): Promise<void> {
+  await signOut();
+  await router.push('/login');
+}
 
 function openDrawer(): void {
   isDrawerOpen.value = true;

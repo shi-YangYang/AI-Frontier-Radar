@@ -500,6 +500,7 @@ export async function runRetentionCleanup(): Promise<{
 export interface WechatAccount {
   accountId: string;
   baseUrl: string;
+  ownerUserId: string | null;
   pushEnabled: boolean;
   tokenMasked: string;
   userId: string | null;
@@ -929,6 +930,10 @@ async function requestJson<T>(url: string, options: RequestInit = {}): Promise<T
 
   const payload = (await response.json()) as AdminResponse<T> | AdminErrorResponse;
 
+  if (response.status === 401) {
+    window.dispatchEvent(new CustomEvent('auth:expired'));
+  }
+
   if (!response.ok || payload.ok === false) {
     if (payload.ok === false) {
       throw new AdminApiRequestError({
@@ -1046,4 +1051,147 @@ function toIsoDateTime(value: string): string | null {
   }
 
   return date.toISOString();
+}
+
+
+export interface AuthUser {
+  createdAt: string;
+  id: string;
+  role: 'admin' | 'user';
+  updatedAt: string;
+  username: string;
+}
+
+export interface UserRecord {
+  createdAt: string;
+  id: string;
+  role: 'admin' | 'user';
+  updatedAt: string;
+  username: string;
+}
+
+export async function fetchCurrentUser(): Promise<AuthUser | null> {
+  const response = await fetch('/auth/me', {
+    headers: { Accept: 'application/json' },
+  });
+
+  if (response.status === 401) {
+    return null;
+  }
+
+  const payload = (await response.json()) as AdminResponse<{ user: AuthUser }> | AdminErrorResponse;
+
+  if (!response.ok || payload.ok === false) {
+    throw new AdminApiRequestError({
+      code: payload.ok === false ? payload.error.code : 'REQUEST_FAILED',
+      message: payload.ok === false ? localizeErrorMessage(payload.error.message) : '请求失败',
+      statusCode: response.status,
+    });
+  }
+
+  return payload.data.user;
+}
+
+export async function login(username: string, password: string): Promise<AuthUser> {
+  const data = await requestJson<{ user: AuthUser }>('/auth/login', {
+    body: JSON.stringify({ password, username }),
+    method: 'POST',
+  });
+
+  return data.user;
+}
+
+export async function logout(): Promise<void> {
+  await requestJson<{ loggedOut: boolean }>('/auth/logout', { method: 'POST' });
+}
+
+export async function listUsers(): Promise<UserRecord[]> {
+  const data = await requestJson<{ users: UserRecord[] }>('/admin/api/users');
+
+  return data.users;
+}
+
+export async function createUser(input: {
+  password: string;
+  role: 'admin' | 'user';
+  username: string;
+}): Promise<UserRecord> {
+  const data = await requestJson<{ user: UserRecord }>('/admin/api/users', {
+    body: JSON.stringify(input),
+    method: 'POST',
+  });
+
+  return data.user;
+}
+
+export async function deleteUser(id: string): Promise<boolean> {
+  const data = await requestJson<{ deleted: boolean }>(`/admin/api/users/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+
+  return data.deleted;
+}
+
+export async function resetUserPassword(id: string, password: string): Promise<boolean> {
+  const data = await requestJson<{ updated: boolean }>(
+    `/admin/api/users/${encodeURIComponent(id)}/password`,
+    {
+      body: JSON.stringify({ password }),
+      method: 'PUT',
+    },
+  );
+
+  return data.updated;
+}
+
+export interface MyWechatAccount {
+  accountId: string;
+  displayName: string;
+  enabled: boolean;
+  userId?: string;
+}
+
+export interface MyWechatBinding {
+  accounts: MyWechatAccount[];
+  login: {
+    loggedIn: boolean;
+    qrcodeDataUrl?: string;
+    qrcodeUrl?: string;
+    status: string;
+  };
+}
+
+export async function getMyWechatBinding(): Promise<MyWechatBinding> {
+  return requestJson<MyWechatBinding>('/user/api/wechat');
+}
+
+export async function startMyWechatBind(): Promise<{
+  qrcodeDataUrl?: string;
+  qrcodeUrl?: string;
+  status: string;
+}> {
+  return requestJson<{ qrcodeDataUrl?: string; qrcodeUrl?: string; status: string }>(
+    '/user/api/wechat/bind',
+    { method: 'POST' },
+  );
+}
+
+export async function submitMyWechatLoginCode(code: string): Promise<void> {
+  await requestJson<{ submitted: boolean }>('/user/api/wechat/bind/code', {
+    body: JSON.stringify({ code }),
+    method: 'POST',
+  });
+}
+
+export async function cancelMyWechatBind(): Promise<void> {
+  await requestJson<{ cancelled: boolean }>('/user/api/wechat/bind/cancel', { method: 'POST' });
+}
+
+export async function unbindMyWechatAccount(accountId: string): Promise<boolean> {
+  const data = await requestJson<{ deleted: boolean }>(
+    `/user/api/wechat/accounts/${encodeURIComponent(accountId)}`,
+    { method: 'DELETE' },
+  );
+
+  return data.deleted;
 }

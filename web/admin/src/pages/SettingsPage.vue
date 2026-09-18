@@ -816,6 +816,98 @@
           </article>
         </section>
 
+        <section v-else-if="activeSettingsTab === 'users'" class="settings-layout single-column">
+          <article class="panel settings-form-panel">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.users.addTitle') }}</h2>
+                <p>{{ t('settings.users.addDescription') }}</p>
+              </div>
+            </header>
+            <form class="settings-form users-create-form" @submit.prevent="submitCreateUser">
+              <label>
+                <span>{{ t('settings.users.usernameLabel') }}</span>
+                <input
+                  v-model="newUserForm.username"
+                  autocomplete="off"
+                  maxlength="32"
+                  :placeholder="t('settings.users.usernamePlaceholder')"
+                />
+              </label>
+              <label>
+                <span>{{ t('settings.users.passwordLabel') }}</span>
+                <input
+                  v-model="newUserForm.password"
+                  autocomplete="new-password"
+                  type="password"
+                  :placeholder="t('settings.users.passwordPlaceholder')"
+                />
+              </label>
+              <label>
+                <span>{{ t('settings.users.roleLabel') }}</span>
+                <SelectControl
+                  v-model="newUserForm.role"
+                  :aria-label="t('settings.users.roleLabel')"
+                  :disabled="busy"
+                  :options="userRoleOptions"
+                />
+              </label>
+              <button class="primary" type="submit" :disabled="busy">{{ t('settings.users.createAction') }}</button>
+            </form>
+          </article>
+
+          <article class="panel">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.users.listTitle') }}</h2>
+                <p>{{ t('settings.users.listDescription') }}</p>
+              </div>
+            </header>
+            <div v-if="users.length === 0" class="empty-panel">{{ t('settings.users.empty') }}</div>
+            <div v-else class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{{ t('settings.users.table.username') }}</th>
+                    <th>{{ t('settings.users.table.role') }}</th>
+                    <th>{{ t('settings.users.table.createdAt') }}</th>
+                    <th>{{ t('settings.users.table.actions') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="user in users" :key="user.id">
+                    <td>
+                      <strong>{{ user.username }}</strong>
+                      <span v-if="user.id === currentUserId" class="muted"> · {{ t('settings.users.self') }}</span>
+                    </td>
+                    <td>
+                      <span class="status-badge" :class="user.role === 'admin' ? 'good' : 'neutral'">
+                        {{ user.role === 'admin' ? t('auth.roleAdmin') : t('auth.roleUser') }}
+                      </span>
+                    </td>
+                    <td class="muted">{{ formatDateTime(user.createdAt) }}</td>
+                    <td>
+                      <div class="row-actions">
+                        <button type="button" :disabled="busy" @click="openResetPassword(user)">
+                          {{ t('settings.users.resetPassword') }}
+                        </button>
+                        <button
+                          class="danger"
+                          type="button"
+                          :disabled="busy || user.id === currentUserId"
+                          @click="userToDelete = user"
+                        >
+                          {{ t('actions.delete') }}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
         <section v-else class="settings-layout single-column">
           <article class="panel settings-form-panel">
             <header class="panel-header">
@@ -892,6 +984,47 @@
       @cancel="cleanupOpen = false"
       @confirm="runCleanup"
     />
+
+    <ConfirmModal
+      :body="t('settings.users.deleteBody', { username: userToDelete?.username ?? '' })"
+      :open="userToDelete !== null"
+      :title="t('settings.users.deleteTitle')"
+      @cancel="userToDelete = null"
+      @confirm="confirmDeleteUser"
+    />
+
+    <Teleport to="body">
+      <div v-if="passwordTarget !== null" class="modal-backdrop" @click.self="passwordTarget = null">
+        <section class="modal" role="dialog" aria-modal="true" aria-labelledby="reset-password-title">
+          <header class="modal-header">
+            <div>
+              <h2 id="reset-password-title">{{ t('settings.users.resetTitle') }}</h2>
+              <p>{{ passwordTarget.username }}</p>
+            </div>
+            <button class="icon-button" type="button" :aria-label="t('actions.close')" @click="passwordTarget = null">
+              ×
+            </button>
+          </header>
+          <form @submit.prevent="submitResetPassword">
+            <div class="modal-body">
+              <label>
+                <span>{{ t('settings.users.newPasswordLabel') }}</span>
+                <input
+                  v-model="newPasswordInput"
+                  autocomplete="new-password"
+                  type="password"
+                  :placeholder="t('settings.users.passwordPlaceholder')"
+                />
+              </label>
+            </div>
+            <footer class="modal-footer">
+              <button type="button" @click="passwordTarget = null">{{ t('actions.cancel') }}</button>
+              <button class="primary" type="submit" :disabled="busy">{{ t('settings.users.resetSubmit') }}</button>
+            </footer>
+          </form>
+        </section>
+      </div>
+    </Teleport>
 
     <Teleport to="body">
       <div v-if="editingTarget !== null" class="modal-backdrop" @click.self="closeEditTarget">
@@ -986,6 +1119,10 @@ import { computed, onMounted, reactive, ref, watch } from 'vue';
 import {
   AdminApiRequestError,
   backupDownloadUrl,
+  createUser,
+  deleteUser,
+  listUsers,
+  resetUserPassword,
   checkXSourceLogin,
   deleteWechatAccount,
   getWechatStatus,
@@ -1026,6 +1163,7 @@ import {
   type BackupEntry,
   type RetentionSettings,
   type RuntimeSettingsSummary,
+  type UserRecord,
   type WechatAccount,
   type WechatStatus,
   type RuntimeXSourceSettings,
@@ -1040,6 +1178,7 @@ import PageHeader from '../components/PageHeader.vue';
 import PaginationBar from '../components/PaginationBar.vue';
 import SelectControl from '../components/SelectControl.vue';
 import ToastNotice from '../components/ToastNotice.vue';
+import { useAuth } from '../auth';
 import { t, type MessageKey } from '../i18n';
 import { DEFAULT_PAGE_SIZE, formatDateTime } from '../utils';
 
@@ -1297,7 +1436,106 @@ function showSettingsError(error: unknown): void {
   noticeDanger.value = true;
 }
 
-type SettingsTabKey = 'data' | 'feishu' | 'polling' | 'rss' | 'rules' | 'wechat' | 'xSource' | 'runtime';
+const { currentUser } = useAuth();
+const currentUserId = ref('');
+const newUserForm = reactive({ password: '', role: 'user' as 'admin' | 'user', username: '' });
+const newPasswordInput = ref('');
+const passwordTarget = ref<UserRecord | null>(null);
+const userToDelete = ref<UserRecord | null>(null);
+const users = ref<UserRecord[]>([]);
+const userRoleOptions = computed(() => [
+  { label: t('auth.roleUser'), value: 'user' },
+  { label: t('auth.roleAdmin'), value: 'admin' },
+]);
+
+async function loadUsers(): Promise<void> {
+  try {
+    users.value = await listUsers();
+  } catch (error) {
+    showSettingsError(error);
+  }
+}
+
+async function submitCreateUser(): Promise<void> {
+  if (newUserForm.username.trim().length === 0 || newUserForm.password.length === 0) {
+    notice.value = t('settings.users.createIncomplete');
+    noticeDanger.value = true;
+
+    return;
+  }
+
+  busy.value = true;
+
+  try {
+    await createUser({
+      password: newUserForm.password,
+      role: newUserForm.role,
+      username: newUserForm.username.trim(),
+    });
+    newUserForm.password = '';
+    newUserForm.username = '';
+    newUserForm.role = 'user';
+    notice.value = t('settings.users.created');
+    noticeDanger.value = false;
+    await loadUsers();
+  } catch (error) {
+    showSettingsError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+function openResetPassword(user: UserRecord): void {
+  passwordTarget.value = user;
+  newPasswordInput.value = '';
+}
+
+async function submitResetPassword(): Promise<void> {
+  const target = passwordTarget.value;
+
+  if (target === null) {
+    return;
+  }
+
+  busy.value = true;
+
+  try {
+    await resetUserPassword(target.id, newPasswordInput.value);
+    passwordTarget.value = null;
+    newPasswordInput.value = '';
+    notice.value = t('settings.users.passwordReset');
+    noticeDanger.value = false;
+  } catch (error) {
+    showSettingsError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function confirmDeleteUser(): Promise<void> {
+  const target = userToDelete.value;
+
+  userToDelete.value = null;
+
+  if (target === null) {
+    return;
+  }
+
+  busy.value = true;
+
+  try {
+    await deleteUser(target.id);
+    notice.value = t('settings.users.deleted');
+    noticeDanger.value = false;
+    await loadUsers();
+  } catch (error) {
+    showSettingsError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+type SettingsTabKey = 'data' | 'feishu' | 'polling' | 'rss' | 'rules' | 'users' | 'wechat' | 'xSource' | 'runtime';
 
 const activeSettingsTab = ref<SettingsTabKey>('feishu');
 const settingsTabs: Array<{ descriptionKey: MessageKey; key: SettingsTabKey; labelKey: MessageKey }> = [
@@ -1335,6 +1573,11 @@ const settingsTabs: Array<{ descriptionKey: MessageKey; key: SettingsTabKey; lab
     descriptionKey: 'settings.tabs.data.description',
     key: 'data',
     labelKey: 'settings.tabs.data.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.users.description',
+    key: 'users',
+    labelKey: 'settings.tabs.users.label',
   },
   {
     descriptionKey: 'settings.tabs.runtime.description',
@@ -1455,6 +1698,7 @@ const runModeOptions = computed<{ label: string; value: 'headless' | 'headed' }[
 const xDiagnosticUsername = ref('openai');
 
 onMounted(() => {
+  currentUserId.value = currentUser.value?.id ?? '';
   void loadSettings({ silent: true });
   void loadDataSettings();
   void loadBackups();
@@ -1464,6 +1708,10 @@ onMounted(() => {
 watch(activeSettingsTab, (tab) => {
   if (tab === 'wechat') {
     void loadWechatStatus();
+  }
+
+  if (tab === 'users') {
+    void loadUsers();
   }
 });
 

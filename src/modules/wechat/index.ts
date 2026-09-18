@@ -1,3 +1,4 @@
+export { WechatBindCoordinator } from './wechat-bind-coordinator';
 export {
   createWechatBridgeService,
   WechatBridgeService,

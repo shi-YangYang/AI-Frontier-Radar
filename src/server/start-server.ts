@@ -2,8 +2,9 @@ import { toStartupConfigLogContext } from '../shared/config';
 import type { AppConfig } from '../shared/config/types';
 import { createApp } from '../app/create-app';
 import type { AppLogger } from '../lib/logger';
+import { createAuthService } from '../modules/auth';
 import { createRetentionService } from '../modules/maintenance';
-import { createWechatBridgeService, syncWechatDeliveryTargets } from '../modules/wechat';
+import { createWechatBridgeService, syncWechatDeliveryTargets, WechatBindCoordinator } from '../modules/wechat';
 import { createRuntimeScheduler, createRuntimeSourceProviders } from '../modules/scheduler';
 import { createRuntimeSettingsService, createStorageFromConfig } from '../modules/storage';
 
@@ -14,6 +15,14 @@ export interface StartServerOptions {
 
 export async function startServer(options: StartServerOptions): Promise<void> {
   const storage = createStorageFromConfig(options.config);
+  const auth = createAuthService({
+    adminPassword: process.env.ADMIN_PASSWORD,
+    adminUsername: process.env.ADMIN_USERNAME,
+    logger: options.logger,
+    storage,
+  });
+
+  await auth.ensureSeedAdmin();
   const runtimeSettings = createRuntimeSettingsService({
     config: options.config,
     storage,
@@ -51,6 +60,8 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     storage,
   });
   const app = createApp({
+    auth,
+    wechatBindCoordinator: new WechatBindCoordinator(),
     wechatBridge,
     adminActions: {
       runDeliveryWorkerNow: (runOptions) => scheduler.runDeliveryWorkerNow(runOptions),

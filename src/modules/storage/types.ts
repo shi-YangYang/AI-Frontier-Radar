@@ -131,6 +131,7 @@ export interface DeliveryTargetConfig {
 export interface DeliveryTarget {
   config: DeliveryTargetConfig;
   id: string;
+  ownerUserId: string | null;
   targetKey: string;
   channelType: DeliveryChannelType;
   displayName: string;
@@ -143,6 +144,7 @@ export interface DeliveryTarget {
 export interface CreateDeliveryTargetInput {
   config?: DeliveryTargetConfig;
   id?: string;
+  ownerUserId?: string | null;
   targetKey: string;
   channelType?: DeliveryChannelType;
   displayName: string;
@@ -153,6 +155,7 @@ export interface CreateDeliveryTargetInput {
 export interface UpdateDeliveryTargetInput {
   channelType?: DeliveryChannelType;
   config?: DeliveryTargetConfig;
+  ownerUserId?: string | null;
   displayName?: string;
   webhookUrl?: string;
   enabled?: boolean;
@@ -256,4 +259,32 @@ export interface DefaultDeliveryTargetInput {
   targetKey: string;
   webhookUrl: string;
   displayName?: string;
+}
+
+export type UserRole = 'admin' | 'user';
+
+export interface User {
+  createdAt: string;
+  id: string;
+  role: UserRole;
+  updatedAt: string;
+  username: string;
+}
+
+export interface UserWithPassword extends User {
+  passwordHash: string;
+}
+
+export interface CreateUserInput {
+  id?: string;
+  passwordHash: string;
+  role: UserRole;
+  username: string;
+}
+
+export interface UserSession {
+  createdAt: string;
+  expiresAt: string;
+  id: string;
+  userId: string;
 }
