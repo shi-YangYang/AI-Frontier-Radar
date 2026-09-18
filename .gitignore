@@ -11,3 +11,5 @@ dist-web/
 node_modules/
 wechat-bridge/.state
 wechat-bridge/node_modules/
+
+.DS_Store
