@@ -13,10 +13,34 @@
         </span>
       </RouterLink>
       <nav class="nav-list" :aria-label="t('nav.overview')">
-        <RouterLink v-for="item in navItems" :key="item.to" class="nav-item" :to="item.to">
-          <NavIcon :name="item.icon" />
-          {{ t(item.label) }}
-        </RouterLink>
+        <template v-for="item in navItems" :key="item.to">
+          <RouterLink
+            class="nav-item"
+            :to="item.to"
+            @click="item.to === '/settings' ? toggleSettingsMenu($event) : undefined"
+          >
+            <NavIcon :name="item.icon" />
+            {{ t(item.label) }}
+            <span
+              v-if="item.to === '/settings'"
+              class="nav-chevron"
+              :class="{ open: settingsMenuOpen }"
+              aria-hidden="true"
+            ></span>
+          </RouterLink>
+          <div v-if="item.to === '/settings' && settingsMenuOpen" class="nav-sub-list">
+            <RouterLink
+              v-for="tab in settingsNavTabs"
+              :key="tab.key"
+              class="nav-sub-item"
+              :class="{ active: activeSettingsTabKey === tab.key }"
+              :title="t(tab.descriptionKey)"
+              :to="{ path: '/settings', query: { tab: tab.key } }"
+            >
+              {{ t(tab.labelKey) }}
+            </RouterLink>
+          </div>
+        </template>
       </nav>
       <div class="sidebar-user" v-if="currentUser !== null">
         <div class="sidebar-user-head">
@@ -67,16 +91,34 @@
         </button>
       </header>
       <nav class="drawer-nav-list" :aria-label="t('nav.drawerTitle')">
-        <RouterLink
-          v-for="item in navItems"
-          :key="item.to"
-          class="drawer-nav-item"
-          :to="item.to"
-          @click="closeDrawer"
-        >
-          <NavIcon :name="item.icon" />
-          {{ t(item.label) }}
-        </RouterLink>
+        <template v-for="item in navItems" :key="item.to">
+          <RouterLink
+            class="drawer-nav-item"
+            :to="item.to"
+            @click="item.to === '/settings' ? toggleSettingsMenu($event, true) : closeDrawer()"
+          >
+            <NavIcon :name="item.icon" />
+            {{ t(item.label) }}
+            <span
+              v-if="item.to === '/settings'"
+              class="nav-chevron"
+              :class="{ open: settingsMenuOpen }"
+              aria-hidden="true"
+            ></span>
+          </RouterLink>
+          <div v-if="item.to === '/settings' && settingsMenuOpen" class="drawer-nav-sub-list">
+            <RouterLink
+              v-for="tab in settingsNavTabs"
+              :key="tab.key"
+              class="drawer-nav-sub-item"
+              :class="{ active: activeSettingsTabKey === tab.key }"
+              :to="{ path: '/settings', query: { tab: tab.key } }"
+              @click="closeDrawer"
+            >
+              {{ t(tab.labelKey) }}
+            </RouterLink>
+          </div>
+        </template>
       </nav>
       <div class="drawer-user" v-if="currentUser !== null">
         <strong>{{ currentUser.username }}</strong>
@@ -132,6 +174,63 @@ const navItems = [
   { icon: 'settings', label: 'nav.settings', to: '/settings' },
 ] as const;
 
+const settingsNavTabs: Array<{ descriptionKey: MessageKey; key: string; labelKey: MessageKey }> = [
+  {
+    descriptionKey: 'settings.tabs.feishu.description',
+    key: 'feishu',
+    labelKey: 'settings.tabs.feishu.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.polling.description',
+    key: 'polling',
+    labelKey: 'settings.tabs.polling.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.xSource.description',
+    key: 'xSource',
+    labelKey: 'settings.tabs.xSource.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.rss.description',
+    key: 'rss',
+    labelKey: 'settings.tabs.rss.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.rules.description',
+    key: 'rules',
+    labelKey: 'settings.tabs.rules.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.wechat.description',
+    key: 'wechat',
+    labelKey: 'settings.tabs.wechat.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.data.description',
+    key: 'data',
+    labelKey: 'settings.tabs.data.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.users.description',
+    key: 'users',
+    labelKey: 'settings.tabs.users.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.runtime.description',
+    key: 'runtime',
+    labelKey: 'settings.tabs.runtime.label',
+  },
+];
+
+const isSettingsRoute = computed(() => route.path === '/settings');
+const settingsMenuOpen = ref(isSettingsRoute.value);
+const settingsTabKeys = settingsNavTabs.map((tab) => tab.key);
+const activeSettingsTabKey = computed(() => {
+  const queryTab = typeof route.query.tab === 'string' ? route.query.tab : '';
+
+  return settingsTabKeys.includes(queryTab) ? queryTab : 'feishu';
+});
+
 watchEffect(() => {
   document.documentElement.lang = htmlLanguage.value;
   document.title = t('brand.documentTitle');
@@ -143,6 +242,10 @@ watch(
     closeDrawer();
   },
 );
+
+watch(isSettingsRoute, (onSettings) => {
+  settingsMenuOpen.value = onSettings;
+});
 
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown);
@@ -161,6 +264,21 @@ function handleAuthExpired(): void {
 async function handleLogout(): Promise<void> {
   await signOut();
   await router.push('/login');
+}
+
+function toggleSettingsMenu(event: MouseEvent, fromDrawer = false): void {
+  if (settingsMenuOpen.value) {
+    event.preventDefault();
+    settingsMenuOpen.value = false;
+
+    return;
+  }
+
+  settingsMenuOpen.value = true;
+
+  if (fromDrawer && !isSettingsRoute.value) {
+    closeDrawer();
+  }
 }
 
 function openDrawer(): void {

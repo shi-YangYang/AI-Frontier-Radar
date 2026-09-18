@@ -12,23 +12,7 @@
       <div class="empty-panel">{{ t('settings.loading') }}</div>
     </div>
 
-    <div v-else class="settings-shell">
-      <nav class="settings-tabs" :aria-label="t('settings.tabsAria')">
-        <button
-          v-for="tab in settingsTabs"
-          :key="tab.key"
-          type="button"
-          class="settings-tab"
-          :class="{ active: activeSettingsTab === tab.key }"
-          :aria-current="activeSettingsTab === tab.key ? 'page' : undefined"
-          @click="activeSettingsTab = tab.key"
-        >
-          <span>{{ t(tab.labelKey) }}</span>
-          <small>{{ t(tab.descriptionKey) }}</small>
-        </button>
-      </nav>
-
-      <div class="settings-tab-panel">
+    <div v-else class="settings-tab-panel">
         <section v-if="activeSettingsTab === 'feishu'" class="settings-layout single-column">
           <article class="panel">
             <header class="panel-header">
@@ -961,7 +945,6 @@
             </dl>
           </article>
         </section>
-      </div>
     </div>
 
     <ConfirmModal
@@ -1117,7 +1100,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 
 import {
   AdminApiRequestError,
@@ -1441,6 +1424,7 @@ function showSettingsError(error: unknown): void {
 
 const { currentUser } = useAuth();
 const router = useRouter();
+const route = useRoute();
 const currentUserId = ref('');
 const newUserForm = reactive({ password: '', role: 'user' as 'admin' | 'user', username: '' });
 const newPasswordInput = ref('');
@@ -1549,54 +1533,34 @@ async function confirmDeleteUser(): Promise<void> {
 
 type SettingsTabKey = 'data' | 'feishu' | 'polling' | 'rss' | 'rules' | 'users' | 'wechat' | 'xSource' | 'runtime';
 
-const activeSettingsTab = ref<SettingsTabKey>('feishu');
-const settingsTabs: Array<{ descriptionKey: MessageKey; key: SettingsTabKey; labelKey: MessageKey }> = [
-  {
-    descriptionKey: 'settings.tabs.feishu.description',
-    key: 'feishu',
-    labelKey: 'settings.tabs.feishu.label',
-  },
-  {
-    descriptionKey: 'settings.tabs.polling.description',
-    key: 'polling',
-    labelKey: 'settings.tabs.polling.label',
-  },
-  {
-    descriptionKey: 'settings.tabs.xSource.description',
-    key: 'xSource',
-    labelKey: 'settings.tabs.xSource.label',
-  },
-  {
-    descriptionKey: 'settings.tabs.rss.description',
-    key: 'rss',
-    labelKey: 'settings.tabs.rss.label',
-  },
-  {
-    descriptionKey: 'settings.tabs.rules.description',
-    key: 'rules',
-    labelKey: 'settings.tabs.rules.label',
-  },
-  {
-    descriptionKey: 'settings.tabs.wechat.description',
-    key: 'wechat',
-    labelKey: 'settings.tabs.wechat.label',
-  },
-  {
-    descriptionKey: 'settings.tabs.data.description',
-    key: 'data',
-    labelKey: 'settings.tabs.data.label',
-  },
-  {
-    descriptionKey: 'settings.tabs.users.description',
-    key: 'users',
-    labelKey: 'settings.tabs.users.label',
-  },
-  {
-    descriptionKey: 'settings.tabs.runtime.description',
-    key: 'runtime',
-    labelKey: 'settings.tabs.runtime.label',
-  },
+const SETTINGS_TAB_KEYS: SettingsTabKey[] = [
+  'data',
+  'feishu',
+  'polling',
+  'rss',
+  'rules',
+  'users',
+  'wechat',
+  'xSource',
+  'runtime',
 ];
+
+function resolveSettingsTab(): SettingsTabKey {
+  const queryTab = typeof route.query.tab === 'string' ? route.query.tab : '';
+
+  return SETTINGS_TAB_KEYS.includes(queryTab as SettingsTabKey)
+    ? (queryTab as SettingsTabKey)
+    : 'feishu';
+}
+
+const activeSettingsTab = ref<SettingsTabKey>(resolveSettingsTab());
+
+watch(
+  () => route.query.tab,
+  () => {
+    activeSettingsTab.value = resolveSettingsTab();
+  },
+);
 
 const pollingForm = reactive({
   excludeReplies: true,
@@ -1715,6 +1679,10 @@ onMounted(() => {
   void loadDataSettings();
   void loadBackups();
   void loadWechatStatus();
+
+  if (activeSettingsTab.value === 'users') {
+    void loadUsers();
+  }
 });
 
 watch(activeSettingsTab, (tab) => {
