@@ -497,6 +497,7 @@ export async function runRetentionCleanup(): Promise<{
 export interface WechatAccount {
   accountId: string;
   baseUrl: string;
+  pushEnabled: boolean;
   tokenMasked: string;
   userId: string | null;
 }
@@ -541,6 +542,16 @@ export async function testWechatBridge(): Promise<{ messageId?: string; ok: true
   return requestJson<{ messageId?: string; ok: true }>('/admin/api/wechat/test', {
     method: 'POST',
   });
+}
+
+export async function updateWechatAccountPush(
+  accountId: string,
+  enabled: boolean,
+): Promise<{ enabled: boolean }> {
+  return requestJson<{ enabled: boolean }>(
+    `/admin/api/wechat/accounts/${encodeURIComponent(accountId)}/push`,
+    { body: JSON.stringify({ enabled }), method: 'PATCH' },
+  );
 }
 
 export async function deleteWechatAccount(accountId: string): Promise<boolean> {
@@ -710,7 +721,9 @@ export async function testFeishuSettings(): Promise<FeishuTestResult> {
   return requestJson<FeishuTestResult>('/admin/api/settings/feishu/test', { method: 'POST' });
 }
 
-export async function listDeliveryTargets(query: DeliveryTargetPageQuery): Promise<{
+export async function listDeliveryTargets(
+  query: DeliveryTargetPageQuery & { excludeChannelType?: string },
+): Promise<{
   deliveryTargets: DeliveryTarget[];
   pagination: AdminPagination;
   summary: DeliveryTargetSummary;
@@ -944,10 +957,16 @@ function toPageQuery(query: PageQuery): string {
   return params.toString();
 }
 
-function toDeliveryTargetPageQuery(query: DeliveryTargetPageQuery): string {
+function toDeliveryTargetPageQuery(
+  query: DeliveryTargetPageQuery & { excludeChannelType?: string },
+): string {
   const params = new URLSearchParams();
   params.set('page', String(query.page));
   params.set('pageSize', String(query.pageSize));
+
+  if (query.excludeChannelType !== undefined && query.excludeChannelType.length > 0) {
+    params.set('excludeChannelType', query.excludeChannelType);
+  }
   return params.toString();
 }
 

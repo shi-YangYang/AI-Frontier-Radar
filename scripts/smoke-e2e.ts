@@ -115,7 +115,43 @@ async function main(): Promise<void> {
     rss: rssProvider,
     x: sourceProvider,
   });
+  const fakeWechatAccounts = [
+    {
+      accountId: 'wechat-a@im.bot',
+      baseUrl: 'https://ilinkai.weixin.qq.com',
+      tokenMasked: 'aaaa***bbbb',
+      userId: 'user-a@im.wechat',
+    },
+    {
+      accountId: 'wechat-b@im.bot',
+      baseUrl: 'https://ilinkai.weixin.qq.com',
+      tokenMasked: 'cccc***dddd',
+      userId: 'user-b@im.wechat',
+    },
+  ];
+  const fakeWechatBridge = {
+    getAccounts: async () => fakeWechatAccounts,
+    getLoginState: async () => ({ loggedIn: true, status: 'idle' }),
+    getStatus: () => ({ installed: true, port: 3_991, running: true }),
+    getTargets: async () => [],
+    isInstalled: () => true,
+    isRunning: () => true,
+    removeAccount: async (accountId: string) => {
+      const index = fakeWechatAccounts.findIndex((account) => account.accountId === accountId);
+
+      if (index >= 0) {
+        fakeWechatAccounts.splice(index, 1);
+        return true;
+      }
+
+      return false;
+    },
+    sendMessage: async () => ({ ok: true }),
+    startLogin: async () => ({ status: 'pending' }),
+    submitLoginCode: async () => undefined,
+  };
   const app = createApp({
+    wechatBridge: fakeWechatBridge as never,
     adminActions: {
       validateWatchAccount: async (input) => {
         if (input.sourceType === 'rss') {
@@ -1673,6 +1709,59 @@ async function main(): Promise<void> {
       url: '/admin/api/subscription-rules',
     });
     checks.push({ name: '分渠道规则：未命中不投递并正确清理规则' });
+
+    const wechatStatusResponse = await app.inject({ method: 'GET', url: '/admin/api/wechat/status' });
+    assert(wechatStatusResponse.statusCode === 200, 'wechat status should return 200');
+    const wechatTargetA = await storage.deliveryTargets.findByTargetKey('wechat:wechat-a@im.bot');
+    const wechatTargetB = await storage.deliveryTargets.findByTargetKey('wechat:wechat-b@im.bot');
+    assert(
+      wechatTargetA !== null &&
+        wechatTargetA.enabled &&
+        wechatTargetA.config.accountId === 'wechat-a@im.bot' &&
+        wechatTargetA.config.target === 'user-a@im.wechat' &&
+        wechatTargetB !== null &&
+        wechatTargetB.enabled,
+      `wechat auto targets mismatch: ${JSON.stringify({ a: wechatTargetA?.config, b: wechatTargetB?.config })}`,
+    );
+    checks.push({ name: '绑定微信号后自动创建投递通道（默认开启）' });
+
+    await app.inject({
+      method: 'PATCH',
+      payload: { enabled: false },
+      url: `/admin/api/settings/delivery-targets/${wechatTargetB?.id}/enabled`,
+    });
+    await app.inject({ method: 'GET', url: '/admin/api/wechat/status' });
+    const wechatTargetBAfterToggle = await storage.deliveryTargets.findByTargetKey(
+      'wechat:wechat-b@im.bot',
+    );
+    assert(
+      wechatTargetBAfterToggle !== null && !wechatTargetBAfterToggle.enabled,
+      'sync must preserve per-account disabled state',
+    );
+    checks.push({ name: '单账号可关闭推送且同步不会覆盖' });
+
+    await app.inject({ method: 'DELETE', url: '/admin/api/wechat/accounts/wechat-b@im.bot' });
+    const wechatTargetBAfterDelete = await storage.deliveryTargets.findByTargetKey(
+      'wechat:wechat-b@im.bot',
+    );
+    const wechatTargetAAfterDelete = await storage.deliveryTargets.findByTargetKey(
+      'wechat:wechat-a@im.bot',
+    );
+    assert(
+      wechatTargetBAfterDelete === null && wechatTargetAAfterDelete !== null,
+      'removing a wechat account should remove its channel only',
+    );
+    checks.push({ name: '删除微信号同步移除其投递通道' });
+
+    if (wechatTargetAAfterDelete !== null) {
+      await storage.deliveryTargets.delete(wechatTargetAAfterDelete.id);
+    }
+    fakeWechatAccounts.push({
+      accountId: 'wechat-b@im.bot',
+      baseUrl: 'https://ilinkai.weixin.qq.com',
+      tokenMasked: 'cccc***dddd',
+      userId: 'user-b@im.wechat',
+    });
 
     const feedXmlResponse = await app.inject({ method: 'GET', url: '/feed.xml' });
     assert(feedXmlResponse.statusCode === 200, `feed.xml returned ${feedXmlResponse.statusCode}`);

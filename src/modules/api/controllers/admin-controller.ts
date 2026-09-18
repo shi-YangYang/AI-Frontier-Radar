@@ -52,7 +52,7 @@ import {
   type RetentionSettings,
 } from '../../maintenance';
 import { sharedLogBuffer, type LogBufferEntry } from '../../../lib/logger';
-import type { WechatAccount, WechatBridgeService } from '../../wechat';
+import { syncWechatDeliveryTargets, type WechatAccount, type WechatBridgeService } from '../../wechat';
 import { SOURCE_GROUPS, findSourceGroup } from '../../../config/source-groups';
 import {
   applySourceGroup,
@@ -769,11 +769,33 @@ export async function getAdminWechatStatus(options: AdminControllerOptions): Pro
   const targets = status.running ? await service.getTargets().catch(() => []) : [];
   const accounts = status.running ? await service.getAccounts().catch(() => []) : [];
 
+  if (status.running && accounts.length >= 0) {
+    await syncWechatDeliveryTargets({
+      accounts,
+      bridgeBaseUrl: `http://127.0.0.1:${status.port}/send`,
+      deliveryTargets: options.storage.deliveryTargets,
+    }).catch(() => undefined);
+  }
+
+  const wechatTargets = (await options.storage.deliveryTargets.listAll()).filter(
+    (target) => target.channelType === 'wechat_clawbot',
+  );
+  const accountsWithPush = accounts.map((account) => {
+    const target = wechatTargets.find(
+      (entry) => entry.config.accountId === account.accountId,
+    );
+
+    return {
+      ...account,
+      pushEnabled: target?.enabled === true,
+    };
+  });
+
   return {
     ok: true,
     data: {
       ...(loginState.accountId === undefined ? {} : { accountId: loginState.accountId }),
-      accounts,
+      accounts: accountsWithPush,
       installed: status.installed,
       loggedIn: loginState.loggedIn,
       loginStatus: loginState.status,
@@ -792,6 +814,34 @@ export async function getAdminWechatStatus(options: AdminControllerOptions): Pro
   };
 }
 
+export async function updateAdminWechatAccountPush(
+  params: unknown,
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { enabled: boolean } }> {
+  if (!isRecord(params) || typeof params.accountId !== 'string' || params.accountId.trim().length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'accountId 无效。');
+  }
+
+  if (!isRecord(body) || typeof body.enabled !== 'boolean') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'enabled 必须是布尔值。');
+  }
+
+  const accountId = params.accountId.trim();
+  const knownTargets = await options.storage.deliveryTargets.listAll();
+  const target = knownTargets.find(
+    (entry) => entry.channelType === 'wechat_clawbot' && entry.config.accountId === accountId,
+  );
+
+  if (target === undefined) {
+    throw new AdminApiError(404, 'NOT_FOUND', '该微信账号还没有对应的投递通道。');
+  }
+
+  await options.storage.deliveryTargets.update(target.id, { enabled: body.enabled });
+
+  return { ok: true, data: { enabled: body.enabled } };
+}
+
 export async function deleteAdminWechatAccount(
   params: unknown,
   options: AdminControllerOptions,
@@ -803,7 +853,20 @@ export async function deleteAdminWechatAccount(
   }
 
   try {
-    const deleted = await service.removeAccount(params.accountId.trim());
+    const accountId = params.accountId.trim();
+    const deleted = await service.removeAccount(accountId);
+
+    if (deleted) {
+      const knownTargets = await options.storage.deliveryTargets.listAll();
+      const wechatTarget = knownTargets.find(
+        (target) =>
+          target.channelType === 'wechat_clawbot' && target.config.accountId === accountId,
+      );
+
+      if (wechatTarget !== undefined) {
+        await options.storage.deliveryTargets.delete(wechatTarget.id);
+      }
+    }
 
     return { ok: true, data: { deleted } };
   } catch (error) {
@@ -1121,9 +1184,15 @@ export async function listAdminDeliveryTargets(
   };
 }> {
   const paginationInput = readPaginationQuery(query);
-  const summary = await options.storage.deliveryTargets.getVisibleSummary();
+  const excludeChannelTypes = readExcludeChannelTypesQuery(query);
+  const summary = await options.storage.deliveryTargets.getVisibleSummary({
+    ...(excludeChannelTypes === undefined ? {} : { excludeChannelTypes }),
+  });
   const resolvedPaginationInput = clampPaginationInput(paginationInput, summary.total);
-  const deliveryTargets = await options.storage.deliveryTargets.listPage(resolvedPaginationInput);
+  const deliveryTargets = await options.storage.deliveryTargets.listPage({
+    ...resolvedPaginationInput,
+    ...(excludeChannelTypes === undefined ? {} : { excludeChannelTypes }),
+  });
 
   return {
     ok: true,
@@ -2144,6 +2213,25 @@ function collectUnknownRuleTargetKeys(rules: unknown[], knownTargetKeys: Set<str
   }
 
   return unknownKeys;
+}
+
+function readExcludeChannelTypesQuery(query: unknown): string[] | undefined {
+  if (!isRecord(query) || query.excludeChannelType === undefined) {
+    return undefined;
+  }
+
+  const rawValue = Array.isArray(query.excludeChannelType)
+    ? query.excludeChannelType[0]
+    : query.excludeChannelType;
+
+  if (typeof rawValue !== 'string' || rawValue.trim().length === 0) {
+    return undefined;
+  }
+
+  return rawValue
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
 }
 
 function readCreateDeliveryTargetBody(body: unknown): {

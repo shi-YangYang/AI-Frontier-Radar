@@ -49,6 +49,7 @@ import {
   startAdminWechatLogin,
   submitAdminWechatLoginCode,
   testAdminWechat,
+  updateAdminWechatAccountPush,
   testAdminDeliveryTarget,
   testAdminFeishuSettings,
   testAdminXSourceAnonymous,
@@ -575,6 +576,19 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     },
     async (request, reply) =>
       sendAdminResponse(reply, () => submitAdminWechatLoginCode(request.body, options)),
+  );
+
+  app.patch(
+    '/admin/api/wechat/accounts/:accountId/push',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () =>
+        updateAdminWechatAccountPush(request.params, request.body, options),
+      ),
   );
 
   app.post(

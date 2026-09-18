@@ -645,38 +645,6 @@
                 </button>
               </div>
 
-              <div class="settings-field">
-                <span>{{ t('settings.wechat.deliveryTitle') }}</span>
-                <p class="muted wechat-delivery-hint">{{ t('settings.wechat.deliveryHint') }}</p>
-                <label class="checkbox-row">
-                  <input v-model="wechatDeliveryForm.enabled" type="checkbox" />
-                  <span>{{ t('settings.wechat.deliveryEnabled') }}</span>
-                </label>
-                <div class="settings-field">
-                  <span>{{ t('settings.feishu.accountLabel') }}</span>
-                  <SelectControl
-                    v-model="wechatDeliveryForm.accountId"
-                    :aria-label="t('settings.feishu.accountLabel')"
-                    :disabled="busy"
-                    :options="wechatAccountOptions"
-                  />
-                </div>
-                <label>
-                  <span>{{ t('settings.feishu.targetLabel') }}</span>
-                  <input
-                    v-model="wechatDeliveryForm.target"
-                    autocomplete="off"
-                    :placeholder="t('settings.feishu.targetPlaceholder')"
-                  />
-                  <small>{{ t('settings.feishu.targetHelp') }}</small>
-                </label>
-                <div class="settings-actions">
-                  <button class="primary" type="button" :disabled="busy || !wechatStatus.loggedIn" @click="saveWechatDelivery">
-                    {{ t('actions.save') }}
-                  </button>
-                </div>
-              </div>
-
               <div v-if="wechatQrCode !== null" class="wechat-qr-block">
                 <img v-if="wechatStatus.qrcodeDataUrl" :src="wechatStatus.qrcodeDataUrl" alt="WeChat login QR" class="wechat-qr-image" />
                 <a v-if="wechatStatus.qrcodeUrl" :href="wechatStatus.qrcodeUrl" rel="noreferrer" target="_blank">
@@ -696,6 +664,7 @@
 
               <div class="settings-field">
                 <span>{{ t('settings.wechat.accountsTitle') }}</span>
+                <p class="muted wechat-delivery-hint">{{ t('settings.wechat.accountsAutoPush') }}</p>
                 <div v-if="wechatStatus.accounts.length === 0" class="empty-panel">
                   {{ t('settings.wechat.accountsEmpty') }}
                 </div>
@@ -704,6 +673,7 @@
                     <tr>
                       <th>{{ t('settings.wechat.accountId') }}</th>
                       <th>{{ t('settings.wechat.accountUser') }}</th>
+                      <th>{{ t('settings.wechat.accountPush') }}</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -711,6 +681,17 @@
                     <tr v-for="account in wechatStatus.accounts" :key="account.accountId">
                       <td><code>{{ account.accountId }}</code></td>
                       <td><code>{{ account.userId ?? '-' }}</code></td>
+                      <td>
+                        <label class="checkbox-row compact-checkbox">
+                          <input
+                            type="checkbox"
+                            :checked="account.pushEnabled"
+                            :disabled="busy"
+                            @change="toggleWechatAccountPush(account)"
+                          />
+                          <span class="muted">{{ t('settings.wechat.accountPushHint') }}</span>
+                        </label>
+                      </td>
                       <td class="table-actions">
                         <button
                           class="link-danger"
@@ -956,31 +937,6 @@
                   />
                   <small>{{ t('settings.edit.saveHelp') }}</small>
                 </label>
-                <div v-if="editingTarget.channelType === 'wechat_clawbot'" class="settings-field">
-                  <span>{{ t('settings.feishu.accountLabel') }}</span>
-                  <SelectControl
-                    v-model="editTargetForm.accountId"
-                    :aria-label="t('settings.feishu.accountLabel')"
-                    :disabled="busy"
-                    :options="wechatAccountOptions"
-                  />
-                  <small>{{ t('settings.edit.accountHelp') }}</small>
-                </div>
-                <label v-if="editingTarget.channelType === 'wechat_clawbot'">
-                  <span>{{ t('settings.edit.newTargetLabel') }}</span>
-                  <input
-                    v-model="editTargetForm.target"
-                    autocomplete="off"
-                    :placeholder="t('settings.edit.newTargetPlaceholder')"
-                  />
-                  <small>
-                    {{
-                      editingTarget.target
-                        ? t('settings.edit.targetKeepHelp', { target: editingTarget.target })
-                        : t('settings.edit.targetUnsetHelp')
-                    }}
-                  </small>
-                </label>
                 <label v-if="editingTarget.channelType === 'dingtalk_webhook'">
                   <span>{{ t('settings.edit.newSecretLabel') }}</span>
                   <input
@@ -1046,6 +1002,7 @@ import {
   deleteWechatAccount,
   getWechatStatus,
   startWechatLogin,
+  updateWechatAccountPush,
   submitWechatLoginCode,
   testWechatBridge,
   createBackup,
@@ -1120,73 +1077,19 @@ const anonymousCheckResult = ref<XSourceAnonymousCheckResult | null>(null);
 const loginCheckResult = ref<XSourceLoginCheckResult | null>(null);
 
 const wechatCodeInput = ref('');
-const wechatDeliveryForm = reactive({
-  accountId: '',
-  enabled: false,
-  target: '',
-});
 const wechatQrCode = ref<{ qrcodeDataUrl?: string; qrcodeUrl?: string } | null>(null);
 const wechatStatus = ref<WechatStatus | null>(null);
 let wechatPollTimer: ReturnType<typeof setInterval> | null = null;
 
-function syncWechatDeliveryForm(): void {
-  const target = deliveryTargets.value.find((entry) => entry.channelType === 'wechat_clawbot');
-
-  if (target === undefined) {
-    return;
-  }
-
-  wechatDeliveryForm.enabled = target.enabled;
-  wechatDeliveryForm.accountId = target.accountId ?? '';
-  wechatDeliveryForm.target = target.target ?? '';
-}
-
 async function loadWechatStatus(): Promise<void> {
   try {
     wechatStatus.value = await getWechatStatus();
-    syncWechatDeliveryForm();
 
     if (wechatStatus.value.loginStatus === 'connected' || wechatStatus.value.loginStatus === 'failed') {
       stopWechatPolling();
     }
   } catch (error) {
     showSettingsError(error);
-  }
-}
-
-async function saveWechatDelivery(): Promise<void> {
-  busy.value = true;
-
-  try {
-    const existing = deliveryTargets.value.find((entry) => entry.channelType === 'wechat_clawbot');
-    const accountId = wechatDeliveryForm.accountId.trim();
-    const target = wechatDeliveryForm.target.trim();
-
-    if (existing === undefined) {
-      await createDeliveryTarget({
-        ...(accountId.length === 0 ? {} : { accountId }),
-        channelType: 'wechat_clawbot',
-        displayName: t('settings.wechat.deliveryName'),
-        enabled: wechatDeliveryForm.enabled,
-        ...(target.length === 0 ? {} : { target }),
-        webhookUrl: 'http://127.0.0.1:3991/send',
-      });
-    } else {
-      await updateDeliveryTarget(existing.id, {
-        accountId,
-        displayName: existing.displayName,
-        ...(target.length === 0 ? {} : { target }),
-      });
-      await updateDeliveryTargetEnabled(existing.id, wechatDeliveryForm.enabled);
-    }
-
-    await loadDeliveryTargets(1, { silent: true });
-    notice.value = t('settings.wechat.deliverySaved');
-    noticeDanger.value = false;
-  } catch (error) {
-    showSettingsError(error);
-  } finally {
-    busy.value = false;
   }
 }
 
@@ -1202,6 +1105,21 @@ function startWechatPolling(): void {
   wechatPollTimer = setInterval(() => {
     void loadWechatStatus();
   }, 3_000);
+}
+
+async function toggleWechatAccountPush(account: WechatAccount): Promise<void> {
+  busy.value = true;
+
+  try {
+    await updateWechatAccountPush(account.accountId, !account.pushEnabled);
+    wechatStatus.value = await getWechatStatus();
+    notice.value = t('settings.wechat.accountPushSaved');
+    noticeDanger.value = false;
+  } catch (error) {
+    showSettingsError(error);
+  } finally {
+    busy.value = false;
+  }
 }
 
 async function removeWechatAccount(account: WechatAccount): Promise<void> {
@@ -1476,14 +1394,6 @@ const channelTypeOptions = computed<{ label: string; value: DeliveryChannelType 
   { label: t('settings.feishu.channel.dingtalk'), value: 'dingtalk_webhook' },
   { label: t('settings.feishu.channel.bark'), value: 'bark' },
   { label: t('settings.feishu.channel.generic'), value: 'generic_webhook' },
-]);
-
-const wechatAccountOptions = computed<{ label: string; value: string }[]>(() => [
-  { label: t('settings.feishu.accountDefault'), value: '' },
-  ...(wechatStatus.value?.accounts ?? []).map((account) => ({
-    label: `${account.accountId}${account.userId ? ` (${account.userId})` : ''}`,
-    value: account.accountId,
-  })),
 ]);
 
 const channelUrlPlaceholders: Record<DeliveryChannelType, string> = {
@@ -2064,8 +1974,13 @@ function resetNewTargetForm(): void {
   newTargetForm.webhookUrl = '';
 }
 
-function toDeliveryTargetQuery(page: number): { page: number; pageSize: number } {
+function toDeliveryTargetQuery(page: number): {
+  excludeChannelType: string;
+  page: number;
+  pageSize: number;
+} {
   return {
+    excludeChannelType: 'wechat_clawbot',
     page,
     pageSize: deliveryTargetPagination.value.pageSize,
   };
