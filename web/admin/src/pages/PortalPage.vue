@@ -1,21 +1,25 @@
 <template>
   <div class="portal-shell">
     <header class="portal-header">
-      <div class="portal-brand">
-        <BrandLogo :alt="t('brand.name')" class="portal-logo" />
-        <div>
-          <strong>{{ t('brand.name') }}</strong>
-          <small>{{ t('portal.subtitle') }}</small>
+      <div class="portal-header-inner">
+        <div class="portal-brand">
+          <BrandLogo :alt="t('brand.name')" class="portal-logo" />
+          <div>
+            <strong>{{ t('brand.name') }}</strong>
+            <small>{{ t('portal.subtitle') }}</small>
+          </div>
         </div>
-      </div>
-      <div class="portal-header-actions">
-        <span v-if="currentUser !== null" class="portal-user">
-          {{ t('portal.signedInAs') }} <strong>{{ currentUser.username }}</strong>
-        </span>
-        <button class="language-button" type="button" @click="toggleLanguage">
-          {{ t('language.switchTo') }}
-        </button>
-        <button type="button" @click="handleLogout">{{ t('auth.logout') }}</button>
+        <div class="portal-header-actions">
+          <span v-if="currentUser !== null" class="portal-user">
+            {{ t('portal.signedInAs') }} <strong>{{ currentUser.username }}</strong>
+          </span>
+          <div class="portal-header-buttons">
+            <button class="language-button" type="button" @click="toggleLanguage">
+              {{ t('language.switchTo') }}
+            </button>
+            <button type="button" @click="handleLogout">{{ t('auth.logout') }}</button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -23,8 +27,8 @@
       <ToastNotice :message="notice" :danger="noticeDanger" />
 
       <section class="panel">
-        <header class="panel-header">
-          <div>
+        <header class="panel-header portal-panel-header">
+          <div class="portal-panel-text">
             <h2>{{ t('portal.wechatTitle') }}</h2>
             <p>{{ t('portal.wechatDescription') }}</p>
           </div>
@@ -40,8 +44,10 @@
 
         <div v-if="binding === null" class="empty-panel">{{ t('portal.loading') }}</div>
 
-        <div v-else-if="binding.accounts.length === 0 && !qrVisible" class="empty-panel">
-          {{ t('portal.noBindings') }}
+        <div v-else-if="binding.accounts.length === 0 && !qrVisible" class="portal-empty">
+          <div class="portal-empty-icon" aria-hidden="true">◎</div>
+          <p>{{ t('portal.noBindings') }}</p>
+          <small>{{ t('portal.emptyHint') }}</small>
         </div>
 
         <div v-else class="portal-account-list">

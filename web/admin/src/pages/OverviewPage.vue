@@ -1,6 +1,6 @@
 <template>
   <section>
-    <PageHeader :title="t('overview.title')" :subtitle="t('overview.subtitle')">
+    <PageHeader :subtitle="t('overview.subtitle')">
       <div class="toolbar">
         <button type="button" :disabled="busy" @click="() => loadSummary()">{{ t('actions.refresh') }}</button>
         <button class="primary" type="button" :disabled="busy" @click="runPoll">{{ t('actions.pollNow') }}</button>

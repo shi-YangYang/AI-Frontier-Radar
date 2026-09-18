@@ -19,18 +19,17 @@
         </RouterLink>
       </nav>
       <div class="sidebar-user" v-if="currentUser !== null">
-        <div class="sidebar-user-info">
-          <strong>{{ currentUser.username }}</strong>
-          <small>{{ currentUser.role === 'admin' ? t('auth.roleAdmin') : t('auth.roleUser') }}</small>
+        <div class="sidebar-user-head">
+          <div class="sidebar-user-info">
+            <strong>{{ currentUser.username }}</strong>
+            <small>{{ currentUser.role === 'admin' ? t('auth.roleAdmin') : t('auth.roleUser') }}</small>
+          </div>
         </div>
-        <button class="language-button" type="button" @click="handleLogout">
+        <button class="logout-button" type="button" @click="handleLogout">
           {{ t('auth.logout') }}
         </button>
       </div>
       <div class="sidebar-actions">
-        <button class="language-button" type="button" @click="toggleLanguage">
-          {{ t('language.switchTo') }}
-        </button>
         <button
           class="menu-button"
           type="button"
@@ -87,7 +86,19 @@
       </div>
     </aside>
     <main class="content">
-      <RouterView />
+      <header class="content-topbar">
+        <nav class="breadcrumb" :aria-label="t('nav.breadcrumb')">
+          <RouterLink to="/">{{ t('nav.home') }}</RouterLink>
+          <span class="breadcrumb-sep" aria-hidden="true">/</span>
+          <span class="breadcrumb-current">{{ t(breadcrumbLabel) }}</span>
+        </nav>
+        <button class="language-button" type="button" @click="toggleLanguage">
+          {{ t('language.switchTo') }}
+        </button>
+      </header>
+      <div class="content-body">
+        <RouterView />
+      </div>
     </main>
   </div>
 </template>
@@ -99,7 +110,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { signOut, useAuth } from './auth';
 import BrandLogo from './components/BrandLogo.vue';
 import NavIcon from './components/NavIcon.vue';
-import { useI18n } from './i18n';
+import { useI18n, type MessageKey } from './i18n';
 
 const { htmlLanguage, t, toggleLanguage } = useI18n();
 const { currentUser } = useAuth();
@@ -107,6 +118,9 @@ const route = useRoute();
 const router = useRouter();
 const isDrawerOpen = ref(false);
 const isBareRoute = computed(() => route.path === '/login' || route.path === '/portal');
+const breadcrumbLabel = computed<MessageKey>(
+  () => (route.meta.labelKey as MessageKey | undefined) ?? 'nav.overview',
+);
 
 const navItems = [
   { icon: 'home', label: 'nav.overview', to: '/' },

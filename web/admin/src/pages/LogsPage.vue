@@ -1,6 +1,6 @@
 <template>
   <section>
-    <PageHeader :title="t('logs.title')" :subtitle="t('logs.subtitle')">
+    <PageHeader :subtitle="t('logs.subtitle')">
       <div class="toolbar">
         <SelectControl
           :model-value="levelFilter"

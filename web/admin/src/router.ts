@@ -24,31 +24,31 @@ export const router = createRouter({
     },
     {
       component: OverviewPage,
-      path: '/',
+      path: '/', meta: { labelKey: 'nav.overview' },
     },
     {
       component: AccountsPage,
-      path: '/accounts',
+      path: '/accounts', meta: { labelKey: 'nav.accounts' },
     },
     {
       component: PollRunsPage,
-      path: '/poll-runs',
+      path: '/poll-runs', meta: { labelKey: 'nav.pollRuns' },
     },
     {
       component: PostsPage,
-      path: '/posts',
+      path: '/posts', meta: { labelKey: 'nav.posts' },
     },
     {
       component: DeliveryEventsPage,
-      path: '/delivery-events',
+      path: '/delivery-events', meta: { labelKey: 'nav.deliveryEvents' },
     },
     {
       component: SettingsPage,
-      path: '/settings',
+      path: '/settings', meta: { labelKey: 'nav.settings' },
     },
     {
       component: LogsPage,
-      path: '/logs',
+      path: '/logs', meta: { labelKey: 'nav.logs' },
     },
   ],
 });

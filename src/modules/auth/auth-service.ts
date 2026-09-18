@@ -18,9 +18,9 @@ export interface LoginResult {
 }
 
 const DEFAULT_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
-const MIN_PASSWORD_LENGTH = 8;
+const MIN_PASSWORD_LENGTH = 4;
 const MAX_PASSWORD_LENGTH = 200;
-const USERNAME_PATTERN = /^[A-Za-z0-9_-]{3,32}$/;
+const USERNAME_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
 
 export class AuthValidationError extends Error {
   public constructor(message: string) {
@@ -130,7 +130,7 @@ export class AuthService {
     const username = input.username.trim();
 
     if (!USERNAME_PATTERN.test(username)) {
-      throw new AuthValidationError('用户名需为 3-32 位字母、数字、下划线或短横线。');
+      throw new AuthValidationError('用户名需为 1-32 位字母、数字、下划线或短横线。');
     }
 
     validatePassword(input.password);

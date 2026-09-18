@@ -1,16 +1,40 @@
 <template>
   <div class="auth-shell">
-    <div class="auth-topbar">
-      <button class="language-button" type="button" @click="toggleLanguage">
-        {{ t('language.switchTo') }}
-      </button>
-    </div>
-    <section class="auth-card">
-      <BrandLogo :alt="t('brand.name')" class="auth-logo" />
-      <h1>{{ t('auth.loginTitle') }}</h1>
-      <p class="muted">{{ t('auth.loginSubtitle') }}</p>
+    <aside class="auth-brand">
+      <div class="auth-brand-decor" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+      <div class="auth-brand-inner">
+        <div class="auth-brand-head">
+          <BrandLogo :alt="t('brand.name')" class="auth-brand-logo" />
+          <div>
+            <strong>{{ t('brand.name') }}</strong>
+            <small>{{ t('brand.subtitle') }}</small>
+          </div>
+        </div>
+        <h1>{{ t('auth.brandHeadline') }}</h1>
+        <ul class="auth-brand-points">
+          <li>{{ t('auth.pointSources') }}</li>
+          <li>{{ t('auth.pointLocal') }}</li>
+          <li>{{ t('auth.pointWechat') }}</li>
+        </ul>
+        <small class="auth-brand-foot">{{ t('auth.brandFoot') }}</small>
+      </div>
+    </aside>
 
-      <form class="auth-form" @submit.prevent="handleSubmit">
+    <main class="auth-main">
+      <div class="auth-topbar">
+        <button class="language-button" type="button" @click="toggleLanguage">
+          {{ t('language.switchTo') }}
+        </button>
+      </div>
+
+      <form class="auth-form-card" @submit.prevent="handleSubmit">
+        <header>
+          <h2>{{ t('auth.loginTitle') }}</h2>
+          <p>{{ t('auth.loginSubtitle') }}</p>
+        </header>
+
         <label>
           <span>{{ t('auth.username') }}</span>
           <input
@@ -35,7 +59,7 @@
           {{ busy ? t('auth.loggingIn') : t('auth.loginAction') }}
         </button>
       </form>
-    </section>
+    </main>
   </div>
 </template>
 

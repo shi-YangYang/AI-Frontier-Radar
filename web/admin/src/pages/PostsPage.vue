@@ -1,6 +1,6 @@
 <template>
   <section>
-    <PageHeader :title="t('posts.title')" :subtitle="t('posts.subtitle')">
+    <PageHeader :subtitle="t('posts.subtitle')">
       <div class="toolbar">
         <button type="button" :disabled="busy" @click="manualRefresh">{{ t('actions.refresh') }}</button>
         <button
