@@ -72,6 +72,15 @@
               >
                 {{ t('settings.feishu.clawbotUrlAuto') }}
               </span>
+              <div v-if="newTargetForm.channelType === 'wechat_clawbot'" class="settings-field">
+                <span>{{ t('settings.feishu.accountLabel') }}</span>
+                <SelectControl
+                  v-model="newTargetForm.accountId"
+                  :aria-label="t('settings.feishu.accountLabel')"
+                  :disabled="busy"
+                  :options="wechatAccountOptions"
+                />
+              </div>
               <label v-if="newTargetForm.channelType === 'wechat_clawbot'">
                 <span>{{ t('settings.feishu.targetLabel') }}</span>
                 <input
@@ -648,7 +657,7 @@
                   :disabled="busy || !wechatStatus.installed || !wechatStatus.running"
                   @click="startWechatLoginNow"
                 >
-                  {{ wechatStatus.loggedIn ? t('settings.wechat.relogin') : t('settings.wechat.login') }}
+                  {{ wechatStatus.accounts.length > 0 ? t('settings.wechat.addAccount') : t('settings.wechat.login') }}
                 </button>
                 <button
                   type="button"
@@ -677,6 +686,38 @@
               </div>
 
               <div class="settings-field">
+                <span>{{ t('settings.wechat.accountsTitle') }}</span>
+                <div v-if="wechatStatus.accounts.length === 0" class="empty-panel">
+                  {{ t('settings.wechat.accountsEmpty') }}
+                </div>
+                <table v-else class="data-table">
+                  <thead>
+                    <tr>
+                      <th>{{ t('settings.wechat.accountId') }}</th>
+                      <th>{{ t('settings.wechat.accountUser') }}</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="account in wechatStatus.accounts" :key="account.accountId">
+                      <td><code>{{ account.accountId }}</code></td>
+                      <td><code>{{ account.userId ?? '-' }}</code></td>
+                      <td class="table-actions">
+                        <button
+                          class="link-danger"
+                          type="button"
+                          :disabled="busy"
+                          @click="removeWechatAccount(account)"
+                        >
+                          {{ t('actions.delete') }}
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="settings-field">
                 <span>{{ t('settings.wechat.targetsTitle') }}</span>
                 <div v-if="wechatStatus.targets.length === 0" class="empty-panel">
                   {{ t('settings.wechat.targetsEmpty') }}
@@ -684,12 +725,14 @@
                 <table v-else class="data-table">
                   <thead>
                     <tr>
+                      <th>{{ t('settings.wechat.targetAccount') }}</th>
                       <th>{{ t('settings.wechat.targetId') }}</th>
                       <th>{{ t('settings.wechat.targetLastSeen') }}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="target in wechatStatus.targets" :key="target.id">
+                    <tr v-for="target in wechatStatus.targets" :key="`${target.accountId ?? ''}-${target.id}`">
+                      <td><code>{{ target.accountId ?? '-' }}</code></td>
                       <td><code>{{ target.id }}</code></td>
                       <td>{{ target.lastSeenAt ?? '-' }}</td>
                     </tr>
@@ -903,6 +946,16 @@
                   />
                   <small>{{ t('settings.edit.saveHelp') }}</small>
                 </label>
+                <div v-if="editingTarget.channelType === 'wechat_clawbot'" class="settings-field">
+                  <span>{{ t('settings.feishu.accountLabel') }}</span>
+                  <SelectControl
+                    v-model="editTargetForm.accountId"
+                    :aria-label="t('settings.feishu.accountLabel')"
+                    :disabled="busy"
+                    :options="wechatAccountOptions"
+                  />
+                  <small>{{ t('settings.edit.accountHelp') }}</small>
+                </div>
                 <label v-if="editingTarget.channelType === 'wechat_clawbot'">
                   <span>{{ t('settings.edit.newTargetLabel') }}</span>
                   <input
@@ -980,6 +1033,7 @@ import {
   AdminApiRequestError,
   backupDownloadUrl,
   checkXSourceLogin,
+  deleteWechatAccount,
   getWechatStatus,
   startWechatLogin,
   submitWechatLoginCode,
@@ -1017,6 +1071,7 @@ import {
   type BackupEntry,
   type RetentionSettings,
   type RuntimeSettingsSummary,
+  type WechatAccount,
   type WechatStatus,
   type RuntimeXSourceSettings,
   type XSourceAnonymousCheckResult,
@@ -1082,6 +1137,21 @@ function startWechatPolling(): void {
   wechatPollTimer = setInterval(() => {
     void loadWechatStatus();
   }, 3_000);
+}
+
+async function removeWechatAccount(account: WechatAccount): Promise<void> {
+  busy.value = true;
+
+  try {
+    await deleteWechatAccount(account.accountId);
+    notice.value = t('settings.wechat.accountDeleted', { account: account.accountId });
+    noticeDanger.value = false;
+    await loadWechatStatus();
+  } catch (error) {
+    showSettingsError(error);
+  } finally {
+    busy.value = false;
+  }
 }
 
 async function startWechatLoginNow(): Promise<void> {
@@ -1293,6 +1363,7 @@ const pollingForm = reactive({
 });
 
 const newTargetForm = reactive({
+  accountId: '',
   channelType: 'feishu_webhook' as DeliveryChannelType,
   displayName: '',
   enabled: true,
@@ -1302,6 +1373,7 @@ const newTargetForm = reactive({
 });
 
 const editTargetForm = reactive({
+  accountId: '',
   displayName: '',
   secret: '',
   target: '',
@@ -1340,6 +1412,14 @@ const channelTypeOptions = computed<{ label: string; value: DeliveryChannelType 
   { label: t('settings.feishu.channel.bark'), value: 'bark' },
   { label: t('settings.feishu.channel.generic'), value: 'generic_webhook' },
   { label: t('settings.feishu.channel.wechatBridge'), value: 'wechat_clawbot' },
+]);
+
+const wechatAccountOptions = computed<{ label: string; value: string }[]>(() => [
+  { label: t('settings.feishu.accountDefault'), value: '' },
+  ...(wechatStatus.value?.accounts ?? []).map((account) => ({
+    label: `${account.accountId}${account.userId ? ` (${account.userId})` : ''}`,
+    value: account.accountId,
+  })),
 ]);
 
 const channelUrlPlaceholders: Record<DeliveryChannelType, string> = {
@@ -1709,8 +1789,10 @@ async function createTarget(): Promise<void> {
   try {
     const secret = newTargetForm.secret.trim();
     const target = newTargetForm.target.trim();
+    const accountId = newTargetForm.accountId.trim();
 
     await createDeliveryTarget({
+      ...(accountId.length === 0 ? {} : { accountId }),
       channelType: newTargetForm.channelType,
       displayName: newTargetForm.displayName.trim(),
       enabled: newTargetForm.enabled,
@@ -1732,6 +1814,7 @@ async function createTarget(): Promise<void> {
 
 function openEditTarget(target: DeliveryTarget): void {
   editingTarget.value = target;
+  editTargetForm.accountId = target.accountId ?? '';
   editTargetForm.displayName = target.displayName;
   editTargetForm.secret = '';
   editTargetForm.target = '';
@@ -1740,6 +1823,7 @@ function openEditTarget(target: DeliveryTarget): void {
 
 function closeEditTarget(): void {
   editingTarget.value = null;
+  editTargetForm.accountId = '';
   editTargetForm.displayName = '';
   editTargetForm.secret = '';
   editTargetForm.target = '';
@@ -1766,7 +1850,9 @@ async function saveTargetEdit(): Promise<void> {
     const webhookUrl = editTargetForm.webhookUrl.trim();
     const secret = editTargetForm.secret.trim();
     const target = editTargetForm.target.trim();
+    const accountId = editTargetForm.accountId.trim();
     const result = await updateDeliveryTarget(editingTarget.value.id, {
+      accountId,
       displayName: editTargetForm.displayName.trim(),
       ...(secret.length === 0 ? {} : { secret }),
       ...(target.length === 0 ? {} : { target }),
@@ -1905,6 +1991,7 @@ function replaceDeliveryTarget(nextTarget: DeliveryTarget): void {
 }
 
 function resetNewTargetForm(): void {
+  newTargetForm.accountId = '';
   newTargetForm.channelType = 'feishu_webhook';
   newTargetForm.displayName = '';
   newTargetForm.enabled = true;

@@ -52,7 +52,7 @@ import {
   type RetentionSettings,
 } from '../../maintenance';
 import { sharedLogBuffer, type LogBufferEntry } from '../../../lib/logger';
-import type { WechatBridgeService } from '../../wechat';
+import type { WechatAccount, WechatBridgeService } from '../../wechat';
 import { SOURCE_GROUPS, findSourceGroup } from '../../../config/source-groups';
 import {
   applySourceGroup,
@@ -734,6 +734,7 @@ export async function getAdminWechatStatus(options: AdminControllerOptions): Pro
   ok: true;
   data: {
     accountId?: string;
+    accounts: WechatAccount[];
     installed: boolean;
     loggedIn: boolean;
     loginStatus: string;
@@ -742,7 +743,7 @@ export async function getAdminWechatStatus(options: AdminControllerOptions): Pro
     qrcodeDataUrl?: string;
     qrcodeUrl?: string;
     running: boolean;
-    targets: Array<{ id: string; lastSeenAt?: string; preview?: string }>;
+    targets: Array<{ accountId?: string; id: string; lastSeenAt?: string; preview?: string }>;
   };
 }> {
   const service = options.wechatBridge;
@@ -751,6 +752,7 @@ export async function getAdminWechatStatus(options: AdminControllerOptions): Pro
     return {
       ok: true,
       data: {
+        accounts: [],
         installed: false,
         loggedIn: false,
         loginStatus: 'unavailable',
@@ -765,11 +767,13 @@ export async function getAdminWechatStatus(options: AdminControllerOptions): Pro
   const status = service.getStatus();
   const loginState = await service.getLoginState();
   const targets = status.running ? await service.getTargets().catch(() => []) : [];
+  const accounts = status.running ? await service.getAccounts().catch(() => []) : [];
 
   return {
     ok: true,
     data: {
       ...(loginState.accountId === undefined ? {} : { accountId: loginState.accountId }),
+      accounts,
       installed: status.installed,
       loggedIn: loginState.loggedIn,
       loginStatus: loginState.status,
@@ -779,12 +783,36 @@ export async function getAdminWechatStatus(options: AdminControllerOptions): Pro
       ...(loginState.qrcodeUrl === undefined ? {} : { qrcodeUrl: loginState.qrcodeUrl }),
       running: status.running,
       targets: targets.map((target) => ({
+        ...(target.accountId === undefined ? {} : { accountId: target.accountId }),
         id: target.id,
         ...(target.lastSeenAt === undefined ? {} : { lastSeenAt: target.lastSeenAt }),
         ...(target.preview === undefined ? {} : { preview: target.preview }),
       })),
     },
   };
+}
+
+export async function deleteAdminWechatAccount(
+  params: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { deleted: boolean } }> {
+  const service = requireWechatBridge(options);
+
+  if (!isRecord(params) || typeof params.accountId !== 'string' || params.accountId.trim().length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'accountId 无效。');
+  }
+
+  try {
+    const deleted = await service.removeAccount(params.accountId.trim());
+
+    return { ok: true, data: { deleted } };
+  } catch (error) {
+    throw new AdminApiError(
+      502,
+      'WECHAT_BRIDGE_FAILED',
+      error instanceof Error ? error.message : '删除微信账号失败。',
+    );
+  }
 }
 
 export async function startAdminWechatLogin(
@@ -1152,8 +1180,10 @@ export async function updateAdminDeliveryTarget(
     await assertWebhookUrlNotDuplicated(input.webhookUrl, options, existingTarget.id);
   }
 
-  const { secret, target, ...restInput } = input;
-  const nextConfig: { secret?: string; target?: string } = { ...existingTarget.config };
+  const { accountId, secret, target, ...restInput } = input;
+  const nextConfig: { accountId?: string; secret?: string; target?: string } = {
+    ...existingTarget.config,
+  };
 
   if (secret !== undefined) {
     if (secret.length === 0) {
@@ -1168,6 +1198,14 @@ export async function updateAdminDeliveryTarget(
       delete nextConfig.target;
     } else {
       nextConfig.target = target;
+    }
+  }
+
+  if (accountId !== undefined) {
+    if (accountId.length === 0) {
+      delete nextConfig.accountId;
+    } else {
+      nextConfig.accountId = accountId;
     }
   }
 
@@ -1379,6 +1417,7 @@ interface AdminSummary {
 }
 
 interface AdminDeliveryTarget {
+  accountId: string | null;
   channelType: DeliveryTarget['channelType'];
   createdAt: string;
   displayName: string;
@@ -1931,6 +1970,7 @@ function toSafeSourceErrorDetails(error: SourceProviderError): Record<string, un
 
 function toAdminDeliveryTarget(target: DeliveryTarget): AdminDeliveryTarget {
   return {
+    accountId: target.config.accountId ?? null,
     channelType: target.channelType,
     createdAt: target.createdAt,
     displayName: target.displayName,
@@ -2129,6 +2169,7 @@ function readCreateDeliveryTargetBody(body: unknown): {
 }
 
 function readUpdateDeliveryTargetBody(body: unknown): {
+  accountId?: string;
   displayName?: string;
   secret?: string;
   target?: string;
@@ -2139,6 +2180,7 @@ function readUpdateDeliveryTargetBody(body: unknown): {
   }
 
   const input: {
+    accountId?: string;
     displayName?: string;
     secret?: string;
     target?: string;
@@ -2163,6 +2205,14 @@ function readUpdateDeliveryTargetBody(body: unknown): {
     }
 
     input.target = body.target.trim();
+  }
+
+  if (body.accountId !== undefined) {
+    if (typeof body.accountId !== 'string') {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'accountId 必须是字符串。');
+    }
+
+    input.accountId = body.accountId.trim();
   }
 
   if (Object.keys(input).length === 0) {
@@ -2200,10 +2250,11 @@ function readDeliveryChannelType(value: unknown): DeliveryTarget['channelType'] 
 }
 
 function readDeliveryTargetConfig(body: Record<string, unknown>): {
+  accountId?: string;
   secret?: string;
   target?: string;
 } {
-  const config: { secret?: string; target?: string } = {};
+  const config: { accountId?: string; secret?: string; target?: string } = {};
 
   if (body.secret !== undefined) {
     const secret = readDeliveryTargetSecret(body.secret);
@@ -2226,6 +2277,22 @@ function readDeliveryTargetConfig(body: Record<string, unknown>): {
 
     if (target.length > 0) {
       config.target = target;
+    }
+  }
+
+  if (body.accountId !== undefined) {
+    if (typeof body.accountId !== 'string') {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'accountId 必须是字符串。');
+    }
+
+    const accountId = body.accountId.trim();
+
+    if (accountId.length > 200) {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'accountId 不能超过 200 个字符。');
+    }
+
+    if (accountId.length > 0) {
+      config.accountId = accountId;
     }
   }
 

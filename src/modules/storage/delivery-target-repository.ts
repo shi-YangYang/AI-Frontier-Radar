@@ -326,8 +326,10 @@ function parseDeliveryTargetConfig(rawConfigJson: string): DeliveryTarget['confi
     const record = parsed as Record<string, unknown>;
     const secret = typeof record.secret === 'string' ? record.secret.trim() : '';
     const target = typeof record.target === 'string' ? record.target.trim() : '';
+    const accountId = typeof record.accountId === 'string' ? record.accountId.trim() : '';
 
     return {
+      ...(accountId.length === 0 ? {} : { accountId }),
       ...(secret.length === 0 ? {} : { secret }),
       ...(target.length === 0 ? {} : { target }),
     };
@@ -339,8 +341,10 @@ function parseDeliveryTargetConfig(rawConfigJson: string): DeliveryTarget['confi
 function serializeDeliveryTargetConfig(config: DeliveryTarget['config'] | undefined): string {
   const secret = config?.secret?.trim() ?? '';
   const target = config?.target?.trim() ?? '';
+  const accountId = config?.accountId?.trim() ?? '';
 
   return JSON.stringify({
+    ...(accountId.length === 0 ? {} : { accountId }),
     ...(secret.length === 0 ? {} : { secret }),
     ...(target.length === 0 ? {} : { target }),
   });

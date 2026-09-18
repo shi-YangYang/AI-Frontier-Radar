@@ -23,6 +23,7 @@ import {
   checkAdminXSourceLogin,
   applyAdminSourceGroup,
   clearAdminPostsHistory,
+  deleteAdminWechatAccount,
   downloadAdminBackup,
   exportAdminPosts,
   getAdminDataSettings,
@@ -541,6 +542,17 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
       },
     },
     async (_, reply) => sendAdminResponse(reply, () => getAdminWechatStatus(options)),
+  );
+
+  app.delete(
+    '/admin/api/wechat/accounts/:accountId',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => deleteAdminWechatAccount(request.params, options)),
   );
 
   app.post(

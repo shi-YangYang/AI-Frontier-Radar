@@ -4,6 +4,7 @@ export {
   findWechatBridgeRoot,
 } from './wechat-bridge-service';
 export type {
+  WechatAccount,
   WechatBridgeServiceOptions,
   WechatBridgeStatus,
   WechatLoginState,

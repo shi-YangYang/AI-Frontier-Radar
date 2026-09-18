@@ -1423,6 +1423,7 @@ async function main(): Promise<void> {
       { channelType: 'bark', kind: 'bark', name: 'Mock Bark', url: webhook.urls.bark },
       { channelType: 'generic_webhook', kind: 'generic', name: 'Mock Generic', url: webhook.urls.generic },
       {
+        accountId: 'bot-account-1@im.bot',
         channelType: 'wechat_clawbot',
         kind: 'wechatBridge',
         name: 'Mock WeChat Bridge',
@@ -1443,6 +1444,7 @@ async function main(): Promise<void> {
           webhookUrl: definition.url,
           ...('secret' in definition ? { secret: definition.secret } : {}),
           ...('target' in definition ? { target: definition.target } : {}),
+          ...('accountId' in definition ? { accountId: definition.accountId } : {}),
         },
         url: '/admin/api/settings/delivery-targets',
       });
@@ -1569,6 +1571,7 @@ async function main(): Promise<void> {
       entry.url.startsWith('/mock-wechat-bridge'),
     );
     const wechatBridgeBody = wechatBridgeRequest?.body as {
+      accountId?: string;
       text?: string;
       title?: string;
       to?: string;
@@ -1576,6 +1579,7 @@ async function main(): Promise<void> {
     };
     assert(
       wechatBridgeRequest?.headers.authorization === 'Bearer bridge-smoke-secret' &&
+        wechatBridgeBody?.accountId === 'bot-account-1@im.bot' &&
         wechatBridgeBody?.to === 'user-1@im.wechat' &&
         typeof wechatBridgeBody.title === 'string' &&
         typeof wechatBridgeBody.text === 'string' &&

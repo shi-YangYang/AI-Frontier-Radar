@@ -334,6 +334,7 @@ export type DeliveryChannelType =
   | 'wecom_webhook';
 
 export interface DeliveryTarget {
+  accountId: string | null;
   channelType: DeliveryChannelType;
   createdAt: string;
   displayName: string;
@@ -352,6 +353,7 @@ export interface DeliveryTargetSummary {
 }
 
 export interface CreateDeliveryTargetInput {
+  accountId?: string;
   channelType: DeliveryChannelType;
   displayName: string;
   enabled: boolean;
@@ -361,6 +363,7 @@ export interface CreateDeliveryTargetInput {
 }
 
 export interface UpdateDeliveryTargetInput {
+  accountId?: string;
   displayName: string;
   secret?: string;
   target?: string;
@@ -491,8 +494,16 @@ export async function runRetentionCleanup(): Promise<{
   }>('/admin/api/actions/cleanup-now', { method: 'POST' });
 }
 
+export interface WechatAccount {
+  accountId: string;
+  baseUrl: string;
+  tokenMasked: string;
+  userId: string | null;
+}
+
 export interface WechatStatus {
   accountId?: string;
+  accounts: WechatAccount[];
   installed: boolean;
   loggedIn: boolean;
   loginStatus: string;
@@ -501,7 +512,7 @@ export interface WechatStatus {
   qrcodeDataUrl?: string;
   qrcodeUrl?: string;
   running: boolean;
-  targets: Array<{ id: string; lastSeenAt?: string; preview?: string }>;
+  targets: Array<{ accountId?: string; id: string; lastSeenAt?: string; preview?: string }>;
 }
 
 export async function getWechatStatus(): Promise<WechatStatus> {
@@ -530,6 +541,15 @@ export async function testWechatBridge(): Promise<{ messageId?: string; ok: true
   return requestJson<{ messageId?: string; ok: true }>('/admin/api/wechat/test', {
     method: 'POST',
   });
+}
+
+export async function deleteWechatAccount(accountId: string): Promise<boolean> {
+  const data = await requestJson<{ deleted: boolean }>(
+    '/admin/api/wechat/accounts/' + encodeURIComponent(accountId),
+    { method: 'DELETE' },
+  );
+
+  return data.deleted;
 }
 
 export async function listBackups(): Promise<BackupEntry[]> {

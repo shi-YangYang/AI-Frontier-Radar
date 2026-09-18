@@ -26,7 +26,15 @@ export interface WechatLoginState {
   userId?: string;
 }
 
+export interface WechatAccount {
+  accountId: string;
+  baseUrl: string;
+  tokenMasked: string;
+  userId: string | null;
+}
+
 export interface WechatTarget {
+  accountId?: string;
   firstSeenAt?: string;
   id: string;
   lastSeenAt?: string;
@@ -236,6 +244,21 @@ export class WechatBridgeService {
     this.child.stdin.write(`${code.trim()}\n`);
   }
 
+  public async getAccounts(): Promise<WechatAccount[]> {
+    const response = await this.request<{ accounts?: WechatAccount[] }>('/accounts');
+
+    return Array.isArray(response.accounts) ? response.accounts : [];
+  }
+
+  public async removeAccount(accountId: string): Promise<boolean> {
+    const response = await this.request<{ deleted?: boolean }>(
+      `/accounts/${encodeURIComponent(accountId)}`,
+      { method: 'DELETE' },
+    );
+
+    return response.deleted === true;
+  }
+
   public async getTargets(): Promise<WechatTarget[]> {
     const response = await this.request<{ targets?: WechatTarget[] }>('/targets');
 
@@ -243,6 +266,7 @@ export class WechatBridgeService {
   }
 
   public async sendMessage(input: {
+    accountId?: string;
     author?: string;
     postedAt?: string;
     text: string;

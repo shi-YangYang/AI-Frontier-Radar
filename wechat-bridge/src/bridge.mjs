@@ -41,10 +41,13 @@ function readTargets() {
   }
 }
 
-function recordTarget(targetId, message) {
-  const targets = readTargets().filter((entry) => entry.id !== targetId);
-  targets.push({
-    firstSeenAt: targets.find((entry) => entry.id === targetId)?.firstSeenAt ?? new Date().toISOString(),
+function recordTarget(accountId, targetId, message) {
+  const targets = readTargets();
+  const existing = targets.find((entry) => entry.id === targetId && entry.accountId === accountId);
+  const next = targets.filter((entry) => !(entry.id === targetId && entry.accountId === accountId));
+  next.push({
+    accountId,
+    firstSeenAt: existing?.firstSeenAt ?? new Date().toISOString(),
     id: targetId,
     lastSeenAt: new Date().toISOString(),
     ...(typeof message?.preview === 'string' && message.preview.length > 0
@@ -53,7 +56,20 @@ function recordTarget(targetId, message) {
   });
 
   fs.mkdirSync(path.dirname(resolveTargetsPath()), { recursive: true });
-  fs.writeFileSync(resolveTargetsPath(), JSON.stringify(targets, null, 2), 'utf-8');
+  fs.writeFileSync(resolveTargetsPath(), JSON.stringify(next, null, 2), 'utf-8');
+}
+
+function listAccounts(plugin) {
+  return plugin.accounts.listIndexedWeixinAccountIds().map((accountId) => {
+    const account = plugin.accounts.loadWeixinAccount(accountId) ?? {};
+
+    return {
+      accountId,
+      baseUrl: account.baseUrl ?? plugin.accounts.DEFAULT_BASE_URL,
+      tokenMasked: maskToken(account.token),
+      userId: account.userId ?? null,
+    };
+  });
 }
 
 async function loadPlugin() {
@@ -342,34 +358,25 @@ async function commandServe(plugin, args) {
   const secret = typeof args.secret === 'string' ? args.secret.trim() : '';
   let watchAbort = false;
 
-  async function watchTargets() {
-    let notLoggedInRounds = 0;
+  const watchedAccounts = new Map();
 
+  async function watchAccount(accountId) {
     while (!watchAbort) {
-      let resolved;
+      const account = plugin.accounts.loadWeixinAccount(accountId);
 
-      try {
-        resolved = resolveAccount(plugin.accounts, args.account);
-        notLoggedInRounds = 0;
-      } catch (error) {
-        notLoggedInRounds += 1;
-
-        if (notLoggedInRounds === 1 || notLoggedInRounds % 6 === 0) {
-          log(`尚未登录，等待扫码（请在「设置 → 微信」中登录；已等待约 ${notLoggedInRounds * 10} 秒）`);
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, 10_000));
-        continue;
+      if (account === null || (account.token?.trim()?.length ?? 0) === 0) {
+        return;
       }
 
-      const syncBufPath = plugin.syncBuf.getSyncBufFilePath(resolved.accountId);
+      const baseUrl = account.baseUrl?.trim() || plugin.accounts.DEFAULT_BASE_URL;
+      const syncBufPath = plugin.syncBuf.getSyncBufFilePath(accountId);
       const syncBuf = plugin.syncBuf.loadGetUpdatesBuf(syncBufPath) ?? '';
 
       try {
         const response = await plugin.api.getUpdates({
-          baseUrl: resolved.baseUrl,
+          baseUrl,
           get_updates_buf: syncBuf,
-          token: resolved.token,
+          token: account.token.trim(),
           timeoutMs: SYNC_BUF_TIMEOUT_MS,
         });
 
@@ -387,13 +394,38 @@ async function commandServe(plugin, args) {
                   .filter((value) => typeof value === 'string' && value.length > 0)
                   .join(' ')
               : '';
-            recordTarget(fromUserId, { preview });
+            recordTarget(accountId, fromUserId, { preview });
           }
         }
       } catch (error) {
-        log(`监听会话失败（稍后重试）：${error instanceof Error ? error.message : String(error)}`);
-        await new Promise((resolve) => setTimeout(resolve, 3_000));
+        log(
+          `账号 ${accountId} 监听失败（稍后重试）：${error instanceof Error ? error.message : String(error)}`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 5_000));
       }
+    }
+  }
+
+  async function watchTargets() {
+    let idleRounds = 0;
+
+    while (!watchAbort) {
+      const accountIds = plugin.accounts.listIndexedWeixinAccountIds();
+      const unwatched = accountIds.filter((accountId) => !watchedAccounts.has(accountId));
+
+      for (const accountId of unwatched) {
+        watchedAccounts.set(accountId, true);
+        void watchAccount(accountId).finally(() => watchedAccounts.delete(accountId));
+        log(`开始监听账号 ${accountId} 的会话`);
+      }
+
+      idleRounds = accountIds.length === 0 ? idleRounds + 1 : 0;
+
+      if (idleRounds === 1 || idleRounds % 6 === 0) {
+        log('尚未绑定微信账号，等待扫码（请在「设置 → 微信」中添加）');
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
     }
   }
 
@@ -441,6 +473,35 @@ async function commandServe(plugin, args) {
         return;
       }
 
+      if (request.method === 'GET' && requestUrl.pathname === '/accounts') {
+        sendJson(response, 200, { accounts: listAccounts(plugin), ok: true });
+
+        return;
+      }
+
+      if (request.method === 'DELETE' && requestUrl.pathname.startsWith('/accounts/')) {
+        const accountId = decodeURIComponent(requestUrl.pathname.slice('/accounts/'.length));
+
+        if (accountId.length === 0) {
+          sendJson(response, 400, { error: 'accountId is required', ok: false });
+
+          return;
+        }
+
+        try {
+          plugin.accounts.unregisterWeixinAccountId(accountId);
+          plugin.accounts.clearWeixinAccount(accountId);
+          sendJson(response, 200, { deleted: true, ok: true });
+        } catch (error) {
+          sendJson(response, 500, {
+            error: error instanceof Error ? error.message : String(error),
+            ok: false,
+          });
+        }
+
+        return;
+      }
+
       if (request.method === 'GET' && requestUrl.pathname === '/targets') {
         sendJson(response, 200, { ok: true, targets: readTargets() });
 
@@ -482,7 +543,12 @@ async function commandServe(plugin, args) {
           const composed =
             title.length > 0 && !text.startsWith(title) ? `${title}\n${text}` : text;
           const finalText = url.length > 0 && !composed.includes(url) ? `${composed}\n${url}` : composed;
-          const result = await sendText(plugin, { accountId: args.account, text: finalText, to });
+          const bodyAccountId = typeof body.accountId === 'string' ? body.accountId.trim() : '';
+          const result = await sendText(plugin, {
+            accountId: bodyAccountId || args.account,
+            text: finalText,
+            to,
+          });
 
           sendJson(response, 200, { messageId: result.messageId, ok: true });
         } catch (error) {

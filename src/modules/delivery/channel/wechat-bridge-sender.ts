@@ -33,10 +33,12 @@ export class WechatBridgeSender implements DeliveryChannelSender {
     const timeoutHandle = setTimeout(() => controller.abort(), this.timeoutMs);
     const secret = input.config.secret?.trim() ?? '';
     const target = input.config.target?.trim() ?? '';
+    const accountId = input.config.accountId?.trim() ?? '';
 
     try {
       const response = await this.fetchImplementation(input.webhookUrl, {
         body: JSON.stringify({
+          ...(accountId.length === 0 ? {} : { accountId }),
           author: input.message.author,
           postedAt: input.message.postedAt,
           text: input.message.text,
