@@ -330,7 +330,7 @@ export type DeliveryChannelType =
   | 'dingtalk_webhook'
   | 'feishu_webhook'
   | 'generic_webhook'
-  | 'wechat_bridge'
+  | 'wechat_clawbot'
   | 'wecom_webhook';
 
 export interface DeliveryTarget {
@@ -489,6 +489,47 @@ export async function runRetentionCleanup(): Promise<{
     deletedPosts: number;
     settings: RetentionSettings;
   }>('/admin/api/actions/cleanup-now', { method: 'POST' });
+}
+
+export interface WechatStatus {
+  accountId?: string;
+  installed: boolean;
+  loggedIn: boolean;
+  loginStatus: string;
+  message?: string;
+  port: number;
+  qrcodeDataUrl?: string;
+  qrcodeUrl?: string;
+  running: boolean;
+  targets: Array<{ id: string; lastSeenAt?: string; preview?: string }>;
+}
+
+export async function getWechatStatus(): Promise<WechatStatus> {
+  return requestJson<WechatStatus>('/admin/api/wechat/status');
+}
+
+export async function startWechatLogin(force = false): Promise<{
+  qrcodeDataUrl?: string;
+  qrcodeUrl?: string;
+  status: string;
+}> {
+  return requestJson<{ qrcodeDataUrl?: string; qrcodeUrl?: string; status: string }>(
+    '/admin/api/wechat/login',
+    { body: JSON.stringify({ force }), method: 'POST' },
+  );
+}
+
+export async function submitWechatLoginCode(code: string): Promise<void> {
+  await requestJson<{ submitted: boolean }>('/admin/api/wechat/login/code', {
+    body: JSON.stringify({ code }),
+    method: 'POST',
+  });
+}
+
+export async function testWechatBridge(): Promise<{ messageId?: string; ok: true }> {
+  return requestJson<{ messageId?: string; ok: true }>('/admin/api/wechat/test', {
+    method: 'POST',
+  });
 }
 
 export async function listBackups(): Promise<BackupEntry[]> {

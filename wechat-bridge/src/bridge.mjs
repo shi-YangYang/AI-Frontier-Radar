@@ -61,8 +61,9 @@ async function loadPlugin() {
   const login = await import(`${PLUGIN_PREFIX}/auth/login-qr.js`);
   const send = await import(`${PLUGIN_PREFIX}/messaging/send.js`);
   const api = await import(`${PLUGIN_PREFIX}/api/api.js`);
+  const syncBuf = await import(`${PLUGIN_PREFIX}/storage/sync-buf.js`);
 
-  return { accounts, api, login, send };
+  return { accounts, api, login, send, syncBuf };
 }
 
 function maskToken(token) {
@@ -81,7 +82,7 @@ function resolveAccount(accountsModule, accountId) {
   const account = resolvedId === undefined ? null : accountsModule.loadWeixinAccount(resolvedId);
 
   if (resolvedId === undefined || account === null || (account.token?.trim()?.length ?? 0) === 0) {
-    fail('尚未登录微信，请先在 wechat-bridge 目录运行 npm run login（或 npm run wechat:login）。');
+    fail('尚未登录微信：请在「设置 → 微信」中扫码登录，或运行 npm run wechat:login。');
   }
 
   return {
@@ -199,6 +200,115 @@ async function commandSend(plugin, args) {
   await sendText(plugin, { accountId, text, to });
 }
 
+let webLoginState = {
+  accountId: undefined,
+  message: undefined,
+  qrcodeDataUrl: undefined,
+  qrcodeUrl: undefined,
+  sessionKey: undefined,
+  status: 'idle',
+};
+let webLoginGeneration = 0;
+let webLoginPatched = false;
+
+function patchStdoutForLoginSignals() {
+  if (webLoginPatched) {
+    return;
+  }
+
+  webLoginPatched = true;
+  const originalWrite = process.stdout.write.bind(process.stdout);
+
+  process.stdout.write = (chunk, encoding, callback) => {
+    const text = typeof chunk === 'string' ? chunk : chunk?.toString?.() ?? '';
+
+    if (text.includes('输入手机微信显示的数字') || text.includes('请重新输入')) {
+      if (webLoginState.status === 'pending' || webLoginState.status === 'scanned') {
+        webLoginState = { ...webLoginState, message: '请输入手机微信上显示的数字。', status: 'need-code' };
+      }
+    } else if (text.includes('正在验证')) {
+      if (webLoginState.status === 'pending' || webLoginState.status === 'need-code') {
+        webLoginState = { ...webLoginState, message: '已扫码，等待微信确认…', status: 'scanned' };
+      }
+    }
+
+    return originalWrite(chunk, encoding, callback);
+  };
+}
+
+async function startWebLogin(plugin, options = {}) {
+  patchStdoutForLoginSignals();
+  const generation = (webLoginGeneration += 1);
+  const started = await plugin.login.startWeixinLoginWithQr({ force: options.force === true });
+
+  if (started.qrcodeUrl === undefined || started.qrcodeUrl.length === 0) {
+    webLoginState = { message: started.message ?? '获取二维码失败。', status: 'failed' };
+
+    return webLoginState;
+  }
+
+  let qrcodeDataUrl;
+
+  try {
+    const qrcodeModule = await import('qrcode');
+    qrcodeDataUrl = await qrcodeModule.default.toDataURL(started.qrcodeUrl, {
+      margin: 1,
+      width: 260,
+    });
+  } catch (error) {
+    log(`生成二维码图片失败（可使用链接继续）：${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  webLoginState = {
+    message: '请使用手机微信扫码，并在微信中确认。',
+    qrcodeDataUrl,
+    qrcodeUrl: started.qrcodeUrl,
+    sessionKey: started.sessionKey,
+    status: 'pending',
+  };
+
+  void plugin.login
+    .waitForWeixinLogin({ sessionKey: started.sessionKey, timeoutMs: 480_000 })
+    .then((result) => {
+      if (generation !== webLoginGeneration) {
+        return;
+      }
+
+      if (result.connected === true) {
+        plugin.accounts.registerWeixinAccountId(result.accountId);
+        plugin.accounts.saveWeixinAccount(result.accountId, {
+          baseUrl: result.baseUrl,
+          token: result.botToken,
+          userId: result.userId,
+        });
+        webLoginState = {
+          accountId: result.accountId,
+          message: '登录成功。请给微信里的 ClawBot 发一条消息以登记会话。',
+          status: 'connected',
+          ...(result.userId === undefined ? {} : { userId: result.userId }),
+        };
+        log(`Web 登录成功：accountId=${result.accountId}`);
+        return;
+      }
+
+      webLoginState = {
+        message: result.message ?? '登录未完成。',
+        status: result.alreadyConnected === true ? 'connected' : 'failed',
+        ...(result.accountId === undefined ? {} : { accountId: result.accountId }),
+      };
+    })
+    .catch((error) => {
+      if (generation === webLoginGeneration) {
+        webLoginState = {
+          message: error instanceof Error ? error.message : String(error),
+          status: 'failed',
+        };
+      }
+    });
+
+  return webLoginState;
+}
+
 function readJsonBody(request, maxBytes = 64 * 1024) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -233,28 +343,44 @@ async function commandServe(plugin, args) {
   let watchAbort = false;
 
   async function watchTargets() {
+    let notLoggedInRounds = 0;
+
     while (!watchAbort) {
       let resolved;
 
       try {
         resolved = resolveAccount(plugin.accounts, args.account);
+        notLoggedInRounds = 0;
       } catch (error) {
-        log(`尚未登录，10 秒后重试监听会话（如需登录请运行 npm run wechat:login）`);
+        notLoggedInRounds += 1;
+
+        if (notLoggedInRounds === 1 || notLoggedInRounds % 6 === 0) {
+          log(`尚未登录，等待扫码（请在「设置 → 微信」中登录；已等待约 ${notLoggedInRounds * 10} 秒）`);
+        }
+
         await new Promise((resolve) => setTimeout(resolve, 10_000));
         continue;
       }
 
+      const syncBufPath = plugin.syncBuf.getSyncBufFilePath(resolved.accountId);
+      const syncBuf = plugin.syncBuf.loadGetUpdatesBuf(syncBufPath) ?? '';
+
       try {
         const response = await plugin.api.getUpdates({
           baseUrl: resolved.baseUrl,
+          get_updates_buf: syncBuf,
           token: resolved.token,
           timeoutMs: SYNC_BUF_TIMEOUT_MS,
         });
 
+        if (typeof response.get_updates_buf === 'string' && response.get_updates_buf.length > 0) {
+          plugin.syncBuf.saveGetUpdatesBuf(syncBufPath, response.get_updates_buf);
+        }
+
         for (const message of response.msgs ?? []) {
           const fromUserId = typeof message?.from_user_id === 'string' ? message.from_user_id.trim() : '';
 
-          if (fromUserId.length > 0 && fromUserId !== resolved.account.userId) {
+          if (fromUserId.length > 0) {
             const preview = Array.isArray(message?.item_list)
               ? message.item_list
                   .map((item) => item?.text_item?.text ?? '')
@@ -274,6 +400,52 @@ async function commandServe(plugin, args) {
   const server = http.createServer((request, response) => {
     void (async () => {
       const requestUrl = new URL(request.url ?? '/', `http://127.0.0.1:${port}`);
+
+      if (request.method === 'POST' && requestUrl.pathname === '/login/start') {
+        try {
+          const body = await readJsonBody(request);
+          const state = await startWebLogin(plugin, { force: body.force === true });
+
+          sendJson(response, 200, {
+            message: state.message,
+            ok: state.status !== 'failed',
+            qrcodeDataUrl: state.qrcodeDataUrl,
+            qrcodeUrl: state.qrcodeUrl,
+            status: state.status,
+          });
+        } catch (error) {
+          sendJson(response, 500, {
+            error: error instanceof Error ? error.message : String(error),
+            ok: false,
+          });
+        }
+
+        return;
+      }
+
+      if (request.method === 'GET' && requestUrl.pathname === '/login/status') {
+        const ids = plugin.accounts.listIndexedWeixinAccountIds();
+
+        sendJson(response, 200, {
+          accountId: webLoginState.accountId ?? (webLoginState.status === 'idle' ? ids.at(-1) : undefined),
+          loggedIn: ids.length > 0,
+          message: webLoginState.message,
+          ok: true,
+          qrcodeDataUrl: webLoginState.status === 'pending' || webLoginState.status === 'need-code'
+            ? webLoginState.qrcodeDataUrl
+            : undefined,
+          status: webLoginState.status,
+          userId: webLoginState.userId,
+        });
+
+        return;
+      }
+
+      if (request.method === 'GET' && requestUrl.pathname === '/targets') {
+        sendJson(response, 200, { ok: true, targets: readTargets() });
+
+        return;
+      }
 
       if (request.method === 'GET' && requestUrl.pathname === '/health') {
         const ids = plugin.accounts.listIndexedWeixinAccountIds();

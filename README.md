@@ -386,7 +386,7 @@ YouTube 解析与 GitHub 页面抓取遵循“RSS 源”页签里的代理配置
 | 钉钉机器人 | 群机器人 Webhook（markdown） | Webhook URL；若安全设置选"加签"，需填加签密钥 |
 | Bark | iOS 推送 | 完整推送地址 `https://api.day.app/<deviceKey>` |
 | 通用 Webhook | 任意系统对接，POST JSON（author/title/url/postedAt/text） | Webhook URL |
-| 微信桥（ClawBot） | 通过本仓库自带的轻量桥推送到**个人微信**（微信官方 ClawBot 通道，无需 OpenClaw） | 桥地址（默认 `http://127.0.0.1:3991/send`）、可选桥密钥、可选目标会话 |
+| 微信（ClawBot） | 通过主服务内置的轻量桥推送到**个人微信**（微信官方 ClawBot 通道，无需 OpenClaw） | 可选目标会话（默认发到最近登记的会话） |
 
 - 新消息会按订阅规则投递到所有匹配的启用通道；失败的投递按既有重试策略处理（网络/5xx 重试，业务码错误不重试）。
 
@@ -394,32 +394,23 @@ YouTube 解析与 GitHub 页面抓取遵循“RSS 源”页签里的代理配置
 
 微信官方为 AI 智能体提供了 ClawBot 插件通道（扫码绑定，非第三方 hook）。本项目内置一个**独立轻量桥**（`wechat-bridge/`），直接复用腾讯官方插件（MIT）的登录与发送协议，**不需要安装 OpenClaw**。
 
-### 安装与登录
+### 使用步骤
 
 ```bash
 npm run wechat:install   # 安装桥依赖（仅首次）
-npm run wechat:login     # 终端显示二维码，用手机微信扫码绑定
+npm run local            # 正常启动雷达（主服务会自动托管微信桥）
 ```
 
-登录成功后，给微信里的 **ClawBot** 随便发一条消息（用于登记会话目标），然后：
+1. 打开 `/settings -> 微信`，点击「扫码登录」，用手机微信扫描页面上的二维码；
+2. 若微信提示输入数字，在页面输入并提交；
+3. 登录成功后，在微信里给 **ClawBot** 随便发一条消息（用于登记会话目标）；
+4. 点击「测试发送」确认收到消息后，在 `/settings -> 投递通道` 添加「微信（ClawBot）」渠道即可。
 
-```bash
-npm run wechat:serve     # 启动桥（默认 http://127.0.0.1:3991）
-npm run wechat:status    # 查看登录状态
-npm run wechat:targets   # 查看已登记的会话目标
-```
+### 说明
 
-### 在雷达里配置
-
-`/settings -> 投递通道` 新增「微信桥（ClawBot）」：
-
-| 字段 | 说明 |
-| --- | --- |
-| 桥地址 | 默认 `http://127.0.0.1:3991/send` |
-| 桥密钥 | 与 `wechat:serve --secret <密钥>` 一致；未设置可留空 |
-| 目标会话 | 留空 = 发到最近登记的会话；也可填 `wechat:targets` 查到的目标 id |
-
-说明：桥只发送文本（标题 + 正文 + 原文链接）；如需开机自启，可用系统服务管理器托管 `npm run wechat:serve`。
+- 桥由主服务自动启动/停止，无需单独运行；`npm run wechat:login` / `wechat:serve` / `wechat:status` / `wechat:targets` 保留用于调试。
+- 桥只发送文本（标题 + 正文 + 原文链接），不接收/回复微信消息（仅登记会话目标）。
+- 渠道的「目标会话」留空 = 发到最近登记的会话；也可在「微信」页签复制会话 ID 填入。
 
 ## 订阅规则（推送过滤）
 

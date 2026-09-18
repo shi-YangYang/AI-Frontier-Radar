@@ -1423,7 +1423,7 @@ async function main(): Promise<void> {
       { channelType: 'bark', kind: 'bark', name: 'Mock Bark', url: webhook.urls.bark },
       { channelType: 'generic_webhook', kind: 'generic', name: 'Mock Generic', url: webhook.urls.generic },
       {
-        channelType: 'wechat_bridge',
+        channelType: 'wechat_clawbot',
         kind: 'wechatBridge',
         name: 'Mock WeChat Bridge',
         secret: 'bridge-smoke-secret',

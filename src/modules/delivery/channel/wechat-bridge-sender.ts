@@ -19,7 +19,7 @@ interface WechatBridgeResponseBody {
 const DEFAULT_TIMEOUT_MS = 20_000;
 
 export class WechatBridgeSender implements DeliveryChannelSender {
-  public readonly channelType = 'wechat_bridge' as const;
+  public readonly channelType = 'wechat_clawbot' as const;
   private readonly fetchImplementation: typeof fetch;
   private readonly timeoutMs: number;
 

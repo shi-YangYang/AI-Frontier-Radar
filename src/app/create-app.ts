@@ -9,6 +9,7 @@ import {
   type RuntimeSettingsService,
   type StorageContext,
 } from '../modules/storage';
+import type { WechatBridgeService } from '../modules/wechat';
 
 export interface CreateAppOptions {
   adminActions?: AdminActions;
@@ -16,6 +17,7 @@ export interface CreateAppOptions {
   logger: AppLogger;
   runtimeSettings?: RuntimeSettingsService;
   storage?: StorageContext;
+  wechatBridge?: WechatBridgeService;
 }
 
 export function createApp(options: CreateAppOptions): FastifyInstance {
@@ -37,6 +39,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     config: options.config,
     runtimeSettings: options.runtimeSettings,
     storage,
+    ...(options.wechatBridge === undefined ? {} : { wechatBridge: options.wechatBridge }),
   });
 
   return app;

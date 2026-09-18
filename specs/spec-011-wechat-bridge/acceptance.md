@@ -2,7 +2,7 @@
 
 ## Result
 
-PASS（扫码后的真实发送验证待用户执行，见「未执行项」）
+PASS
 
 ## Spec Coverage
 
@@ -23,9 +23,9 @@ PASS（扫码后的真实发送验证待用户执行，见「未执行项」）
 
 无（设计取舍：仅文本推送；不接收/回复消息，仅登记会话目标）。
 
-## 未执行项
+## 实测补充（用户操作）
 
-- **用户扫码后的真实端到端发送**：需要用户用手机微信扫描 `npm run wechat:login` 的二维码并给 ClawBot 发一条消息登记会话，随后雷达测试发送应真实到达微信。此项待用户操作后验证并回填。
+- 用户完成扫码登录（accountId `3ddf6a468220@im.bot`，userId `o9cq80yFFJH6v21kTXaVvQQpJEGU@im.wechat`）并确认收到测试消息，端到端链路（雷达 → 桥 → 微信 ClawBot）真实可用。
 
 ## Regression Risks
 

@@ -3,6 +3,7 @@ import type { AppConfig } from '../shared/config/types';
 import { createApp } from '../app/create-app';
 import type { AppLogger } from '../lib/logger';
 import { createRetentionService } from '../modules/maintenance';
+import { createWechatBridgeService } from '../modules/wechat';
 import { createRuntimeScheduler, createRuntimeSourceProviders } from '../modules/scheduler';
 import { createRuntimeSettingsService, createStorageFromConfig } from '../modules/storage';
 
@@ -21,6 +22,8 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     logger: options.logger,
     storage,
   });
+  const wechatBridge = createWechatBridgeService({ logger: options.logger });
+  wechatBridge.start();
   const scheduler = createRuntimeScheduler({
     config: options.config,
     logger: options.logger,
@@ -29,6 +32,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     storage,
   });
   const app = createApp({
+    wechatBridge,
     adminActions: {
       runDeliveryWorkerNow: (runOptions) => scheduler.runDeliveryWorkerNow(runOptions),
       runPollingNow: (runOptions) => scheduler.runPollingNow(runOptions),
@@ -134,6 +138,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     options.logger.info({ signal }, 'server shutdown requested');
     try {
       await app.close();
+      await wechatBridge.stop();
     } catch (error) {
       options.logger.error({ err: error, signal }, 'server shutdown failed');
       process.exitCode = 1;

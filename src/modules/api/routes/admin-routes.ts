@@ -27,6 +27,7 @@ import {
   exportAdminPosts,
   getAdminDataSettings,
   getAdminRssSettings,
+  getAdminWechatStatus,
   getAdminSettings,
   getAdminSourceGroups,
   getAdminSubscriptionRules,
@@ -44,6 +45,9 @@ import {
   runAdminDeliveryNow,
   runAdminPollingNow,
   runAdminRetentionCleanup,
+  startAdminWechatLogin,
+  submitAdminWechatLoginCode,
+  testAdminWechat,
   testAdminDeliveryTarget,
   testAdminFeishuSettings,
   testAdminXSourceAnonymous,
@@ -58,6 +62,7 @@ import {
   updateAdminPollingSettings,
 } from '../controllers/admin-controller';
 import { adminJsonResponseSchema } from '../schemas/admin';
+import type { WechatBridgeService } from '../../wechat';
 import type { RuntimeSettingsService, StorageContext } from '../../storage';
 
 interface RegisterAdminRoutesOptions {
@@ -65,6 +70,7 @@ interface RegisterAdminRoutesOptions {
   config: AppConfig;
   runtimeSettings?: RuntimeSettingsService;
   storage: StorageContext;
+  wechatBridge?: WechatBridgeService;
 }
 
 export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdminRoutesOptions): void {
@@ -525,6 +531,48 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
       },
     },
     async (_, reply) => sendAdminResponse(reply, () => runAdminRetentionCleanup(options)),
+  );
+
+  app.get(
+    '/admin/api/wechat/status',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => getAdminWechatStatus(options)),
+  );
+
+  app.post(
+    '/admin/api/wechat/login',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => startAdminWechatLogin(request.body, options)),
+  );
+
+  app.post(
+    '/admin/api/wechat/login/code',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => submitAdminWechatLoginCode(request.body, options)),
+  );
+
+  app.post(
+    '/admin/api/wechat/test',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => testAdminWechat(options)),
   );
 
   app.get(

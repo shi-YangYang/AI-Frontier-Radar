@@ -57,7 +57,7 @@
                   :placeholder="t('settings.feishu.displayNamePlaceholder')"
                 />
               </label>
-              <label>
+              <label v-if="newTargetForm.channelType !== 'wechat_clawbot'">
                 <span>{{ t('settings.feishu.urlLabel') }}</span>
                 <input
                   v-model="newTargetForm.webhookUrl"
@@ -66,16 +66,13 @@
                   type="url"
                 />
               </label>
-              <label v-if="newTargetForm.channelType === 'wechat_bridge'">
-                <span>{{ t('settings.feishu.bridgeSecretLabel') }}</span>
-                <input
-                  v-model="newTargetForm.secret"
-                  autocomplete="off"
-                  :placeholder="t('settings.feishu.secretOptionalPlaceholder')"
-                />
-                <small>{{ t('settings.feishu.bridgeSecretHelp') }}</small>
-              </label>
-              <label v-if="newTargetForm.channelType === 'wechat_bridge'">
+              <span
+                v-else
+                class="muted source-add-inline-hint delivery-target-bridge-hint"
+              >
+                {{ t('settings.feishu.clawbotUrlAuto') }}
+              </span>
+              <label v-if="newTargetForm.channelType === 'wechat_clawbot'">
                 <span>{{ t('settings.feishu.targetLabel') }}</span>
                 <input
                   v-model="newTargetForm.target"
@@ -598,6 +595,111 @@
           </article>
         </section>
 
+        <section v-else-if="activeSettingsTab === 'wechat'" class="settings-layout single-column">
+          <article class="panel settings-form-panel">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.wechat.title') }}</h2>
+                <p>{{ t('settings.wechat.description') }}</p>
+              </div>
+              <button type="button" :disabled="busy" @click="loadWechatStatus">
+                {{ t('actions.refresh') }}
+              </button>
+            </header>
+
+            <div v-if="wechatStatus === null" class="empty-panel">{{ t('settings.loading') }}</div>
+            <template v-else>
+              <div
+                v-if="!wechatStatus.installed"
+                class="inline-alert"
+              >
+                {{ t('settings.wechat.notInstalled') }}
+              </div>
+
+              <dl class="detail-list">
+                <div>
+                  <dt>{{ t('settings.wechat.bridgeStatus') }}</dt>
+                  <dd>
+                    <span class="status-badge" :class="wechatStatus.running ? 'good' : 'neutral'">
+                      {{ wechatStatus.running ? t('settings.wechat.running') : t('settings.wechat.stopped') }}
+                    </span>
+                    <span class="muted"> :{{ wechatStatus.port }}</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt>{{ t('settings.wechat.loginStatus') }}</dt>
+                  <dd>
+                    <span class="status-badge" :class="wechatStatus.loggedIn ? 'good' : 'neutral'">
+                      {{ wechatStatus.loggedIn ? t('settings.wechat.loggedIn') : t('settings.wechat.notLoggedIn') }}
+                    </span>
+                    <span v-if="wechatStatus.accountId" class="muted"> {{ wechatStatus.accountId }}</span>
+                  </dd>
+                </div>
+                <div v-if="wechatStatus.message">
+                  <dt>{{ t('settings.wechat.detail') }}</dt>
+                  <dd>{{ wechatStatus.message }}</dd>
+                </div>
+              </dl>
+
+              <div class="settings-actions">
+                <button
+                  class="primary"
+                  type="button"
+                  :disabled="busy || !wechatStatus.installed || !wechatStatus.running"
+                  @click="startWechatLoginNow"
+                >
+                  {{ wechatStatus.loggedIn ? t('settings.wechat.relogin') : t('settings.wechat.login') }}
+                </button>
+                <button
+                  type="button"
+                  :disabled="busy || !wechatStatus.loggedIn"
+                  @click="sendWechatTest"
+                >
+                  {{ t('settings.wechat.testSend') }}
+                </button>
+              </div>
+
+              <div v-if="wechatQrCode !== null" class="wechat-qr-block">
+                <img v-if="wechatStatus.qrcodeDataUrl" :src="wechatStatus.qrcodeDataUrl" alt="WeChat login QR" class="wechat-qr-image" />
+                <a v-if="wechatStatus.qrcodeUrl" :href="wechatStatus.qrcodeUrl" rel="noreferrer" target="_blank">
+                  {{ t('settings.wechat.openQrLink') }}
+                </a>
+                <p class="muted">{{ t('settings.wechat.scanHint') }}</p>
+                <form v-if="wechatStatus.loginStatus === 'need-code'" class="settings-form" @submit.prevent="submitWechatCode">
+                  <label>
+                    <span>{{ t('settings.wechat.codeLabel') }}</span>
+                    <input v-model="wechatCodeInput" autocomplete="off" :placeholder="t('settings.wechat.codePlaceholder')" />
+                  </label>
+                  <div class="form-actions">
+                    <button class="primary" type="submit" :disabled="busy">{{ t('settings.wechat.submitCode') }}</button>
+                  </div>
+                </form>
+              </div>
+
+              <div class="settings-field">
+                <span>{{ t('settings.wechat.targetsTitle') }}</span>
+                <div v-if="wechatStatus.targets.length === 0" class="empty-panel">
+                  {{ t('settings.wechat.targetsEmpty') }}
+                </div>
+                <table v-else class="data-table">
+                  <thead>
+                    <tr>
+                      <th>{{ t('settings.wechat.targetId') }}</th>
+                      <th>{{ t('settings.wechat.targetLastSeen') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="target in wechatStatus.targets" :key="target.id">
+                      <td><code>{{ target.id }}</code></td>
+                      <td>{{ target.lastSeenAt ?? '-' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </template>
+          </article>
+        </section>
+
         <section v-else-if="activeSettingsTab === 'data'" class="settings-layout single-column">
           <article class="panel settings-form-panel">
             <header class="panel-header">
@@ -801,7 +903,7 @@
                   />
                   <small>{{ t('settings.edit.saveHelp') }}</small>
                 </label>
-                <label v-if="editingTarget.channelType === 'wechat_bridge'">
+                <label v-if="editingTarget.channelType === 'wechat_clawbot'">
                   <span>{{ t('settings.edit.newTargetLabel') }}</span>
                   <input
                     v-model="editTargetForm.target"
@@ -872,12 +974,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 
 import {
   AdminApiRequestError,
   backupDownloadUrl,
   checkXSourceLogin,
+  getWechatStatus,
+  startWechatLogin,
+  submitWechatLoginCode,
+  testWechatBridge,
   createBackup,
   createDeliveryTarget,
   deleteBackup,
@@ -911,6 +1017,7 @@ import {
   type BackupEntry,
   type RetentionSettings,
   type RuntimeSettingsSummary,
+  type WechatStatus,
   type RuntimeXSourceSettings,
   type XSourceAnonymousCheckResult,
   type XSourceAnonymousCheckStatus,
@@ -946,6 +1053,87 @@ const settings = ref<RuntimeSettingsSummary | null>(null);
 const xSourceSettings = ref<RuntimeXSourceSettings | null>(null);
 const anonymousCheckResult = ref<XSourceAnonymousCheckResult | null>(null);
 const loginCheckResult = ref<XSourceLoginCheckResult | null>(null);
+
+const wechatCodeInput = ref('');
+const wechatQrCode = ref<{ qrcodeDataUrl?: string; qrcodeUrl?: string } | null>(null);
+const wechatStatus = ref<WechatStatus | null>(null);
+let wechatPollTimer: ReturnType<typeof setInterval> | null = null;
+
+async function loadWechatStatus(): Promise<void> {
+  try {
+    wechatStatus.value = await getWechatStatus();
+    if (wechatStatus.value.loginStatus === 'connected' || wechatStatus.value.loginStatus === 'failed') {
+      stopWechatPolling();
+    }
+  } catch (error) {
+    showSettingsError(error);
+  }
+}
+
+function stopWechatPolling(): void {
+  if (wechatPollTimer !== null) {
+    clearInterval(wechatPollTimer);
+    wechatPollTimer = null;
+  }
+}
+
+function startWechatPolling(): void {
+  stopWechatPolling();
+  wechatPollTimer = setInterval(() => {
+    void loadWechatStatus();
+  }, 3_000);
+}
+
+async function startWechatLoginNow(): Promise<void> {
+  busy.value = true;
+
+  try {
+    const result = await startWechatLogin(wechatStatus.value?.loggedIn === true);
+    wechatQrCode.value = { qrcodeDataUrl: result.qrcodeDataUrl, qrcodeUrl: result.qrcodeUrl };
+    await loadWechatStatus();
+    startWechatPolling();
+    notice.value = t('settings.wechat.loginStarted');
+    noticeDanger.value = false;
+  } catch (error) {
+    showSettingsError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function submitWechatCode(): Promise<void> {
+  if (wechatCodeInput.value.trim().length === 0) {
+    return;
+  }
+
+  busy.value = true;
+
+  try {
+    await submitWechatLoginCode(wechatCodeInput.value.trim());
+    wechatCodeInput.value = '';
+    notice.value = t('settings.wechat.codeSubmitted');
+    noticeDanger.value = false;
+    await loadWechatStatus();
+  } catch (error) {
+    showSettingsError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function sendWechatTest(): Promise<void> {
+  busy.value = true;
+
+  try {
+    await testWechatBridge();
+    notice.value = t('settings.wechat.testSent');
+    noticeDanger.value = false;
+  } catch (error) {
+    showSettingsError(error);
+  } finally {
+    busy.value = false;
+  }
+}
 
 const backups = ref<BackupEntry[]>([]);
 const cleanupOpen = ref(false);
@@ -1051,7 +1239,7 @@ function showSettingsError(error: unknown): void {
   noticeDanger.value = true;
 }
 
-type SettingsTabKey = 'data' | 'feishu' | 'polling' | 'rss' | 'rules' | 'xSource' | 'runtime';
+type SettingsTabKey = 'data' | 'feishu' | 'polling' | 'rss' | 'rules' | 'wechat' | 'xSource' | 'runtime';
 
 const activeSettingsTab = ref<SettingsTabKey>('feishu');
 const settingsTabs: Array<{ descriptionKey: MessageKey; key: SettingsTabKey; labelKey: MessageKey }> = [
@@ -1079,6 +1267,11 @@ const settingsTabs: Array<{ descriptionKey: MessageKey; key: SettingsTabKey; lab
     descriptionKey: 'settings.tabs.rules.description',
     key: 'rules',
     labelKey: 'settings.tabs.rules.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.wechat.description',
+    key: 'wechat',
+    labelKey: 'settings.tabs.wechat.label',
   },
   {
     descriptionKey: 'settings.tabs.data.description',
@@ -1146,7 +1339,7 @@ const channelTypeOptions = computed<{ label: string; value: DeliveryChannelType 
   { label: t('settings.feishu.channel.dingtalk'), value: 'dingtalk_webhook' },
   { label: t('settings.feishu.channel.bark'), value: 'bark' },
   { label: t('settings.feishu.channel.generic'), value: 'generic_webhook' },
-  { label: t('settings.feishu.channel.wechatBridge'), value: 'wechat_bridge' },
+  { label: t('settings.feishu.channel.wechatBridge'), value: 'wechat_clawbot' },
 ]);
 
 const channelUrlPlaceholders: Record<DeliveryChannelType, string> = {
@@ -1154,7 +1347,7 @@ const channelUrlPlaceholders: Record<DeliveryChannelType, string> = {
   dingtalk_webhook: 'https://oapi.dingtalk.com/robot/send?access_token=...',
   feishu_webhook: 'https://open.feishu.cn/open-apis/bot/v2/hook/...',
   generic_webhook: 'https://example.com/webhook',
-  wechat_bridge: 'http://127.0.0.1:3991/send',
+  wechat_clawbot: 'http://127.0.0.1:3991/send',
   wecom_webhook: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...',
 };
 
@@ -1170,7 +1363,7 @@ function channelTypeLabel(channelType: DeliveryChannelType): string {
       return t('settings.feishu.channel.generic');
     case 'wecom_webhook':
       return t('settings.feishu.channel.wecom');
-    case 'wechat_bridge':
+    case 'wechat_clawbot':
       return t('settings.feishu.channel.wechatBridge');
     default:
       return t('settings.feishu.channel.feishu');
@@ -1206,6 +1399,13 @@ onMounted(() => {
   void loadSettings({ silent: true });
   void loadDataSettings();
   void loadBackups();
+  void loadWechatStatus();
+});
+
+watch(activeSettingsTab, (tab) => {
+  if (tab === 'wechat') {
+    void loadWechatStatus();
+  }
 });
 
 async function loadSettings(options: { silent?: boolean } = {}): Promise<void> {

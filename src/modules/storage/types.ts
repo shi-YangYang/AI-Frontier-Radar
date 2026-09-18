@@ -16,7 +16,7 @@ export type DeliveryChannelType =
   | 'dingtalk_webhook'
   | 'feishu_webhook'
   | 'generic_webhook'
-  | 'wechat_bridge'
+  | 'wechat_clawbot'
   | 'wecom_webhook';
 
 export type DeliveryEventStatus = 'dead' | 'failed' | 'pending' | 'retry_wait' | 'sending' | 'sent';

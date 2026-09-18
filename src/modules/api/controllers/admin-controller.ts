@@ -52,6 +52,7 @@ import {
   type RetentionSettings,
 } from '../../maintenance';
 import { sharedLogBuffer, type LogBufferEntry } from '../../../lib/logger';
+import type { WechatBridgeService } from '../../wechat';
 import { SOURCE_GROUPS, findSourceGroup } from '../../../config/source-groups';
 import {
   applySourceGroup,
@@ -83,6 +84,7 @@ export interface AdminControllerOptions {
   config: AppConfig;
   runtimeSettings?: RuntimeSettingsService;
   storage: StorageContext;
+  wechatBridge?: WechatBridgeService;
 }
 
 export interface AdminApiErrorPayload {
@@ -728,6 +730,162 @@ export function listAdminLogs(query: unknown): {
   };
 }
 
+export async function getAdminWechatStatus(options: AdminControllerOptions): Promise<{
+  ok: true;
+  data: {
+    accountId?: string;
+    installed: boolean;
+    loggedIn: boolean;
+    loginStatus: string;
+    message?: string;
+    port: number;
+    qrcodeDataUrl?: string;
+    qrcodeUrl?: string;
+    running: boolean;
+    targets: Array<{ id: string; lastSeenAt?: string; preview?: string }>;
+  };
+}> {
+  const service = options.wechatBridge;
+
+  if (service === undefined) {
+    return {
+      ok: true,
+      data: {
+        installed: false,
+        loggedIn: false,
+        loginStatus: 'unavailable',
+        message: '微信桥服务未初始化。',
+        port: 0,
+        running: false,
+        targets: [],
+      },
+    };
+  }
+
+  const status = service.getStatus();
+  const loginState = await service.getLoginState();
+  const targets = status.running ? await service.getTargets().catch(() => []) : [];
+
+  return {
+    ok: true,
+    data: {
+      ...(loginState.accountId === undefined ? {} : { accountId: loginState.accountId }),
+      installed: status.installed,
+      loggedIn: loginState.loggedIn,
+      loginStatus: loginState.status,
+      ...(loginState.message === undefined ? {} : { message: loginState.message }),
+      port: status.port,
+      ...(loginState.qrcodeDataUrl === undefined ? {} : { qrcodeDataUrl: loginState.qrcodeDataUrl }),
+      ...(loginState.qrcodeUrl === undefined ? {} : { qrcodeUrl: loginState.qrcodeUrl }),
+      running: status.running,
+      targets: targets.map((target) => ({
+        id: target.id,
+        ...(target.lastSeenAt === undefined ? {} : { lastSeenAt: target.lastSeenAt }),
+        ...(target.preview === undefined ? {} : { preview: target.preview }),
+      })),
+    },
+  };
+}
+
+export async function startAdminWechatLogin(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { qrcodeDataUrl?: string; qrcodeUrl?: string; status: string } }> {
+  const service = requireWechatBridge(options);
+  const force = isRecord(body) && body.force === true;
+
+  try {
+    const state = await service.startLogin(force);
+
+    return {
+      ok: true,
+      data: {
+        ...(state.qrcodeDataUrl === undefined ? {} : { qrcodeDataUrl: state.qrcodeDataUrl }),
+        ...(state.qrcodeUrl === undefined ? {} : { qrcodeUrl: state.qrcodeUrl }),
+        status: state.status,
+      },
+    };
+  } catch (error) {
+    throw new AdminApiError(
+      502,
+      'WECHAT_BRIDGE_FAILED',
+      error instanceof Error ? error.message : '微信桥登录失败。',
+    );
+  }
+}
+
+export async function submitAdminWechatLoginCode(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { submitted: true } }> {
+  const service = requireWechatBridge(options);
+
+  if (!isRecord(body) || typeof body.code !== 'string' || body.code.trim().length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'code 不能为空。');
+  }
+
+  try {
+    await service.submitLoginCode(body.code);
+  } catch (error) {
+    throw new AdminApiError(
+      502,
+      'WECHAT_BRIDGE_FAILED',
+      error instanceof Error ? error.message : '提交验证码失败。',
+    );
+  }
+
+  return { ok: true, data: { submitted: true } };
+}
+
+export async function testAdminWechat(options: AdminControllerOptions): Promise<{
+  ok: true;
+  data: { messageId?: string; ok: true };
+}> {
+  const service = requireWechatBridge(options);
+
+  try {
+    const result = await service.sendMessage({
+      author: 'AI 前沿雷达',
+      postedAt: new Date().toISOString(),
+      text: 'AI 前沿消息本地配置测试：微信桥可用。',
+      title: '【AI前沿消息】配置测试',
+      url: 'http://127.0.0.1:3000',
+    });
+
+    return {
+      ok: true,
+      data: {
+        ...(result.messageId === undefined ? {} : { messageId: result.messageId }),
+        ok: true,
+      },
+    };
+  } catch (error) {
+    throw new AdminApiError(
+      502,
+      'WECHAT_BRIDGE_FAILED',
+      error instanceof Error ? error.message : '微信桥测试发送失败。',
+    );
+  }
+}
+
+function requireWechatBridge(options: AdminControllerOptions): WechatBridgeService {
+  const service = options.wechatBridge;
+
+  if (service === undefined || !service.isInstalled()) {
+    throw new AdminApiError(
+      400,
+      'WECHAT_BRIDGE_UNAVAILABLE',
+      '微信桥未安装。请先运行 npm run wechat:install。',
+    );
+  }
+
+  if (!service.isRunning()) {
+    throw new AdminApiError(503, 'WECHAT_BRIDGE_UNAVAILABLE', '微信桥进程未运行。');
+  }
+
+  return service;
+}
+
 export async function getAdminSourceGroups(
   options: AdminControllerOptions,
 ): Promise<{ ok: true; data: { groups: SourceGroupStatus[] } }> {
@@ -954,7 +1112,16 @@ export async function createAdminDeliveryTarget(
   options: AdminControllerOptions,
 ): Promise<{ ok: true; data: { deliveryTarget: AdminDeliveryTarget } }> {
   const input = readCreateDeliveryTargetBody(body);
-  await assertWebhookUrlNotDuplicated(input.webhookUrl, options);
+
+  if (input.channelType === 'wechat_clawbot' && input.webhookUrl.length === 0) {
+    const bridgePort = options.wechatBridge?.getStatus().port ?? 3_991;
+    input.webhookUrl = `http://127.0.0.1:${bridgePort}/send`;
+  }
+
+  if (input.channelType !== 'wechat_clawbot') {
+    await assertWebhookUrlNotDuplicated(input.webhookUrl, options);
+  }
+
   const deliveryTarget = await options.storage.deliveryTargets.create({
     channelType: input.channelType,
     config: input.config,
@@ -1907,7 +2074,7 @@ async function assertWebhookUrlNotDuplicated(
   );
 
   if (duplicatedTarget !== undefined) {
-    throw new AdminApiError(409, 'DUPLICATE_WEBHOOK_URL', '飞书 webhook URL 已存在。');
+    throw new AdminApiError(409, 'DUPLICATE_WEBHOOK_URL', '该 webhook URL 已存在。');
   }
 }
 
@@ -2019,13 +2186,13 @@ function readDeliveryChannelType(value: unknown): DeliveryTarget['channelType'] 
     value !== 'dingtalk_webhook' &&
     value !== 'feishu_webhook' &&
     value !== 'generic_webhook' &&
-    value !== 'wechat_bridge' &&
+    value !== 'wechat_clawbot' &&
     value !== 'wecom_webhook'
   ) {
     throw new AdminApiError(
       400,
       'INVALID_REQUEST',
-      'channelType 必须是 feishu_webhook、wecom_webhook、dingtalk_webhook、bark、generic_webhook 或 wechat_bridge。',
+      'channelType 必须是 feishu_webhook、wecom_webhook、dingtalk_webhook、bark、generic_webhook 或 wechat_clawbot。',
     );
   }
 
@@ -2087,13 +2254,17 @@ function readDeliveryTargetWebhookUrl(
     throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
   }
 
+  if (body.webhookUrl === undefined && channelType === 'wechat_clawbot') {
+    return '';
+  }
+
   if (typeof body.webhookUrl !== 'string') {
     throw new AdminApiError(400, 'INVALID_REQUEST', 'webhookUrl 必须是字符串。');
   }
 
   const webhookUrl = body.webhookUrl.trim();
 
-  if (webhookUrl.length === 0) {
+  if (webhookUrl.length === 0 && channelType !== 'wechat_clawbot') {
     throw new AdminApiError(400, 'INVALID_REQUEST', 'webhookUrl 不能为空。');
   }
 
