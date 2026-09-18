@@ -999,23 +999,25 @@
           <header class="modal-header">
             <div>
               <h2 id="reset-password-title">{{ t('settings.users.resetTitle') }}</h2>
-              <p>{{ passwordTarget.username }}</p>
+              <p class="muted">{{ passwordTarget.username }}</p>
             </div>
             <button class="icon-button" type="button" :aria-label="t('actions.close')" @click="passwordTarget = null">
               ×
             </button>
           </header>
-          <form @submit.prevent="submitResetPassword">
+          <form class="target-edit-form" @submit.prevent="submitResetPassword">
             <div class="modal-body">
-              <label>
-                <span>{{ t('settings.users.newPasswordLabel') }}</span>
-                <input
-                  v-model="newPasswordInput"
-                  autocomplete="new-password"
-                  type="password"
-                  :placeholder="t('settings.users.passwordPlaceholder')"
-                />
-              </label>
+              <div class="settings-form modal-body-form">
+                <label>
+                  <span>{{ t('settings.users.newPasswordLabel') }}</span>
+                  <input
+                    v-model="newPasswordInput"
+                    autocomplete="new-password"
+                    type="password"
+                    :placeholder="t('settings.users.passwordPlaceholder')"
+                  />
+                </label>
+              </div>
             </div>
             <footer class="modal-footer">
               <button type="button" @click="passwordTarget = null">{{ t('actions.cancel') }}</button>
@@ -1115,6 +1117,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 
 import {
   AdminApiRequestError,
@@ -1178,7 +1181,7 @@ import PageHeader from '../components/PageHeader.vue';
 import PaginationBar from '../components/PaginationBar.vue';
 import SelectControl from '../components/SelectControl.vue';
 import ToastNotice from '../components/ToastNotice.vue';
-import { useAuth } from '../auth';
+import { signOut, useAuth } from '../auth';
 import { t, type MessageKey } from '../i18n';
 import { DEFAULT_PAGE_SIZE, formatDateTime } from '../utils';
 
@@ -1437,6 +1440,7 @@ function showSettingsError(error: unknown): void {
 }
 
 const { currentUser } = useAuth();
+const router = useRouter();
 const currentUserId = ref('');
 const newUserForm = reactive({ password: '', role: 'user' as 'admin' | 'user', username: '' });
 const newPasswordInput = ref('');
@@ -1503,6 +1507,14 @@ async function submitResetPassword(): Promise<void> {
     await resetUserPassword(target.id, newPasswordInput.value);
     passwordTarget.value = null;
     newPasswordInput.value = '';
+
+    if (target.id === currentUserId.value) {
+      await signOut();
+      await router.push({ path: '/login', query: { reset: '1' } });
+
+      return;
+    }
+
     notice.value = t('settings.users.passwordReset');
     noticeDanger.value = false;
   } catch (error) {

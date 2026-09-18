@@ -18,7 +18,6 @@
           <li>{{ t('auth.pointLocal') }}</li>
           <li>{{ t('auth.pointWechat') }}</li>
         </ul>
-        <small class="auth-brand-foot">{{ t('auth.brandFoot') }}</small>
       </div>
     </aside>
 
@@ -35,6 +34,7 @@
           <p>{{ t('auth.loginSubtitle') }}</p>
         </header>
 
+        <p v-if="resetNotice" class="auth-notice">{{ t('auth.passwordResetNotice') }}</p>
         <label>
           <span>{{ t('auth.username') }}</span>
           <input
@@ -78,6 +78,7 @@ const busy = ref(false);
 const errorMessage = ref<string | null>(null);
 const password = ref('');
 const username = ref('');
+const resetNotice = route.query.reset === '1';
 
 async function handleSubmit(): Promise<void> {
   errorMessage.value = null;

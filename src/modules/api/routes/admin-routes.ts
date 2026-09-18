@@ -779,7 +779,10 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
 async function sendAdminIndexHtml(reply: FastifyReply, adminIndexHtmlPath: string): Promise<FastifyReply> {
   try {
     const html = await readFile(adminIndexHtmlPath, 'utf8');
-    return reply.type('text/html; charset=utf-8').send(html);
+    return reply
+      .header('cache-control', 'no-cache')
+      .type('text/html; charset=utf-8')
+      .send(html);
   } catch {
     reply.code(503);
     return reply.type('text/plain; charset=utf-8').send('管理前端尚未构建。请先运行 npm run build。');
