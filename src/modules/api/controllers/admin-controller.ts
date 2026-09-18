@@ -2304,7 +2304,11 @@ function readUpdateDeliveryTargetBody(body: unknown): {
   }
 
   if (body.webhookUrl !== undefined) {
-    input.webhookUrl = readDeliveryTargetWebhookUrl(body, readDeliveryChannelType(body.channelType));
+    const webhookUrl = readDeliveryTargetWebhookUrl(body, readDeliveryChannelType(body.channelType));
+
+    if (webhookUrl.length > 0) {
+      input.webhookUrl = webhookUrl;
+    }
   }
 
   if (body.secret !== undefined) {

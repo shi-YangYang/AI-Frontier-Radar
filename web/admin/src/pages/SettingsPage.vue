@@ -697,7 +697,7 @@
                           class="link-danger"
                           type="button"
                           :disabled="busy"
-                          @click="removeWechatAccount(account)"
+                          @click="wechatAccountToDelete = account"
                         >
                           {{ t('actions.delete') }}
                         </button>
@@ -707,28 +707,6 @@
                 </table>
               </div>
 
-              <div class="settings-field">
-                <span>{{ t('settings.wechat.targetsTitle') }}</span>
-                <div v-if="wechatStatus.targets.length === 0" class="empty-panel">
-                  {{ t('settings.wechat.targetsEmpty') }}
-                </div>
-                <table v-else class="data-table">
-                  <thead>
-                    <tr>
-                      <th>{{ t('settings.wechat.targetAccount') }}</th>
-                      <th>{{ t('settings.wechat.targetId') }}</th>
-                      <th>{{ t('settings.wechat.targetLastSeen') }}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="target in wechatStatus.targets" :key="`${target.accountId ?? ''}-${target.id}`">
-                      <td><code>{{ target.accountId ?? '-' }}</code></td>
-                      <td><code>{{ target.id }}</code></td>
-                      <td>{{ target.lastSeenAt ?? '-' }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
               </template>
             </div>
           </article>
@@ -893,6 +871,16 @@
         </section>
       </div>
     </div>
+
+    <ConfirmModal
+      :body="t('settings.wechat.deleteAccountBody', {
+        account: wechatAccountToDelete?.accountId ?? '',
+      })"
+      :open="wechatAccountToDelete !== null"
+      :title="t('settings.wechat.deleteAccountTitle')"
+      @cancel="wechatAccountToDelete = null"
+      @confirm="confirmRemoveWechatAccount"
+    />
 
     <ConfirmModal
       :body="t('settings.data.cleanupConfirmBody', {
@@ -1076,6 +1064,7 @@ const xSourceSettings = ref<RuntimeXSourceSettings | null>(null);
 const anonymousCheckResult = ref<XSourceAnonymousCheckResult | null>(null);
 const loginCheckResult = ref<XSourceLoginCheckResult | null>(null);
 
+const wechatAccountToDelete = ref<WechatAccount | null>(null);
 const wechatCodeInput = ref('');
 const wechatQrCode = ref<{ qrcodeDataUrl?: string; qrcodeUrl?: string } | null>(null);
 const wechatStatus = ref<WechatStatus | null>(null);
@@ -1122,7 +1111,14 @@ async function toggleWechatAccountPush(account: WechatAccount): Promise<void> {
   }
 }
 
-async function removeWechatAccount(account: WechatAccount): Promise<void> {
+async function confirmRemoveWechatAccount(): Promise<void> {
+  const account = wechatAccountToDelete.value;
+
+  if (account === null) {
+    return;
+  }
+
+  wechatAccountToDelete.value = null;
   busy.value = true;
 
   try {
