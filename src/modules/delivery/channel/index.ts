@@ -40,3 +40,5 @@ export { createBarkSender } from './bark-sender';
 export type { BarkSenderOptions } from './bark-sender';
 export { createGenericWebhookSender } from './generic-webhook-sender';
 export type { GenericWebhookSenderOptions } from './generic-webhook-sender';
+export { createWechatBridgeSender } from './wechat-bridge-sender';
+export type { WechatBridgeSenderOptions } from './wechat-bridge-sender';

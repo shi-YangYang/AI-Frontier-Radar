@@ -16,6 +16,7 @@ export type DeliveryChannelType =
   | 'dingtalk_webhook'
   | 'feishu_webhook'
   | 'generic_webhook'
+  | 'wechat_bridge'
   | 'wecom_webhook';
 
 export type DeliveryEventStatus = 'dead' | 'failed' | 'pending' | 'retry_wait' | 'sending' | 'sent';
@@ -121,6 +122,7 @@ export interface CreateXPostRawInput {
 
 export interface DeliveryTargetConfig {
   secret?: string;
+  target?: string;
 }
 
 export interface DeliveryTarget {

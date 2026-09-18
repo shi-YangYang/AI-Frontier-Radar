@@ -330,6 +330,7 @@ export type DeliveryChannelType =
   | 'dingtalk_webhook'
   | 'feishu_webhook'
   | 'generic_webhook'
+  | 'wechat_bridge'
   | 'wecom_webhook';
 
 export interface DeliveryTarget {
@@ -339,6 +340,7 @@ export interface DeliveryTarget {
   enabled: boolean;
   id: string;
   secretConfigured: boolean;
+  target: string | null;
   targetKey: string;
   updatedAt: string;
   webhookPreview: string;
@@ -354,12 +356,14 @@ export interface CreateDeliveryTargetInput {
   displayName: string;
   enabled: boolean;
   secret?: string;
+  target?: string;
   webhookUrl: string;
 }
 
 export interface UpdateDeliveryTargetInput {
   displayName: string;
   secret?: string;
+  target?: string;
   webhookUrl?: string;
 }
 

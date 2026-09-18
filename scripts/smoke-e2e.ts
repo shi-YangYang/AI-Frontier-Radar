@@ -1422,6 +1422,14 @@ async function main(): Promise<void> {
       },
       { channelType: 'bark', kind: 'bark', name: 'Mock Bark', url: webhook.urls.bark },
       { channelType: 'generic_webhook', kind: 'generic', name: 'Mock Generic', url: webhook.urls.generic },
+      {
+        channelType: 'wechat_bridge',
+        kind: 'wechatBridge',
+        name: 'Mock WeChat Bridge',
+        secret: 'bridge-smoke-secret',
+        target: 'user-1@im.wechat',
+        url: webhook.urls.wechatBridge,
+      },
     ] as const;
     const channelTargetByKind = new Map<string, { id: string; targetKey: string }>();
 
@@ -1434,6 +1442,7 @@ async function main(): Promise<void> {
           enabled: true,
           webhookUrl: definition.url,
           ...('secret' in definition ? { secret: definition.secret } : {}),
+          ...('target' in definition ? { target: definition.target } : {}),
         },
         url: '/admin/api/settings/delivery-targets',
       });
@@ -1448,10 +1457,10 @@ async function main(): Promise<void> {
         createdTarget.data.deliveryTarget.channelType === definition.channelType,
         `channel type mismatch for ${definition.kind}`,
       );
-      if (definition.kind === 'dingtalk') {
+      if (definition.kind === 'dingtalk' || definition.kind === 'wechatBridge') {
         assert(
           createdTarget.data.deliveryTarget.secretConfigured,
-          'dingtalk target should report secretConfigured',
+          `${definition.kind} target should report secretConfigured`,
         );
       }
       channelTargetByKind.set(definition.kind, {
@@ -1555,6 +1564,25 @@ async function main(): Promise<void> {
       `generic payload mismatch: ${JSON.stringify(genericBody)}`,
     );
     checks.push({ name: '4 渠道测试发送：payload 正确且钉钉加签可校验' });
+
+    const wechatBridgeRequest = webhook.requests.find((entry) =>
+      entry.url.startsWith('/mock-wechat-bridge'),
+    );
+    const wechatBridgeBody = wechatBridgeRequest?.body as {
+      text?: string;
+      title?: string;
+      to?: string;
+      url?: string;
+    };
+    assert(
+      wechatBridgeRequest?.headers.authorization === 'Bearer bridge-smoke-secret' &&
+        wechatBridgeBody?.to === 'user-1@im.wechat' &&
+        typeof wechatBridgeBody.title === 'string' &&
+        typeof wechatBridgeBody.text === 'string' &&
+        typeof wechatBridgeBody.url === 'string',
+      `wechat bridge payload mismatch: ${JSON.stringify({ body: wechatBridgeBody, headers: wechatBridgeRequest?.headers.authorization })}`,
+    );
+    checks.push({ name: '微信桥通道：payload 与 Bearer 鉴权正确' });
 
     const barkTargetKey = channelTargetByKind.get('bark')?.targetKey ?? '';
     const routingRulesResponse = await app.inject({
@@ -2397,7 +2425,14 @@ interface MockWebhookRequest {
 async function startMockWebhook(): Promise<{
   close(): Promise<void>;
   requests: MockWebhookRequest[];
-  urls: { bark: string; dingtalk: string; feishu: string; generic: string; wecom: string };
+  urls: {
+    bark: string;
+    dingtalk: string;
+    feishu: string;
+    generic: string;
+    wechatBridge: string;
+    wecom: string;
+  };
 }> {
   const requests: MockWebhookRequest[] = [];
   const server = http.createServer(async (request, response) => {
@@ -2418,6 +2453,14 @@ async function startMockWebhook(): Promise<{
       headers: request.headers,
       url: requestUrl,
     });
+
+    if (requestUrl.startsWith('/mock-wechat-bridge')) {
+      sendJson(response, {
+        messageId: 'mock-bridge-1',
+        ok: true,
+      });
+      return;
+    }
 
     if (requestUrl.startsWith('/mock-wecom') || requestUrl.startsWith('/mock-dingtalk')) {
       sendJson(response, {
@@ -2455,6 +2498,7 @@ async function startMockWebhook(): Promise<{
       dingtalk: `${baseUrl}/mock-dingtalk`,
       feishu: `${baseUrl}/mock-feishu-webhook-secret`,
       generic: `${baseUrl}/mock-generic`,
+      wechatBridge: `${baseUrl}/mock-wechat-bridge`,
       wecom: `${baseUrl}/mock-wecom`,
     },
   };

@@ -66,6 +66,24 @@
                   type="url"
                 />
               </label>
+              <label v-if="newTargetForm.channelType === 'wechat_bridge'">
+                <span>{{ t('settings.feishu.bridgeSecretLabel') }}</span>
+                <input
+                  v-model="newTargetForm.secret"
+                  autocomplete="off"
+                  :placeholder="t('settings.feishu.secretOptionalPlaceholder')"
+                />
+                <small>{{ t('settings.feishu.bridgeSecretHelp') }}</small>
+              </label>
+              <label v-if="newTargetForm.channelType === 'wechat_bridge'">
+                <span>{{ t('settings.feishu.targetLabel') }}</span>
+                <input
+                  v-model="newTargetForm.target"
+                  autocomplete="off"
+                  :placeholder="t('settings.feishu.targetPlaceholder')"
+                />
+                <small>{{ t('settings.feishu.targetHelp') }}</small>
+              </label>
               <label v-if="newTargetForm.channelType === 'dingtalk_webhook'">
                 <span>{{ t('settings.feishu.secretLabel') }}</span>
                 <input
@@ -783,6 +801,21 @@
                   />
                   <small>{{ t('settings.edit.saveHelp') }}</small>
                 </label>
+                <label v-if="editingTarget.channelType === 'wechat_bridge'">
+                  <span>{{ t('settings.edit.newTargetLabel') }}</span>
+                  <input
+                    v-model="editTargetForm.target"
+                    autocomplete="off"
+                    :placeholder="t('settings.edit.newTargetPlaceholder')"
+                  />
+                  <small>
+                    {{
+                      editingTarget.target
+                        ? t('settings.edit.targetKeepHelp', { target: editingTarget.target })
+                        : t('settings.edit.targetUnsetHelp')
+                    }}
+                  </small>
+                </label>
                 <label v-if="editingTarget.channelType === 'dingtalk_webhook'">
                   <span>{{ t('settings.edit.newSecretLabel') }}</span>
                   <input
@@ -1071,12 +1104,14 @@ const newTargetForm = reactive({
   displayName: '',
   enabled: true,
   secret: '',
+  target: '',
   webhookUrl: '',
 });
 
 const editTargetForm = reactive({
   displayName: '',
   secret: '',
+  target: '',
   webhookUrl: '',
 });
 
@@ -1111,6 +1146,7 @@ const channelTypeOptions = computed<{ label: string; value: DeliveryChannelType 
   { label: t('settings.feishu.channel.dingtalk'), value: 'dingtalk_webhook' },
   { label: t('settings.feishu.channel.bark'), value: 'bark' },
   { label: t('settings.feishu.channel.generic'), value: 'generic_webhook' },
+  { label: t('settings.feishu.channel.wechatBridge'), value: 'wechat_bridge' },
 ]);
 
 const channelUrlPlaceholders: Record<DeliveryChannelType, string> = {
@@ -1118,6 +1154,7 @@ const channelUrlPlaceholders: Record<DeliveryChannelType, string> = {
   dingtalk_webhook: 'https://oapi.dingtalk.com/robot/send?access_token=...',
   feishu_webhook: 'https://open.feishu.cn/open-apis/bot/v2/hook/...',
   generic_webhook: 'https://example.com/webhook',
+  wechat_bridge: 'http://127.0.0.1:3991/send',
   wecom_webhook: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...',
 };
 
@@ -1133,6 +1170,8 @@ function channelTypeLabel(channelType: DeliveryChannelType): string {
       return t('settings.feishu.channel.generic');
     case 'wecom_webhook':
       return t('settings.feishu.channel.wecom');
+    case 'wechat_bridge':
+      return t('settings.feishu.channel.wechatBridge');
     default:
       return t('settings.feishu.channel.feishu');
   }
@@ -1469,12 +1508,14 @@ async function createTarget(): Promise<void> {
 
   try {
     const secret = newTargetForm.secret.trim();
+    const target = newTargetForm.target.trim();
 
     await createDeliveryTarget({
       channelType: newTargetForm.channelType,
       displayName: newTargetForm.displayName.trim(),
       enabled: newTargetForm.enabled,
       ...(secret.length === 0 ? {} : { secret }),
+      ...(target.length === 0 ? {} : { target }),
       webhookUrl: newTargetForm.webhookUrl.trim(),
     });
     resetNewTargetForm();
@@ -1493,6 +1534,7 @@ function openEditTarget(target: DeliveryTarget): void {
   editingTarget.value = target;
   editTargetForm.displayName = target.displayName;
   editTargetForm.secret = '';
+  editTargetForm.target = '';
   editTargetForm.webhookUrl = '';
 }
 
@@ -1500,6 +1542,7 @@ function closeEditTarget(): void {
   editingTarget.value = null;
   editTargetForm.displayName = '';
   editTargetForm.secret = '';
+  editTargetForm.target = '';
   editTargetForm.webhookUrl = '';
 }
 
@@ -1522,9 +1565,11 @@ async function saveTargetEdit(): Promise<void> {
   try {
     const webhookUrl = editTargetForm.webhookUrl.trim();
     const secret = editTargetForm.secret.trim();
+    const target = editTargetForm.target.trim();
     const result = await updateDeliveryTarget(editingTarget.value.id, {
       displayName: editTargetForm.displayName.trim(),
       ...(secret.length === 0 ? {} : { secret }),
+      ...(target.length === 0 ? {} : { target }),
       ...(webhookUrl.length === 0 ? {} : { webhookUrl }),
     });
     replaceDeliveryTarget(result.deliveryTarget);
@@ -1660,8 +1705,11 @@ function replaceDeliveryTarget(nextTarget: DeliveryTarget): void {
 }
 
 function resetNewTargetForm(): void {
+  newTargetForm.channelType = 'feishu_webhook';
   newTargetForm.displayName = '';
   newTargetForm.enabled = true;
+  newTargetForm.secret = '';
+  newTargetForm.target = '';
   newTargetForm.webhookUrl = '';
 }
 

@@ -985,14 +985,28 @@ export async function updateAdminDeliveryTarget(
     await assertWebhookUrlNotDuplicated(input.webhookUrl, options, existingTarget.id);
   }
 
+  const { secret, target, ...restInput } = input;
+  const nextConfig: { secret?: string; target?: string } = { ...existingTarget.config };
+
+  if (secret !== undefined) {
+    if (secret.length === 0) {
+      delete nextConfig.secret;
+    } else {
+      nextConfig.secret = secret;
+    }
+  }
+
+  if (target !== undefined) {
+    if (target.length === 0) {
+      delete nextConfig.target;
+    } else {
+      nextConfig.target = target;
+    }
+  }
+
   const updatedTarget = await options.storage.deliveryTargets.update(existingTarget.id, {
-    ...input,
-    ...(input.secret === undefined
-      ? {}
-      : { config: { ...(input.secret.length === 0 ? {} : { secret: input.secret }) } }),
-    ...(input.secret === undefined || input.secret.length > 0
-      ? {}
-      : { config: {} }),
+    ...restInput,
+    config: nextConfig,
   });
 
   if (updatedTarget === null) {
@@ -1204,6 +1218,7 @@ interface AdminDeliveryTarget {
   enabled: boolean;
   id: string;
   secretConfigured: boolean;
+  target: string | null;
   targetKey: string;
   updatedAt: string;
   webhookPreview: string;
@@ -1755,6 +1770,7 @@ function toAdminDeliveryTarget(target: DeliveryTarget): AdminDeliveryTarget {
     enabled: target.enabled,
     id: target.id,
     secretConfigured: (target.config.secret?.length ?? 0) > 0,
+    target: target.config.target ?? null,
     targetKey: target.targetKey,
     updatedAt: target.updatedAt,
     webhookPreview: previewSecretUrl(target.webhookUrl),
@@ -1948,6 +1964,7 @@ function readCreateDeliveryTargetBody(body: unknown): {
 function readUpdateDeliveryTargetBody(body: unknown): {
   displayName?: string;
   secret?: string;
+  target?: string;
   webhookUrl?: string;
 } {
   if (!isRecord(body)) {
@@ -1957,6 +1974,7 @@ function readUpdateDeliveryTargetBody(body: unknown): {
   const input: {
     displayName?: string;
     secret?: string;
+    target?: string;
     webhookUrl?: string;
   } = {};
 
@@ -1972,11 +1990,19 @@ function readUpdateDeliveryTargetBody(body: unknown): {
     input.secret = readDeliveryTargetSecret(body.secret);
   }
 
+  if (body.target !== undefined) {
+    if (typeof body.target !== 'string') {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'target 必须是字符串。');
+    }
+
+    input.target = body.target.trim();
+  }
+
   if (Object.keys(input).length === 0) {
     throw new AdminApiError(
       400,
       'INVALID_REQUEST',
-      '至少需要提供 displayName、webhookUrl 或 secret。',
+      '至少需要提供 displayName、webhookUrl、secret 或 target。',
     );
   }
 
@@ -1993,26 +2019,50 @@ function readDeliveryChannelType(value: unknown): DeliveryTarget['channelType'] 
     value !== 'dingtalk_webhook' &&
     value !== 'feishu_webhook' &&
     value !== 'generic_webhook' &&
+    value !== 'wechat_bridge' &&
     value !== 'wecom_webhook'
   ) {
     throw new AdminApiError(
       400,
       'INVALID_REQUEST',
-      'channelType 必须是 feishu_webhook、wecom_webhook、dingtalk_webhook、bark 或 generic_webhook。',
+      'channelType 必须是 feishu_webhook、wecom_webhook、dingtalk_webhook、bark、generic_webhook 或 wechat_bridge。',
     );
   }
 
   return value;
 }
 
-function readDeliveryTargetConfig(body: Record<string, unknown>): { secret?: string } {
-  if (body.secret === undefined) {
-    return {};
+function readDeliveryTargetConfig(body: Record<string, unknown>): {
+  secret?: string;
+  target?: string;
+} {
+  const config: { secret?: string; target?: string } = {};
+
+  if (body.secret !== undefined) {
+    const secret = readDeliveryTargetSecret(body.secret);
+
+    if (secret.length > 0) {
+      config.secret = secret;
+    }
   }
 
-  const secret = readDeliveryTargetSecret(body.secret);
+  if (body.target !== undefined) {
+    if (typeof body.target !== 'string') {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'target 必须是字符串。');
+    }
 
-  return secret.length === 0 ? {} : { secret };
+    const target = body.target.trim();
+
+    if (target.length > 200) {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'target 不能超过 200 个字符。');
+    }
+
+    if (target.length > 0) {
+      config.target = target;
+    }
+  }
+
+  return config;
 }
 
 function readDeliveryTargetSecret(value: unknown): string {

@@ -16,12 +16,17 @@ import {
   type GenericWebhookSenderOptions,
 } from './generic-webhook-sender';
 import {
+  createWechatBridgeSender,
+  type WechatBridgeSenderOptions,
+} from './wechat-bridge-sender';
+import {
   createWecomWebhookSender,
   type WecomWebhookSenderOptions,
 } from './wecom-webhook-sender';
 
 export interface DeliveryChannelRegistryOptions {
   bark?: BarkSenderOptions;
+  wechatBridge?: WechatBridgeSenderOptions;
   dingtalk?: DingtalkWebhookSenderOptions;
   feishu?: FeishuWebhookSenderOptions;
   generic?: GenericWebhookSenderOptions;
@@ -37,5 +42,6 @@ export function createDefaultDeliveryChannelRegistry(
     createDingtalkWebhookSender(options.dingtalk),
     createBarkSender(options.bark),
     createGenericWebhookSender(options.generic),
+    createWechatBridgeSender(options.wechatBridge),
   ]);
 }
