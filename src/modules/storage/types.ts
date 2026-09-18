@@ -16,6 +16,7 @@ export type DeliveryChannelType =
   | 'dingtalk_webhook'
   | 'feishu_webhook'
   | 'generic_webhook'
+  | 'wechat_clawbot'
   | 'wecom_webhook';
 
 export type DeliveryEventStatus = 'dead' | 'failed' | 'pending' | 'retry_wait' | 'sending' | 'sent';
@@ -70,6 +71,7 @@ export interface XPostRaw {
   xPostId: string;
   dedupeKey: string | null;
   authorUsername: string;
+  title: string | null;
   authorUserId: string | null;
   postedAt: string;
   textContent: string;
@@ -113,6 +115,7 @@ export interface CreateXPostRawInput {
   postedAt: string;
   textContent: string;
   permalinkUrl: string;
+  title?: string;
   isReply?: boolean;
   isRepost?: boolean;
   rawPayloadJson: string;
@@ -120,7 +123,9 @@ export interface CreateXPostRawInput {
 }
 
 export interface DeliveryTargetConfig {
+  accountId?: string;
   secret?: string;
+  target?: string;
 }
 
 export interface DeliveryTarget {

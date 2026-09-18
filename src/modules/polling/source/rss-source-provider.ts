@@ -453,6 +453,7 @@ function toEntryPost(
       sourceUrl,
     },
     textContent,
+    ...(title === undefined || title.length === 0 ? {} : { title }),
     xPostId: createStablePostId(postedAt, guid, fetchedAt),
   };
 }

@@ -35,6 +35,7 @@ export interface SourceProviderAccount {
 export interface StandardizedPost {
   author: SourceProviderAccount;
   dedupeKey?: string;
+  title?: string;
   isReply: boolean;
   isRepost: boolean;
   permalinkUrl: string;

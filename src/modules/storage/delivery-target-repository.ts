@@ -16,6 +16,7 @@ export interface DeleteDeliveryTargetResult {
 }
 
 export interface DeliveryTargetPaginationInput {
+  excludeChannelTypes?: string[];
   page: number;
   pageSize: number;
 }
@@ -194,20 +195,22 @@ export class DeliveryTargetRepository {
       ],
       skip: (input.page - 1) * input.pageSize,
       take: input.pageSize,
-      where: visibleDeliveryTargetWhere(),
+      where: visibleDeliveryTargetWhere(input.excludeChannelTypes),
     });
 
     return deliveryTargets.map(mapDeliveryTarget);
   }
 
-  public async getVisibleSummary(): Promise<DeliveryTargetSummary> {
+  public async getVisibleSummary(
+    input: { excludeChannelTypes?: string[] } = {},
+  ): Promise<DeliveryTargetSummary> {
     const [total, enabled] = await Promise.all([
       this.prisma.deliveryTarget.count({
-        where: visibleDeliveryTargetWhere(),
+        where: visibleDeliveryTargetWhere(input.excludeChannelTypes),
       }),
       this.prisma.deliveryTarget.count({
         where: {
-          ...visibleDeliveryTargetWhere(),
+          ...visibleDeliveryTargetWhere(input.excludeChannelTypes),
           enabled: true,
         },
       }),
@@ -267,11 +270,16 @@ export class DeliveryTargetRepository {
   }
 }
 
-function visibleDeliveryTargetWhere(): Prisma.DeliveryTargetWhereInput {
+function visibleDeliveryTargetWhere(
+  excludeChannelTypes?: string[],
+): Prisma.DeliveryTargetWhereInput {
   return {
     webhookUrl: {
       not: '',
     },
+    ...(excludeChannelTypes === undefined || excludeChannelTypes.length === 0
+      ? {}
+      : { channelType: { notIn: excludeChannelTypes } }),
   };
 }
 
@@ -325,8 +333,14 @@ function parseDeliveryTargetConfig(rawConfigJson: string): DeliveryTarget['confi
 
     const record = parsed as Record<string, unknown>;
     const secret = typeof record.secret === 'string' ? record.secret.trim() : '';
+    const target = typeof record.target === 'string' ? record.target.trim() : '';
+    const accountId = typeof record.accountId === 'string' ? record.accountId.trim() : '';
 
-    return secret.length === 0 ? {} : { secret };
+    return {
+      ...(accountId.length === 0 ? {} : { accountId }),
+      ...(secret.length === 0 ? {} : { secret }),
+      ...(target.length === 0 ? {} : { target }),
+    };
   } catch {
     return {};
   }
@@ -334,6 +348,12 @@ function parseDeliveryTargetConfig(rawConfigJson: string): DeliveryTarget['confi
 
 function serializeDeliveryTargetConfig(config: DeliveryTarget['config'] | undefined): string {
   const secret = config?.secret?.trim() ?? '';
+  const target = config?.target?.trim() ?? '';
+  const accountId = config?.accountId?.trim() ?? '';
 
-  return JSON.stringify(secret.length === 0 ? {} : { secret });
+  return JSON.stringify({
+    ...(accountId.length === 0 ? {} : { accountId }),
+    ...(secret.length === 0 ? {} : { secret }),
+    ...(target.length === 0 ? {} : { target }),
+  });
 }

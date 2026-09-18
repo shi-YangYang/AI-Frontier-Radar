@@ -1,0 +1,22 @@
+{
+  "name": "ai-frontier-radar-wechat-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Standalone bridge that delivers messages to WeChat via Tencent's official ClawBot channel plugin (MIT), without installing OpenClaw.",
+  "scripts": {
+    "login": "node src/bridge.mjs login",
+    "status": "node src/bridge.mjs status",
+    "serve": "node src/bridge.mjs serve",
+    "targets": "node src/bridge.mjs targets"
+  },
+  "dependencies": {
+    "@tencent-weixin/openclaw-weixin": "2.4.9",
+    "openclaw": "file:./shims/openclaw",
+    "qrcode-terminal": "0.12.0",
+    "qrcode": "1.5.4"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

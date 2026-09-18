@@ -1,0 +1,11 @@
+{
+  "name": "openclaw",
+  "version": "2026.5.12",
+  "private": true,
+  "type": "module",
+  "description": "Minimal openclaw plugin-sdk shim used by the standalone WeChat bridge (only the helpers required by @tencent-weixin/openclaw-weixin).",
+  "exports": {
+    "./plugin-sdk/account-id": "./plugin-sdk/account-id.js",
+    "./plugin-sdk/infra-runtime": "./plugin-sdk/infra-runtime.js"
+  }
+}

@@ -315,6 +315,7 @@ function toPaperPost(
     postedAt: resolvePostedAt(paper?.submittedOnDailyAt, paper?.publishedAt, fetchedAt),
     rawPayload: entry,
     textContent: sections.join('\n\n'),
+    title,
     xPostId: `${String(Date.parse(fetchedAt) || Date.now()).padStart(16, '0')}${toHashDigits(paperId)}`,
   };
 }

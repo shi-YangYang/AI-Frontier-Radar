@@ -330,15 +330,18 @@ export type DeliveryChannelType =
   | 'dingtalk_webhook'
   | 'feishu_webhook'
   | 'generic_webhook'
+  | 'wechat_clawbot'
   | 'wecom_webhook';
 
 export interface DeliveryTarget {
+  accountId: string | null;
   channelType: DeliveryChannelType;
   createdAt: string;
   displayName: string;
   enabled: boolean;
   id: string;
   secretConfigured: boolean;
+  target: string | null;
   targetKey: string;
   updatedAt: string;
   webhookPreview: string;
@@ -350,16 +353,20 @@ export interface DeliveryTargetSummary {
 }
 
 export interface CreateDeliveryTargetInput {
+  accountId?: string;
   channelType: DeliveryChannelType;
   displayName: string;
   enabled: boolean;
   secret?: string;
+  target?: string;
   webhookUrl: string;
 }
 
 export interface UpdateDeliveryTargetInput {
+  accountId?: string;
   displayName: string;
   secret?: string;
+  target?: string;
   webhookUrl?: string;
 }
 
@@ -485,6 +492,79 @@ export async function runRetentionCleanup(): Promise<{
     deletedPosts: number;
     settings: RetentionSettings;
   }>('/admin/api/actions/cleanup-now', { method: 'POST' });
+}
+
+export interface WechatAccount {
+  accountId: string;
+  baseUrl: string;
+  pushEnabled: boolean;
+  tokenMasked: string;
+  userId: string | null;
+}
+
+export interface WechatStatus {
+  accountId?: string;
+  accounts: WechatAccount[];
+  installed: boolean;
+  loggedIn: boolean;
+  loginStatus: string;
+  message?: string;
+  port: number;
+  qrcodeDataUrl?: string;
+  qrcodeUrl?: string;
+  running: boolean;
+  targets: Array<{ accountId?: string; id: string; lastSeenAt?: string; preview?: string }>;
+}
+
+export async function getWechatStatus(): Promise<WechatStatus> {
+  return requestJson<WechatStatus>('/admin/api/wechat/status');
+}
+
+export async function startWechatLogin(force = false): Promise<{
+  qrcodeDataUrl?: string;
+  qrcodeUrl?: string;
+  status: string;
+}> {
+  return requestJson<{ qrcodeDataUrl?: string; qrcodeUrl?: string; status: string }>(
+    '/admin/api/wechat/login',
+    { body: JSON.stringify({ force }), method: 'POST' },
+  );
+}
+
+export async function submitWechatLoginCode(code: string): Promise<void> {
+  await requestJson<{ submitted: boolean }>('/admin/api/wechat/login/code', {
+    body: JSON.stringify({ code }),
+    method: 'POST',
+  });
+}
+
+export async function testWechatBridge(): Promise<{
+  failed: Array<{ accountId: string; error: string }>;
+  sent: number;
+}> {
+  return requestJson<{ failed: Array<{ accountId: string; error: string }>; sent: number }>(
+    '/admin/api/wechat/test',
+    { method: 'POST' },
+  );
+}
+
+export async function updateWechatAccountPush(
+  accountId: string,
+  enabled: boolean,
+): Promise<{ enabled: boolean }> {
+  return requestJson<{ enabled: boolean }>(
+    `/admin/api/wechat/accounts/${encodeURIComponent(accountId)}/push`,
+    { body: JSON.stringify({ enabled }), method: 'PATCH' },
+  );
+}
+
+export async function deleteWechatAccount(accountId: string): Promise<boolean> {
+  const data = await requestJson<{ deleted: boolean }>(
+    '/admin/api/wechat/accounts/' + encodeURIComponent(accountId),
+    { method: 'DELETE' },
+  );
+
+  return data.deleted;
 }
 
 export async function listBackups(): Promise<BackupEntry[]> {
@@ -645,7 +725,9 @@ export async function testFeishuSettings(): Promise<FeishuTestResult> {
   return requestJson<FeishuTestResult>('/admin/api/settings/feishu/test', { method: 'POST' });
 }
 
-export async function listDeliveryTargets(query: DeliveryTargetPageQuery): Promise<{
+export async function listDeliveryTargets(
+  query: DeliveryTargetPageQuery & { excludeChannelType?: string },
+): Promise<{
   deliveryTargets: DeliveryTarget[];
   pagination: AdminPagination;
   summary: DeliveryTargetSummary;
@@ -879,10 +961,16 @@ function toPageQuery(query: PageQuery): string {
   return params.toString();
 }
 
-function toDeliveryTargetPageQuery(query: DeliveryTargetPageQuery): string {
+function toDeliveryTargetPageQuery(
+  query: DeliveryTargetPageQuery & { excludeChannelType?: string },
+): string {
   const params = new URLSearchParams();
   params.set('page', String(query.page));
   params.set('pageSize', String(query.pageSize));
+
+  if (query.excludeChannelType !== undefined && query.excludeChannelType.length > 0) {
+    params.set('excludeChannelType', query.excludeChannelType);
+  }
   return params.toString();
 }
 

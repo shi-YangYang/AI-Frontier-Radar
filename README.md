@@ -386,8 +386,37 @@ YouTube 解析与 GitHub 页面抓取遵循“RSS 源”页签里的代理配置
 | 钉钉机器人 | 群机器人 Webhook（markdown） | Webhook URL；若安全设置选"加签"，需填加签密钥 |
 | Bark | iOS 推送 | 完整推送地址 `https://api.day.app/<deviceKey>` |
 | 通用 Webhook | 任意系统对接，POST JSON（author/title/url/postedAt/text） | Webhook URL |
+| 微信（ClawBot） | 通过主服务内置的轻量桥推送到**个人微信**（微信官方 ClawBot 通道，无需 OpenClaw） | 可选目标会话（默认发到最近登记的会话） |
 
 - 新消息会按订阅规则投递到所有匹配的启用通道；失败的投递按既有重试策略处理（网络/5xx 重试，业务码错误不重试）。
+
+## 微信桥（个人微信推送）
+
+微信官方为 AI 智能体提供了 ClawBot 插件通道（扫码绑定，非第三方 hook）。本项目内置一个**独立轻量桥**（`wechat-bridge/`），直接复用腾讯官方插件（MIT）的登录与发送协议，**不需要安装 OpenClaw**。
+
+### 使用步骤
+
+```bash
+npm run wechat:install   # 安装桥依赖（仅首次）
+npm run local            # 正常启动雷达（主服务会自动托管微信桥）
+```
+
+1. 打开 `/settings -> 微信`，点击「扫码登录」，用手机微信扫描页面上的二维码；
+2. 若微信提示输入数字，在页面输入并提交；
+3. 登录成功后，在微信里给 **ClawBot** 随便发一条消息（用于登记会话目标）；
+4. 点击「测试发送」确认收到消息。绑定完成后该微信号**默认自动接收推送**，无需其他配置。
+
+### 多账号与推送开关
+
+- 「微信」页签可绑定**多个微信号**：每个微信号各自扫码一次（「添加微信（扫码）」），列表可见并可按需删除。
+- **绑定即默认接收推送**（系统自动为每个账号创建并维护投递通道）；如需某个微信号只登录不推送，关闭它所在行的「接收推送」开关即可。
+- 微信通道不会出现在「投递通道」列表中（避免与管理入口重复），启停以「接收推送」开关为准。
+- 官方限制：一个微信号同一时间只能绑定一个 bot 后端（绑定其他平台/实例会顶替当前绑定）；多账号只是让多个微信分别连到本桥。
+
+### 说明
+
+- 桥由主服务自动启动/停止，无需单独运行；`npm run wechat:login` / `wechat:serve` / `wechat:status` / `wechat:targets` 保留用于调试。
+- 桥只发送文本（标题 + 正文 + 原文链接），不接收/回复微信消息（仅登记会话目标）。
 
 ## 订阅规则（推送过滤）
 
@@ -456,6 +485,10 @@ npm run prisma:generate → npm run typecheck → npm run build → npm run smok
 | `npm run prisma:migrate:deploy` | 执行数据库迁移 |
 | `npm run playwright:install` | 安装 Chromium |
 | `npm run db:restore -- <备份文件>` | 用备份恢复数据库（需先停服） |
+| `npm run wechat:install` | 安装微信桥依赖（wechat-bridge） |
+| `npm run wechat:login` | 微信扫码登录（ClawBot 通道） |
+| `npm run wechat:serve` | 启动微信桥服务 |
+| `npm run wechat:status` | 查看微信桥登录状态 |
 
 ## 常见问题
 

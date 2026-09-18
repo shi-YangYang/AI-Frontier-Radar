@@ -52,6 +52,7 @@ import {
   type RetentionSettings,
 } from '../../maintenance';
 import { sharedLogBuffer, type LogBufferEntry } from '../../../lib/logger';
+import { syncWechatDeliveryTargets, type WechatAccount, type WechatBridgeService } from '../../wechat';
 import { SOURCE_GROUPS, findSourceGroup } from '../../../config/source-groups';
 import {
   applySourceGroup,
@@ -83,6 +84,7 @@ export interface AdminControllerOptions {
   config: AppConfig;
   runtimeSettings?: RuntimeSettingsService;
   storage: StorageContext;
+  wechatBridge?: WechatBridgeService;
 }
 
 export interface AdminApiErrorPayload {
@@ -728,6 +730,277 @@ export function listAdminLogs(query: unknown): {
   };
 }
 
+export async function getAdminWechatStatus(options: AdminControllerOptions): Promise<{
+  ok: true;
+  data: {
+    accountId?: string;
+    accounts: WechatAccount[];
+    installed: boolean;
+    loggedIn: boolean;
+    loginStatus: string;
+    message?: string;
+    port: number;
+    qrcodeDataUrl?: string;
+    qrcodeUrl?: string;
+    running: boolean;
+    targets: Array<{ accountId?: string; id: string; lastSeenAt?: string; preview?: string }>;
+  };
+}> {
+  const service = options.wechatBridge;
+
+  if (service === undefined) {
+    return {
+      ok: true,
+      data: {
+        accounts: [],
+        installed: false,
+        loggedIn: false,
+        loginStatus: 'unavailable',
+        message: '微信桥服务未初始化。',
+        port: 0,
+        running: false,
+        targets: [],
+      },
+    };
+  }
+
+  const status = service.getStatus();
+  const loginState = await service.getLoginState();
+  const targets = status.running ? await service.getTargets().catch(() => []) : [];
+  const accounts = status.running ? await service.getAccounts().catch(() => []) : [];
+
+  if (status.running && accounts.length >= 0) {
+    await syncWechatDeliveryTargets({
+      accounts,
+      bridgeBaseUrl: `http://127.0.0.1:${status.port}/send`,
+      deliveryTargets: options.storage.deliveryTargets,
+    }).catch(() => undefined);
+  }
+
+  const wechatTargets = (await options.storage.deliveryTargets.listAll()).filter(
+    (target) => target.channelType === 'wechat_clawbot',
+  );
+  const accountsWithPush = accounts.map((account) => {
+    const target = wechatTargets.find(
+      (entry) => entry.config.accountId === account.accountId,
+    );
+
+    return {
+      ...account,
+      pushEnabled: target?.enabled === true,
+    };
+  });
+
+  return {
+    ok: true,
+    data: {
+      ...(loginState.accountId === undefined ? {} : { accountId: loginState.accountId }),
+      accounts: accountsWithPush,
+      installed: status.installed,
+      loggedIn: loginState.loggedIn,
+      loginStatus: loginState.status,
+      ...(loginState.message === undefined ? {} : { message: loginState.message }),
+      port: status.port,
+      ...(loginState.qrcodeDataUrl === undefined ? {} : { qrcodeDataUrl: loginState.qrcodeDataUrl }),
+      ...(loginState.qrcodeUrl === undefined ? {} : { qrcodeUrl: loginState.qrcodeUrl }),
+      running: status.running,
+      targets: targets.map((target) => ({
+        ...(target.accountId === undefined ? {} : { accountId: target.accountId }),
+        id: target.id,
+        ...(target.lastSeenAt === undefined ? {} : { lastSeenAt: target.lastSeenAt }),
+        ...(target.preview === undefined ? {} : { preview: target.preview }),
+      })),
+    },
+  };
+}
+
+export async function updateAdminWechatAccountPush(
+  params: unknown,
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { enabled: boolean } }> {
+  if (!isRecord(params) || typeof params.accountId !== 'string' || params.accountId.trim().length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'accountId 无效。');
+  }
+
+  if (!isRecord(body) || typeof body.enabled !== 'boolean') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'enabled 必须是布尔值。');
+  }
+
+  const accountId = params.accountId.trim();
+  const knownTargets = await options.storage.deliveryTargets.listAll();
+  const target = knownTargets.find(
+    (entry) => entry.channelType === 'wechat_clawbot' && entry.config.accountId === accountId,
+  );
+
+  if (target === undefined) {
+    throw new AdminApiError(404, 'NOT_FOUND', '该微信账号还没有对应的投递通道。');
+  }
+
+  await options.storage.deliveryTargets.update(target.id, { enabled: body.enabled });
+
+  return { ok: true, data: { enabled: body.enabled } };
+}
+
+export async function deleteAdminWechatAccount(
+  params: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { deleted: boolean } }> {
+  const service = requireWechatBridge(options);
+
+  if (!isRecord(params) || typeof params.accountId !== 'string' || params.accountId.trim().length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'accountId 无效。');
+  }
+
+  try {
+    const accountId = params.accountId.trim();
+    const deleted = await service.removeAccount(accountId);
+
+    if (deleted) {
+      const knownTargets = await options.storage.deliveryTargets.listAll();
+      const wechatTarget = knownTargets.find(
+        (target) =>
+          target.channelType === 'wechat_clawbot' && target.config.accountId === accountId,
+      );
+
+      if (wechatTarget !== undefined) {
+        await options.storage.deliveryTargets.delete(wechatTarget.id);
+      }
+    }
+
+    return { ok: true, data: { deleted } };
+  } catch (error) {
+    throw new AdminApiError(
+      502,
+      'WECHAT_BRIDGE_FAILED',
+      error instanceof Error ? error.message : '删除微信账号失败。',
+    );
+  }
+}
+
+export async function startAdminWechatLogin(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { qrcodeDataUrl?: string; qrcodeUrl?: string; status: string } }> {
+  const service = requireWechatBridge(options);
+  const force = isRecord(body) && body.force === true;
+
+  try {
+    const state = await service.startLogin(force);
+
+    return {
+      ok: true,
+      data: {
+        ...(state.qrcodeDataUrl === undefined ? {} : { qrcodeDataUrl: state.qrcodeDataUrl }),
+        ...(state.qrcodeUrl === undefined ? {} : { qrcodeUrl: state.qrcodeUrl }),
+        status: state.status,
+      },
+    };
+  } catch (error) {
+    throw new AdminApiError(
+      502,
+      'WECHAT_BRIDGE_FAILED',
+      error instanceof Error ? error.message : '微信桥登录失败。',
+    );
+  }
+}
+
+export async function submitAdminWechatLoginCode(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { submitted: true } }> {
+  const service = requireWechatBridge(options);
+
+  if (!isRecord(body) || typeof body.code !== 'string' || body.code.trim().length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'code 不能为空。');
+  }
+
+  try {
+    await service.submitLoginCode(body.code);
+  } catch (error) {
+    throw new AdminApiError(
+      502,
+      'WECHAT_BRIDGE_FAILED',
+      error instanceof Error ? error.message : '提交验证码失败。',
+    );
+  }
+
+  return { ok: true, data: { submitted: true } };
+}
+
+export async function testAdminWechat(options: AdminControllerOptions): Promise<{
+  ok: true;
+  data: { failed: Array<{ accountId: string; error: string }>; ok: true; sent: number };
+}> {
+  const service = requireWechatBridge(options);
+
+  let accounts: Awaited<ReturnType<WechatBridgeService['getAccounts']>>;
+
+  try {
+    accounts = await service.getAccounts();
+  } catch (error) {
+    throw new AdminApiError(
+      502,
+      'WECHAT_BRIDGE_FAILED',
+      error instanceof Error ? error.message : '读取微信账号失败。',
+    );
+  }
+
+  if (accounts.length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '还没有绑定任何微信号，请先扫码添加。');
+  }
+
+  const failed: Array<{ accountId: string; error: string }> = [];
+  let sent = 0;
+
+  for (const account of accounts) {
+    try {
+      await service.sendMessage({
+        accountId: account.accountId,
+        author: 'AI 前沿雷达',
+        postedAt: new Date().toISOString(),
+        text: 'AI 前沿消息本地配置测试：微信桥可用。',
+        title: '【AI前沿消息】配置测试',
+        url: 'http://127.0.0.1:3000',
+      });
+      sent += 1;
+    } catch (error) {
+      failed.push({
+        accountId: account.accountId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (sent === 0) {
+    throw new AdminApiError(
+      502,
+      'WECHAT_BRIDGE_FAILED',
+      `全部账号发送失败：${failed.map((entry) => `${entry.accountId}（${entry.error}）`).join('；')}`,
+    );
+  }
+
+  return { ok: true, data: { failed, ok: true, sent } };
+}
+
+function requireWechatBridge(options: AdminControllerOptions): WechatBridgeService {
+  const service = options.wechatBridge;
+
+  if (service === undefined || !service.isInstalled()) {
+    throw new AdminApiError(
+      400,
+      'WECHAT_BRIDGE_UNAVAILABLE',
+      '微信桥未安装。请先运行 npm run wechat:install。',
+    );
+  }
+
+  if (!service.isRunning()) {
+    throw new AdminApiError(503, 'WECHAT_BRIDGE_UNAVAILABLE', '微信桥进程未运行。');
+  }
+
+  return service;
+}
+
 export async function getAdminSourceGroups(
   options: AdminControllerOptions,
 ): Promise<{ ok: true; data: { groups: SourceGroupStatus[] } }> {
@@ -935,9 +1208,15 @@ export async function listAdminDeliveryTargets(
   };
 }> {
   const paginationInput = readPaginationQuery(query);
-  const summary = await options.storage.deliveryTargets.getVisibleSummary();
+  const excludeChannelTypes = readExcludeChannelTypesQuery(query);
+  const summary = await options.storage.deliveryTargets.getVisibleSummary({
+    ...(excludeChannelTypes === undefined ? {} : { excludeChannelTypes }),
+  });
   const resolvedPaginationInput = clampPaginationInput(paginationInput, summary.total);
-  const deliveryTargets = await options.storage.deliveryTargets.listPage(resolvedPaginationInput);
+  const deliveryTargets = await options.storage.deliveryTargets.listPage({
+    ...resolvedPaginationInput,
+    ...(excludeChannelTypes === undefined ? {} : { excludeChannelTypes }),
+  });
 
   return {
     ok: true,
@@ -954,7 +1233,16 @@ export async function createAdminDeliveryTarget(
   options: AdminControllerOptions,
 ): Promise<{ ok: true; data: { deliveryTarget: AdminDeliveryTarget } }> {
   const input = readCreateDeliveryTargetBody(body);
-  await assertWebhookUrlNotDuplicated(input.webhookUrl, options);
+
+  if (input.channelType === 'wechat_clawbot' && input.webhookUrl.length === 0) {
+    const bridgePort = options.wechatBridge?.getStatus().port ?? 3_991;
+    input.webhookUrl = `http://127.0.0.1:${bridgePort}/send`;
+  }
+
+  if (input.channelType !== 'wechat_clawbot') {
+    await assertWebhookUrlNotDuplicated(input.webhookUrl, options);
+  }
+
   const deliveryTarget = await options.storage.deliveryTargets.create({
     channelType: input.channelType,
     config: input.config,
@@ -985,14 +1273,38 @@ export async function updateAdminDeliveryTarget(
     await assertWebhookUrlNotDuplicated(input.webhookUrl, options, existingTarget.id);
   }
 
+  const { accountId, secret, target, ...restInput } = input;
+  const nextConfig: { accountId?: string; secret?: string; target?: string } = {
+    ...existingTarget.config,
+  };
+
+  if (secret !== undefined) {
+    if (secret.length === 0) {
+      delete nextConfig.secret;
+    } else {
+      nextConfig.secret = secret;
+    }
+  }
+
+  if (target !== undefined) {
+    if (target.length === 0) {
+      delete nextConfig.target;
+    } else {
+      nextConfig.target = target;
+    }
+  }
+
+  if (accountId !== undefined) {
+    if (accountId.length === 0) {
+      delete nextConfig.accountId;
+    } else {
+      nextConfig.accountId = accountId;
+    }
+  }
+
   const updatedTarget = await options.storage.deliveryTargets.update(existingTarget.id, {
-    ...input,
-    ...(input.secret === undefined
-      ? {}
-      : { config: { ...(input.secret.length === 0 ? {} : { secret: input.secret }) } }),
-    ...(input.secret === undefined || input.secret.length > 0
-      ? {}
-      : { config: {} }),
+    ...restInput,
+    config: nextConfig,
   });
 
   if (updatedTarget === null) {
@@ -1198,12 +1510,14 @@ interface AdminSummary {
 }
 
 interface AdminDeliveryTarget {
+  accountId: string | null;
   channelType: DeliveryTarget['channelType'];
   createdAt: string;
   displayName: string;
   enabled: boolean;
   id: string;
   secretConfigured: boolean;
+  target: string | null;
   targetKey: string;
   updatedAt: string;
   webhookPreview: string;
@@ -1749,12 +2063,14 @@ function toSafeSourceErrorDetails(error: SourceProviderError): Record<string, un
 
 function toAdminDeliveryTarget(target: DeliveryTarget): AdminDeliveryTarget {
   return {
+    accountId: target.config.accountId ?? null,
     channelType: target.channelType,
     createdAt: target.createdAt,
     displayName: target.displayName,
     enabled: target.enabled,
     id: target.id,
     secretConfigured: (target.config.secret?.length ?? 0) > 0,
+    target: target.config.target ?? null,
     targetKey: target.targetKey,
     updatedAt: target.updatedAt,
     webhookPreview: previewSecretUrl(target.webhookUrl),
@@ -1891,7 +2207,7 @@ async function assertWebhookUrlNotDuplicated(
   );
 
   if (duplicatedTarget !== undefined) {
-    throw new AdminApiError(409, 'DUPLICATE_WEBHOOK_URL', '飞书 webhook URL 已存在。');
+    throw new AdminApiError(409, 'DUPLICATE_WEBHOOK_URL', '该 webhook URL 已存在。');
   }
 }
 
@@ -1923,6 +2239,25 @@ function collectUnknownRuleTargetKeys(rules: unknown[], knownTargetKeys: Set<str
   return unknownKeys;
 }
 
+function readExcludeChannelTypesQuery(query: unknown): string[] | undefined {
+  if (!isRecord(query) || query.excludeChannelType === undefined) {
+    return undefined;
+  }
+
+  const rawValue = Array.isArray(query.excludeChannelType)
+    ? query.excludeChannelType[0]
+    : query.excludeChannelType;
+
+  if (typeof rawValue !== 'string' || rawValue.trim().length === 0) {
+    return undefined;
+  }
+
+  return rawValue
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+}
+
 function readCreateDeliveryTargetBody(body: unknown): {
   channelType: DeliveryTarget['channelType'];
   config: { secret?: string };
@@ -1946,8 +2281,10 @@ function readCreateDeliveryTargetBody(body: unknown): {
 }
 
 function readUpdateDeliveryTargetBody(body: unknown): {
+  accountId?: string;
   displayName?: string;
   secret?: string;
+  target?: string;
   webhookUrl?: string;
 } {
   if (!isRecord(body)) {
@@ -1955,8 +2292,10 @@ function readUpdateDeliveryTargetBody(body: unknown): {
   }
 
   const input: {
+    accountId?: string;
     displayName?: string;
     secret?: string;
+    target?: string;
     webhookUrl?: string;
   } = {};
 
@@ -1965,18 +2304,38 @@ function readUpdateDeliveryTargetBody(body: unknown): {
   }
 
   if (body.webhookUrl !== undefined) {
-    input.webhookUrl = readDeliveryTargetWebhookUrl(body, readDeliveryChannelType(body.channelType));
+    const webhookUrl = readDeliveryTargetWebhookUrl(body, readDeliveryChannelType(body.channelType));
+
+    if (webhookUrl.length > 0) {
+      input.webhookUrl = webhookUrl;
+    }
   }
 
   if (body.secret !== undefined) {
     input.secret = readDeliveryTargetSecret(body.secret);
   }
 
+  if (body.target !== undefined) {
+    if (typeof body.target !== 'string') {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'target 必须是字符串。');
+    }
+
+    input.target = body.target.trim();
+  }
+
+  if (body.accountId !== undefined) {
+    if (typeof body.accountId !== 'string') {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'accountId 必须是字符串。');
+    }
+
+    input.accountId = body.accountId.trim();
+  }
+
   if (Object.keys(input).length === 0) {
     throw new AdminApiError(
       400,
       'INVALID_REQUEST',
-      '至少需要提供 displayName、webhookUrl 或 secret。',
+      '至少需要提供 displayName、webhookUrl、secret 或 target。',
     );
   }
 
@@ -1993,26 +2352,67 @@ function readDeliveryChannelType(value: unknown): DeliveryTarget['channelType'] 
     value !== 'dingtalk_webhook' &&
     value !== 'feishu_webhook' &&
     value !== 'generic_webhook' &&
+    value !== 'wechat_clawbot' &&
     value !== 'wecom_webhook'
   ) {
     throw new AdminApiError(
       400,
       'INVALID_REQUEST',
-      'channelType 必须是 feishu_webhook、wecom_webhook、dingtalk_webhook、bark 或 generic_webhook。',
+      'channelType 必须是 feishu_webhook、wecom_webhook、dingtalk_webhook、bark、generic_webhook 或 wechat_clawbot。',
     );
   }
 
   return value;
 }
 
-function readDeliveryTargetConfig(body: Record<string, unknown>): { secret?: string } {
-  if (body.secret === undefined) {
-    return {};
+function readDeliveryTargetConfig(body: Record<string, unknown>): {
+  accountId?: string;
+  secret?: string;
+  target?: string;
+} {
+  const config: { accountId?: string; secret?: string; target?: string } = {};
+
+  if (body.secret !== undefined) {
+    const secret = readDeliveryTargetSecret(body.secret);
+
+    if (secret.length > 0) {
+      config.secret = secret;
+    }
   }
 
-  const secret = readDeliveryTargetSecret(body.secret);
+  if (body.target !== undefined) {
+    if (typeof body.target !== 'string') {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'target 必须是字符串。');
+    }
 
-  return secret.length === 0 ? {} : { secret };
+    const target = body.target.trim();
+
+    if (target.length > 200) {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'target 不能超过 200 个字符。');
+    }
+
+    if (target.length > 0) {
+      config.target = target;
+    }
+  }
+
+  if (body.accountId !== undefined) {
+    if (typeof body.accountId !== 'string') {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'accountId 必须是字符串。');
+    }
+
+    const accountId = body.accountId.trim();
+
+    if (accountId.length > 200) {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'accountId 不能超过 200 个字符。');
+    }
+
+    if (accountId.length > 0) {
+      config.accountId = accountId;
+    }
+  }
+
+  return config;
 }
 
 function readDeliveryTargetSecret(value: unknown): string {
@@ -2037,13 +2437,17 @@ function readDeliveryTargetWebhookUrl(
     throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
   }
 
+  if (body.webhookUrl === undefined && channelType === 'wechat_clawbot') {
+    return '';
+  }
+
   if (typeof body.webhookUrl !== 'string') {
     throw new AdminApiError(400, 'INVALID_REQUEST', 'webhookUrl 必须是字符串。');
   }
 
   const webhookUrl = body.webhookUrl.trim();
 
-  if (webhookUrl.length === 0) {
+  if (webhookUrl.length === 0 && channelType !== 'wechat_clawbot') {
     throw new AdminApiError(400, 'INVALID_REQUEST', 'webhookUrl 不能为空。');
   }
 

@@ -10,7 +10,7 @@ import { loadAppConfig } from '../src/config';
 import { createLogger } from '../src/lib/logger';
 import { createApp } from '../src/app/create-app';
 import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createAi2BlogSourceProvider, createAnthropicNewsSourceProvider, createGithubTrendingSourceProvider, createHfDailyPapersSourceProvider, createMoonshotBlogSourceProvider, createRssSourceProvider, createSourceProviderRegistry, createSubscriptionRuleMatcher, createXSourceProvider, normalizeMetaBlogRawEntries, parseAi2BlogHtml, parseMoonshotBlogHtml, parseXaiNewsHtml, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
-import { runDeliveryWorkerJob } from '../src/modules/delivery';
+import { createV1TextMessageFormatter, runDeliveryWorkerJob } from '../src/modules/delivery';
 import { createRuntimeScheduler, createRuntimeSourceProviders } from '../src/modules/scheduler';
 import { applySourceGroup, createPrismaClient, createStorage, getSourceGroupStatuses } from '../src/modules/storage';
 import { SOURCE_GROUPS } from '../src/config/source-groups';
@@ -115,7 +115,43 @@ async function main(): Promise<void> {
     rss: rssProvider,
     x: sourceProvider,
   });
+  const fakeWechatAccounts = [
+    {
+      accountId: 'wechat-a@im.bot',
+      baseUrl: 'https://ilinkai.weixin.qq.com',
+      tokenMasked: 'aaaa***bbbb',
+      userId: 'user-a@im.wechat',
+    },
+    {
+      accountId: 'wechat-b@im.bot',
+      baseUrl: 'https://ilinkai.weixin.qq.com',
+      tokenMasked: 'cccc***dddd',
+      userId: 'user-b@im.wechat',
+    },
+  ];
+  const fakeWechatBridge = {
+    getAccounts: async () => fakeWechatAccounts,
+    getLoginState: async () => ({ loggedIn: true, status: 'idle' }),
+    getStatus: () => ({ installed: true, port: 3_991, running: true }),
+    getTargets: async () => [],
+    isInstalled: () => true,
+    isRunning: () => true,
+    removeAccount: async (accountId: string) => {
+      const index = fakeWechatAccounts.findIndex((account) => account.accountId === accountId);
+
+      if (index >= 0) {
+        fakeWechatAccounts.splice(index, 1);
+        return true;
+      }
+
+      return false;
+    },
+    sendMessage: async () => ({ ok: true }),
+    startLogin: async () => ({ status: 'pending' }),
+    submitLoginCode: async () => undefined,
+  };
   const app = createApp({
+    wechatBridge: fakeWechatBridge as never,
     adminActions: {
       validateWatchAccount: async (input) => {
         if (input.sourceType === 'rss') {
@@ -1422,6 +1458,15 @@ async function main(): Promise<void> {
       },
       { channelType: 'bark', kind: 'bark', name: 'Mock Bark', url: webhook.urls.bark },
       { channelType: 'generic_webhook', kind: 'generic', name: 'Mock Generic', url: webhook.urls.generic },
+      {
+        accountId: 'bot-account-1@im.bot',
+        channelType: 'wechat_clawbot',
+        kind: 'wechatBridge',
+        name: 'Mock WeChat Bridge',
+        secret: 'bridge-smoke-secret',
+        target: 'user-1@im.wechat',
+        url: webhook.urls.wechatBridge,
+      },
     ] as const;
     const channelTargetByKind = new Map<string, { id: string; targetKey: string }>();
 
@@ -1434,6 +1479,8 @@ async function main(): Promise<void> {
           enabled: true,
           webhookUrl: definition.url,
           ...('secret' in definition ? { secret: definition.secret } : {}),
+          ...('target' in definition ? { target: definition.target } : {}),
+          ...('accountId' in definition ? { accountId: definition.accountId } : {}),
         },
         url: '/admin/api/settings/delivery-targets',
       });
@@ -1448,10 +1495,10 @@ async function main(): Promise<void> {
         createdTarget.data.deliveryTarget.channelType === definition.channelType,
         `channel type mismatch for ${definition.kind}`,
       );
-      if (definition.kind === 'dingtalk') {
+      if (definition.kind === 'dingtalk' || definition.kind === 'wechatBridge') {
         assert(
           createdTarget.data.deliveryTarget.secretConfigured,
-          'dingtalk target should report secretConfigured',
+          `${definition.kind} target should report secretConfigured`,
         );
       }
       channelTargetByKind.set(definition.kind, {
@@ -1556,6 +1603,61 @@ async function main(): Promise<void> {
     );
     checks.push({ name: '4 渠道测试发送：payload 正确且钉钉加签可校验' });
 
+    const wechatBridgeRequest = webhook.requests.find((entry) =>
+      entry.url.startsWith('/mock-wechat-bridge'),
+    );
+    const wechatBridgeBody = wechatBridgeRequest?.body as {
+      accountId?: string;
+      text?: string;
+      title?: string;
+      to?: string;
+      url?: string;
+    };
+    assert(
+      wechatBridgeRequest?.headers.authorization === 'Bearer bridge-smoke-secret' &&
+        wechatBridgeBody?.accountId === 'bot-account-1@im.bot' &&
+        wechatBridgeBody?.to === 'user-1@im.wechat' &&
+        wechatBridgeBody?.title === undefined &&
+        typeof wechatBridgeBody.text === 'string' &&
+        typeof wechatBridgeBody.url === 'string',
+      `wechat bridge payload mismatch: ${JSON.stringify({ body: wechatBridgeBody, headers: wechatBridgeRequest?.headers.authorization })}`,
+    );
+    checks.push({ name: '微信桥通道：payload 与 Bearer 鉴权正确' });
+
+    const formatter = createV1TextMessageFormatter();
+    const titledMessage = formatter.format({
+      authorUsername: 'OpenAI News',
+      permalinkUrl: 'https://openai.com/index/cooley-gopublic',
+      postedAt: '2026-09-17T12:00:00.000Z',
+      textContent:
+        'How Cooley is accelerating IPO work with ChatGPT\n\nCooley built GO Public with ChatGPT Work to bring intelligence to the IPO process.',
+      title: 'How Cooley is accelerating IPO work with ChatGPT',
+    });
+    assert(
+      titledMessage.text.includes('📌 标题：How Cooley is accelerating IPO work with ChatGPT') &&
+        titledMessage.text.includes(
+          '📝 内容：Cooley built GO Public with ChatGPT Work to bring intelligence to the IPO process.',
+        ) &&
+        titledMessage.text.includes('🔗 原文链接：https://openai.com/index/cooley-gopublic') &&
+        !titledMessage.text.includes('📝 内容：How Cooley') &&
+        titledMessage.title.includes('How Cooley is accelerating IPO work'),
+      `formatter titled output mismatch: ${titledMessage.text}`,
+    );
+
+    const untitledMessage = formatter.format({
+      authorUsername: 'mock_ai',
+      permalinkUrl: 'https://x.com/mock_ai/status/1000000000000000001',
+      postedAt: '2026-09-17T12:00:00.000Z',
+      textContent: 'hello from X',
+    });
+    assert(
+      !untitledMessage.text.includes('📌 标题') &&
+        untitledMessage.text.includes('📝 内容：hello from X') &&
+        untitledMessage.text.includes('🆔 帖子 ID：1000000000000000001'),
+      `formatter untitled output mismatch: ${untitledMessage.text}`,
+    );
+    checks.push({ name: '推送消息模板：标题/内容分行且 X 帖无标题行' });
+
     const barkTargetKey = channelTargetByKind.get('bark')?.targetKey ?? '';
     const routingRulesResponse = await app.inject({
       method: 'PUT',
@@ -1641,6 +1743,59 @@ async function main(): Promise<void> {
       url: '/admin/api/subscription-rules',
     });
     checks.push({ name: '分渠道规则：未命中不投递并正确清理规则' });
+
+    const wechatStatusResponse = await app.inject({ method: 'GET', url: '/admin/api/wechat/status' });
+    assert(wechatStatusResponse.statusCode === 200, 'wechat status should return 200');
+    const wechatTargetA = await storage.deliveryTargets.findByTargetKey('wechat:wechat-a@im.bot');
+    const wechatTargetB = await storage.deliveryTargets.findByTargetKey('wechat:wechat-b@im.bot');
+    assert(
+      wechatTargetA !== null &&
+        wechatTargetA.enabled &&
+        wechatTargetA.config.accountId === 'wechat-a@im.bot' &&
+        wechatTargetA.config.target === 'user-a@im.wechat' &&
+        wechatTargetB !== null &&
+        wechatTargetB.enabled,
+      `wechat auto targets mismatch: ${JSON.stringify({ a: wechatTargetA?.config, b: wechatTargetB?.config })}`,
+    );
+    checks.push({ name: '绑定微信号后自动创建投递通道（默认开启）' });
+
+    await app.inject({
+      method: 'PATCH',
+      payload: { enabled: false },
+      url: `/admin/api/settings/delivery-targets/${wechatTargetB?.id}/enabled`,
+    });
+    await app.inject({ method: 'GET', url: '/admin/api/wechat/status' });
+    const wechatTargetBAfterToggle = await storage.deliveryTargets.findByTargetKey(
+      'wechat:wechat-b@im.bot',
+    );
+    assert(
+      wechatTargetBAfterToggle !== null && !wechatTargetBAfterToggle.enabled,
+      'sync must preserve per-account disabled state',
+    );
+    checks.push({ name: '单账号可关闭推送且同步不会覆盖' });
+
+    await app.inject({ method: 'DELETE', url: '/admin/api/wechat/accounts/wechat-b@im.bot' });
+    const wechatTargetBAfterDelete = await storage.deliveryTargets.findByTargetKey(
+      'wechat:wechat-b@im.bot',
+    );
+    const wechatTargetAAfterDelete = await storage.deliveryTargets.findByTargetKey(
+      'wechat:wechat-a@im.bot',
+    );
+    assert(
+      wechatTargetBAfterDelete === null && wechatTargetAAfterDelete !== null,
+      'removing a wechat account should remove its channel only',
+    );
+    checks.push({ name: '删除微信号同步移除其投递通道' });
+
+    if (wechatTargetAAfterDelete !== null) {
+      await storage.deliveryTargets.delete(wechatTargetAAfterDelete.id);
+    }
+    fakeWechatAccounts.push({
+      accountId: 'wechat-b@im.bot',
+      baseUrl: 'https://ilinkai.weixin.qq.com',
+      tokenMasked: 'cccc***dddd',
+      userId: 'user-b@im.wechat',
+    });
 
     const feedXmlResponse = await app.inject({ method: 'GET', url: '/feed.xml' });
     assert(feedXmlResponse.statusCode === 200, `feed.xml returned ${feedXmlResponse.statusCode}`);
@@ -2397,7 +2552,14 @@ interface MockWebhookRequest {
 async function startMockWebhook(): Promise<{
   close(): Promise<void>;
   requests: MockWebhookRequest[];
-  urls: { bark: string; dingtalk: string; feishu: string; generic: string; wecom: string };
+  urls: {
+    bark: string;
+    dingtalk: string;
+    feishu: string;
+    generic: string;
+    wechatBridge: string;
+    wecom: string;
+  };
 }> {
   const requests: MockWebhookRequest[] = [];
   const server = http.createServer(async (request, response) => {
@@ -2418,6 +2580,14 @@ async function startMockWebhook(): Promise<{
       headers: request.headers,
       url: requestUrl,
     });
+
+    if (requestUrl.startsWith('/mock-wechat-bridge')) {
+      sendJson(response, {
+        messageId: 'mock-bridge-1',
+        ok: true,
+      });
+      return;
+    }
 
     if (requestUrl.startsWith('/mock-wecom') || requestUrl.startsWith('/mock-dingtalk')) {
       sendJson(response, {
@@ -2455,6 +2625,7 @@ async function startMockWebhook(): Promise<{
       dingtalk: `${baseUrl}/mock-dingtalk`,
       feishu: `${baseUrl}/mock-feishu-webhook-secret`,
       generic: `${baseUrl}/mock-generic`,
+      wechatBridge: `${baseUrl}/mock-wechat-bridge`,
       wecom: `${baseUrl}/mock-wecom`,
     },
   };

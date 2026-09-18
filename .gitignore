@@ -9,3 +9,5 @@ data/
 dist/
 dist-web/
 node_modules/
+wechat-bridge/.state
+wechat-bridge/node_modules/

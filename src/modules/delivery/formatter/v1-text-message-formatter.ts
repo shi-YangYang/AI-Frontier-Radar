@@ -4,6 +4,7 @@ export interface V1TextMessageFormatterInput {
   permalinkUrl: string;
   postedAt: string;
   textContent: string;
+  title?: string | null;
 }
 
 export interface V1TextMessageFormatterOptions {
@@ -30,32 +31,38 @@ export class V1TextMessageFormatter {
 
   public format(input: V1TextMessageFormatterInput): FormattedTextMessage {
     const normalizedContent = normalizePostBody(input.textContent);
-    const truncationResult = truncateText(normalizedContent, this.bodyMaxLength);
+    const rawTitle = normalizeOptionalDisplayName(input.title) ?? '';
+    const contentWithoutTitle =
+      rawTitle.length > 0 && normalizedContent.startsWith(rawTitle)
+        ? normalizedContent.slice(rawTitle.length).replace(/^[\s:：\-—]+/u, '')
+        : normalizedContent;
+    const hasBody = contentWithoutTitle.trim().length > 0;
+    const truncationResult = truncateText(
+      hasBody ? contentWithoutTitle : EMPTY_CONTENT_PLACEHOLDER,
+      this.bodyMaxLength,
+    );
     const normalizedPermalink = input.permalinkUrl.trim();
     const postId = extractPostId(normalizedPermalink);
     const authorLabel = formatAuthorLabel(input.authorUsername, input.authorDisplayName);
-    const titleSnippet = truncateText(
-      truncationResult.value.split('\n')[0]?.trim() ?? '',
-      TITLE_SNIPPET_MAX_LENGTH,
-    ).value;
+    const channelTitleSource =
+      rawTitle.length > 0 ? rawTitle : truncationResult.value.split('\n')[0]?.trim() ?? '';
+    const channelTitle = truncateText(channelTitleSource, TITLE_SNIPPET_MAX_LENGTH).value;
 
     return {
       text: [
         '🚀【AI前沿消息】发现新帖',
-        '',
         `👤 作者：${authorLabel}`,
         `🕘 北京时间：${formatChinaTimestamp(input.postedAt)}`,
         `🌐 UTC 时间：${formatUtcTimestamp(input.postedAt)}`,
         postId === undefined ? undefined : `🆔 帖子 ID：${postId}`,
-        '',
-        '📝 内容：',
-        truncationResult.value,
-        truncationResult.truncated ? `（内容已截断，最多显示 ${this.bodyMaxLength} 字符）` : undefined,
-        '',
-        '🔗 原文链接：',
-        normalizedPermalink,
+        rawTitle.length === 0 ? undefined : `📌 标题：${rawTitle}`,
+        hasBody || rawTitle.length === 0 ? `📝 内容：${truncationResult.value}` : undefined,
+        truncationResult.truncated
+          ? `（内容已截断，最多显示 ${this.bodyMaxLength} 字符）`
+          : undefined,
+        `🔗 原文链接：${normalizedPermalink}`,
       ].filter((line): line is string => line !== undefined).join('\n'),
-      title: `【AI前沿消息】${authorLabel}：${titleSnippet}`,
+      title: `【AI前沿消息】${authorLabel}：${channelTitle}`,
       truncated: truncationResult.truncated,
       type: 'text',
     };

@@ -7,6 +7,7 @@ export {
   createFeishuWebhookClient,
   createFeishuWebhookSender,
   createGenericWebhookSender,
+  createWechatBridgeSender,
   createWecomWebhookSender,
   FeishuWebhookClient,
 } from './channel/index';

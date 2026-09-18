@@ -345,6 +345,7 @@ function toTrendingPost(
     postedAt: fetchedAt,
     rawPayload: repo,
     textContent: sections.join('\n\n'),
+    title: repo.repoFullName,
     xPostId: createStablePostId(fetchedAt, repo.repoFullName),
   };
 }
