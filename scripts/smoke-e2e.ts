@@ -2395,7 +2395,12 @@ async function main(): Promise<void> {
       await rawInject({ headers: { cookie: userCookie }, method: 'GET', url: '/user/api/wechat' })
     ).json() as {
       data: {
-        accounts: Array<{ accountId: string; sessionActive: boolean; sourceIds: string[] }>;
+        accounts: Array<{
+          accountId: string;
+          sendLimit: number;
+          sessionActive: boolean;
+          sourceIds: string[];
+        }>;
         sources: Array<{ id: string }>;
       };
     };
@@ -2404,7 +2409,8 @@ async function main(): Promise<void> {
         (account) =>
           account.accountId === boundAccountId &&
           account.sourceIds.includes(seededAccount.id) &&
-          account.sessionActive === true,
+          account.sessionActive === true &&
+          account.sendLimit === 10,
       ),
       `binding API should report sessionActive, got ${JSON.stringify(bindingAfterFilter.data.accounts)}`,
     );
@@ -2423,6 +2429,50 @@ async function main(): Promise<void> {
       `other user setting sources should return 404, got ${overreachSourcesResponse.statusCode}`,
     );
     checks.push({ name: '绑定端保存接收源并拒绝越权修改' });
+
+    await prisma.xPostRaw.create({
+      data: {
+        authorUserId: 'user-posts-probe',
+        authorUsername: 'posts-probe',
+        createdAt: new Date().toISOString(),
+        detectedAt: new Date().toISOString(),
+        id: 'posts-probe-1',
+        isReply: false,
+        isRepost: false,
+        permalinkUrl: 'https://example.com/posts-probe-1',
+        postedAt: new Date().toISOString(),
+        rawPayloadJson: '{}',
+        textContent: '用户端消息列表探针',
+        title: '探针标题',
+        xPostId: '9000000000000000001',
+      },
+    });
+    const userPostsResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: '/user/api/posts?page=1&pageSize=5',
+    });
+    assert(
+      userPostsResponse.statusCode === 200,
+      `user posts returned ${userPostsResponse.statusCode}`,
+    );
+    const userPosts = userPostsResponse.json() as {
+      data: {
+        pagination: { total: number };
+        posts: Array<{ permalinkUrl: string; textContent: string; title: string | null }>;
+      };
+    };
+    assert(
+      userPosts.data.pagination.total >= 1 &&
+        userPosts.data.posts.some((post) => post.textContent === '用户端消息列表探针'),
+      `user posts should return stored posts, got ${JSON.stringify(userPosts.data)}`,
+    );
+    const unauthorizedPostsResponse = await rawInject({ method: 'GET', url: '/user/api/posts' });
+    assert(
+      unauthorizedPostsResponse.statusCode === 401,
+      'user posts should require a session',
+    );
+    checks.push({ name: '用户端可浏览消息列表（/user/api/posts，含鉴权）' });
 
     const secondBindResponse = await rawInject({
       headers: { cookie: userCookie },

@@ -1155,6 +1155,32 @@ export async function resetUserPassword(id: string, password: string): Promise<b
   return data.updated;
 }
 
+export interface UserPostItem {
+  authorDisplayName: string | null;
+  authorUsername: string;
+  detectedAt: string;
+  id: string;
+  isReply: boolean;
+  isRepost: boolean;
+  permalinkUrl: string;
+  postedAt: string;
+  sourceDisplayName: string | null;
+  sourceType: string;
+  textContent: string;
+  title: string | null;
+}
+
+export interface UserPostsPage {
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+  posts: UserPostItem[];
+}
+
+export async function listMyPosts(page = 1, pageSize = 20): Promise<UserPostsPage> {
+  return requestJson<UserPostsPage>(
+    `/user/api/posts?page=${encodeURIComponent(String(page))}&pageSize=${encodeURIComponent(String(pageSize))}`,
+  );
+}
+
 export interface MyWechatQuietHours {
   enabled: boolean;
   endHour: number;
@@ -1166,6 +1192,8 @@ export interface MyWechatAccount {
   displayName: string;
   enabled: boolean;
   quietHours: MyWechatQuietHours | null;
+  sendCount: number;
+  sendLimit: number;
   sessionActive: boolean;
   sourceIds: string[];
   userId?: string;
