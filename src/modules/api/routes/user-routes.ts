@@ -9,6 +9,7 @@ import {
   startUserWechatBind,
   submitUserWechatLoginCode,
   unbindUserWechatAccount,
+  updateUserWechatQuietHours,
   updateUserWechatSources,
   type UserControllerOptions,
 } from '../controllers/user-controller';
@@ -49,6 +50,18 @@ export function registerUserRoutes(app: FastifyInstance, options: RegisterUserRo
 
     return sendUserResponse(reply, () =>
       submitUserWechatLoginCode(user, request.body, options.userControllerOptions),
+    );
+  });
+
+  app.put('/user/api/wechat/accounts/:accountId/quiet-hours', async (request, reply) => {
+    const user = await requireSession(request, reply, options.auth);
+
+    if (user === null) {
+      return reply;
+    }
+
+    return sendUserResponse(reply, () =>
+      updateUserWechatQuietHours(user, request.params, request.body, options.userControllerOptions),
     );
   });
 

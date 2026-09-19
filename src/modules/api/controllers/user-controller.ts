@@ -102,6 +102,7 @@ export async function getUserWechatBinding(
       accountId: string;
       displayName: string;
       enabled: boolean;
+      quietHours: { enabled: boolean; endHour: number; startHour: number } | null;
       sourceIds: string[];
       userId?: string;
     }>;
@@ -132,6 +133,7 @@ export async function getUserWechatBinding(
         accountId: target.config.accountId ?? '',
         displayName: target.displayName,
         enabled: target.enabled,
+        quietHours: target.config.quietHours ?? null,
         sourceIds: target.config.sourceIds ?? [],
         ...(target.config.target === undefined ? {} : { userId: target.config.target }),
       })),
@@ -295,6 +297,50 @@ export async function cancelUserWechatBind(
   return { ok: true, data: { cancelled: isPending } };
 }
 
+export async function updateUserWechatQuietHours(
+  user: User,
+  params: unknown,
+  body: unknown,
+  options: UserControllerOptions,
+): Promise<{
+  ok: true;
+  data: { quietHours: { enabled: boolean; endHour: number; startHour: number } | null };
+}> {
+  if (!isRecord(params) || typeof params.accountId !== 'string' || params.accountId.trim().length === 0) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'accountId 无效。');
+  }
+
+  if (!isRecord(body) || typeof body.enabled !== 'boolean') {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'enabled 必须是布尔值。');
+  }
+
+  const accountId = params.accountId.trim();
+  const target = await findOwnWechatTarget(options.storage, user, accountId);
+
+  if (target === null) {
+    throw new AdminApiError(404, 'NOT_FOUND', '未找到属于你的微信绑定。');
+  }
+
+  const nextConfig = { ...target.config };
+
+  if (body.enabled) {
+    const startHour = readHour(body.startHour, 23);
+    const endHour = readHour(body.endHour, 8);
+
+    if (startHour === endHour) {
+      throw new AdminApiError(400, 'INVALID_REQUEST', '静默开始与结束时间不能相同。');
+    }
+
+    nextConfig.quietHours = { enabled: true, endHour, startHour };
+  } else {
+    delete nextConfig.quietHours;
+  }
+
+  await options.storage.deliveryTargets.update(target.id, { config: nextConfig });
+
+  return { ok: true, data: { quietHours: nextConfig.quietHours ?? null } };
+}
+
 export async function unbindUserWechatAccount(
   user: User,
   params: unknown,
@@ -412,4 +458,12 @@ function mapUserError(error: unknown, fallback: string): Error {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function readHour(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 23) {
+    return fallback;
+  }
+
+  return value;
 }

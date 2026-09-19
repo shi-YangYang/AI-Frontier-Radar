@@ -237,6 +237,35 @@ export class DeliveryEventRepository {
     return deliveryEvents.map(mapDeliveryEvent);
   }
 
+  public async listPendingByTargetKey(targetKey: string): Promise<DeliveryEvent[]> {
+    const deliveryEvents = await this.prisma.deliveryEvent.findMany({
+      orderBy: [{ createdAt: 'asc' }],
+      where: {
+        status: 'pending',
+        targetKey,
+      },
+    });
+
+    return deliveryEvents.map(mapDeliveryEvent);
+  }
+
+  public async releaseToPending(id: string): Promise<boolean> {
+    const result = await this.prisma.deliveryEvent.updateMany({
+      data: {
+        lockedAt: null,
+        nextRetryAt: null,
+        status: 'pending',
+        updatedAt: createTimestamp(),
+      },
+      where: {
+        id,
+        status: 'sending',
+      },
+    });
+
+    return result.count > 0;
+  }
+
   public async listRecent(limit = 20): Promise<DeliveryEvent[]> {
     const deliveryEvents = await this.prisma.deliveryEvent.findMany({
       orderBy: { createdAt: 'desc' },

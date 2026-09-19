@@ -1155,10 +1155,17 @@ export async function resetUserPassword(id: string, password: string): Promise<b
   return data.updated;
 }
 
+export interface MyWechatQuietHours {
+  enabled: boolean;
+  endHour: number;
+  startHour: number;
+}
+
 export interface MyWechatAccount {
   accountId: string;
   displayName: string;
   enabled: boolean;
+  quietHours: MyWechatQuietHours | null;
   sourceIds: string[];
   userId?: string;
 }
@@ -1200,6 +1207,21 @@ export async function submitMyWechatLoginCode(code: string): Promise<void> {
     body: JSON.stringify({ code }),
     method: 'POST',
   });
+}
+
+export async function updateMyWechatQuietHours(
+  accountId: string,
+  input: { enabled: boolean; endHour: number; startHour: number },
+): Promise<MyWechatQuietHours | null> {
+  const data = await requestJson<{ quietHours: MyWechatQuietHours | null }>(
+    `/user/api/wechat/accounts/${encodeURIComponent(accountId)}/quiet-hours`,
+    {
+      body: JSON.stringify(input),
+      method: 'PUT',
+    },
+  );
+
+  return data.quietHours;
 }
 
 export async function updateMyWechatSources(

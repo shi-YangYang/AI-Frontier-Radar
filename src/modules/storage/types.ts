@@ -122,8 +122,15 @@ export interface CreateXPostRawInput {
   detectedAt?: string;
 }
 
+export interface DeliveryTargetQuietHours {
+  enabled: boolean;
+  endHour: number;
+  startHour: number;
+}
+
 export interface DeliveryTargetConfig {
   accountId?: string;
+  quietHours?: DeliveryTargetQuietHours;
   secret?: string;
   sourceIds?: string[];
   target?: string;

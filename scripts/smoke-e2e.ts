@@ -11,7 +11,7 @@ import { createLogger } from '../src/lib/logger';
 import { createApp } from '../src/app/create-app';
 import { createAuthService } from '../src/modules/auth';
 import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createAi2BlogSourceProvider, createAnthropicNewsSourceProvider, createGithubTrendingSourceProvider, createHfDailyPapersSourceProvider, createMoonshotBlogSourceProvider, createRssSourceProvider, createSourceProviderRegistry, createSubscriptionRuleMatcher, createXSourceProvider, normalizeMetaBlogRawEntries, parseAi2BlogHtml, parseMoonshotBlogHtml, parseXaiNewsHtml, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
-import { createV1TextMessageFormatter, runDeliveryWorkerJob } from '../src/modules/delivery';
+import { createV1TextMessageFormatter, isWithinQuietHours, runDeliveryWorkerJob } from '../src/modules/delivery';
 import { createRuntimeScheduler, createRuntimeSourceProviders } from '../src/modules/scheduler';
 import { applySourceGroup, createPrismaClient, createStorage, getSourceGroupStatuses } from '../src/modules/storage';
 import { SOURCE_GROUPS } from '../src/config/source-groups';
@@ -2496,6 +2496,128 @@ async function main(): Promise<void> {
     );
     checks.push({ name: '源过滤生效：未选源不投递、其它绑定不受影响' });
 
+    const quietReference = new Date('2026-04-24T18:00:00.000Z');
+    const quietWindow = findQuietWindow(quietReference, true);
+    const openWindow = findQuietWindow(quietReference, false);
+    const wechatTargetForQuiet = await storage.deliveryTargets.findByTargetKey(wechatTargetKey);
+    assert(wechatTargetForQuiet !== null, 'wechat target should exist for quiet-hour tests');
+    await storage.deliveryTargets.update(wechatTargetForQuiet.id, {
+      webhookUrl: webhook.urls.wechatBridge,
+    });
+
+    const quietOnResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'PUT',
+      payload: { enabled: true, ...quietWindow },
+      url: `/user/api/wechat/accounts/${encodeURIComponent(boundAccountId)}/quiet-hours`,
+    });
+    assert(
+      quietOnResponse.statusCode === 200,
+      `enabling quiet hours returned ${quietOnResponse.statusCode}`,
+    );
+
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T04:00:00.000Z',
+        id: '1000000010000000002',
+        text: 'Quiet hours post one',
+      },
+      {
+        created_at: '2026-04-24T04:10:00.000Z',
+        id: '1000000010000000003',
+        text: 'Quiet hours post two',
+      },
+    ]);
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const quietRequestsBefore = webhook.requests.filter((entry) =>
+      entry.url.startsWith('/mock-wechat-bridge'),
+    ).length;
+    await runDeliveryWorkerJob({ logger, now: () => quietReference, storage });
+    const quietRequestsAfter = webhook.requests.filter((entry) =>
+      entry.url.startsWith('/mock-wechat-bridge'),
+    ).length;
+    const quietEventOne = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000002',
+      wechatTargetKey,
+    );
+    assert(
+      quietRequestsAfter === quietRequestsBefore &&
+        quietEventOne !== null &&
+        quietEventOne.status === 'pending',
+      `quiet hours should hold the event pending without sending, got ${JSON.stringify({ requests: quietRequestsAfter - quietRequestsBefore, status: quietEventOne?.status })}`,
+    );
+    checks.push({ name: '夜间静默期间新帖暂缓、不产生推送' });
+
+    const quietOffResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'PUT',
+      payload: { enabled: true, ...openWindow },
+      url: `/user/api/wechat/accounts/${encodeURIComponent(boundAccountId)}/quiet-hours`,
+    });
+    assert(
+      quietOffResponse.statusCode === 200,
+      `closing quiet window returned ${quietOffResponse.statusCode}`,
+    );
+    await runDeliveryWorkerJob({ logger, now: () => quietReference, storage });
+    const digestRequests = webhook.requests.filter((entry) =>
+      entry.url.startsWith('/mock-wechat-bridge'),
+    );
+    const digestRequest = digestRequests.at(-1);
+    const digestText = JSON.stringify(digestRequest?.body ?? {});
+    const quietEventOneAfterFlush = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000002',
+      wechatTargetKey,
+    );
+    const quietEventTwoAfterFlush = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000003',
+      wechatTargetKey,
+    );
+    assert(
+      digestRequests.length === quietRequestsBefore + 1 &&
+        digestText.includes('Quiet hours post one') &&
+        digestText.includes('Quiet hours post two') &&
+        quietEventOneAfterFlush?.status === 'sent' &&
+        quietEventTwoAfterFlush?.status === 'sent',
+      `digest should combine both posts into one push, got ${JSON.stringify({ total: digestRequests.length, eventOne: quietEventOneAfterFlush?.status, eventTwo: quietEventTwoAfterFlush?.status })}`,
+    );
+    checks.push({ name: '静默结束后合并为一条汇总推送' });
+
+    const failureTarget = await storage.deliveryTargets.findByTargetKey(wechatTargetKey);
+    assert(failureTarget !== null, 'wechat target should exist for digest failure test');
+    await storage.deliveryTargets.update(failureTarget.id, {
+      webhookUrl: `${webhook.url}/not-mock-fail`,
+    });
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T05:00:00.000Z',
+        id: '1000000010000000004',
+        text: 'Digest failure post one',
+      },
+      {
+        created_at: '2026-04-24T05:10:00.000Z',
+        id: '1000000010000000005',
+        text: 'Digest failure post two',
+      },
+    ]);
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    await runDeliveryWorkerJob({ logger, now: () => quietReference, storage });
+    const failureEventOne = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000004',
+      wechatTargetKey,
+    );
+    const failureEventTwo = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000005',
+      wechatTargetKey,
+    );
+    assert(
+      failureEventOne !== null &&
+        failureEventOne.status !== 'sending' &&
+        failureEventTwo !== null &&
+        failureEventTwo.status !== 'sending',
+      `failed digest must not leave events stuck in sending, got ${JSON.stringify({ one: failureEventOne?.status, two: failureEventTwo?.status })}`,
+    );
+    checks.push({ name: '汇总发送失败不会把其余事件卡在 sending' });
+
     const selfDeleteResponse = await app.inject({
       method: 'DELETE',
       url: `/admin/api/users/${mePayload.data.user.id}`,
@@ -3107,6 +3229,25 @@ function readJsonBody(request: IncomingMessage): Promise<unknown> {
     });
     request.on('error', reject);
   });
+}
+
+function findQuietWindow(
+  reference: Date,
+  inside: boolean,
+): { endHour: number; startHour: number } {
+  for (let startHour = 0; startHour < 24; startHour += 1) {
+    for (let endHour = 0; endHour < 24; endHour += 1) {
+      if (startHour === endHour) {
+        continue;
+      }
+
+      if (isWithinQuietHours(reference, { endHour, startHour }) === inside) {
+        return { endHour, startHour };
+      }
+    }
+  }
+
+  throw new Error('unable to find a quiet-hours window for the reference date');
 }
 
 function readSessionCookie(setCookieHeader: string | string[] | undefined): string {

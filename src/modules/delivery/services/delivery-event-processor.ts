@@ -1,8 +1,10 @@
 import type { AppLogger } from '../../../lib/logger';
 import type { DeliveryEventRepository, DeliveryTargetRepository, XPostRepository } from '../../storage';
-import type { DeliveryChannelRegistry, DeliveryChannelSendResult } from '../channel';
+import type { DeliveryEvent, DeliveryTarget } from '../../storage/types';
+import type { DeliveryChannelRegistry, DeliveryChannelSender, DeliveryChannelSendResult } from '../channel';
 import type { V1TextMessageFormatter } from '../formatter';
 import { DeliveryRetryPolicy, createDeliveryRetryPolicy } from './delivery-retry-policy';
+import { isWithinQuietHours, resolveQuietHoursWindow } from './quiet-hours';
 
 export type DeliveryEventProcessStatus =
   | 'dead'
@@ -21,6 +23,7 @@ export interface DeliveryEventProcessorOptions {
   channels: DeliveryChannelRegistry;
   formatter: V1TextMessageFormatter;
   logger?: AppLogger;
+  now?: () => Date;
   retryPolicy?: DeliveryRetryPolicy;
   storage: {
     deliveryEvents: DeliveryEventRepository;
@@ -32,14 +35,16 @@ export interface DeliveryEventProcessorOptions {
 const LAST_ERROR_MAX_LENGTH = 2_000;
 
 export class DeliveryEventProcessor {
+  private readonly now: () => Date;
   private readonly retryPolicy: DeliveryRetryPolicy;
 
   public constructor(private readonly options: DeliveryEventProcessorOptions) {
+    this.now = options.now ?? (() => new Date());
     this.retryPolicy = options.retryPolicy ?? createDeliveryRetryPolicy();
   }
 
   public async processEvent(eventId: string): Promise<DeliveryEventProcessResult> {
-    const now = new Date();
+    const now = this.now();
     const claimedEvent = await this.options.storage.deliveryEvents.claimDueForSending(
       eventId,
       now.toISOString(),
@@ -82,6 +87,30 @@ export class DeliveryEventProcessor {
           message: `Unsupported delivery channel type ${target.channelType}.`,
           retryable: false,
         });
+      }
+
+      const quietWindow = resolveQuietHoursWindow(target.config);
+
+      if (quietWindow !== null) {
+        if (isWithinQuietHours(now, quietWindow)) {
+          await this.options.storage.deliveryEvents.releaseToPending(claimedEvent.id);
+          this.options.logger?.info?.(
+            {
+              deliveryEventId: claimedEvent.id,
+              quietHours: quietWindow,
+              targetKey: target.targetKey,
+            },
+            '夜间静默：新帖暂缓投递，等待次日汇总',
+          );
+
+          return { eventId, reason: 'quiet-hours', status: 'skipped' };
+        }
+
+        const digestResult = await this.trySendDigest(claimedEvent, target, channelSender, now);
+
+        if (digestResult !== null) {
+          return digestResult;
+        }
       }
 
       const message = this.options.formatter.format({
@@ -137,6 +166,106 @@ export class DeliveryEventProcessor {
         retryable: true,
       });
     }
+  }
+
+  private async trySendDigest(
+    claimedEvent: DeliveryEvent,
+    target: DeliveryTarget,
+    channelSender: DeliveryChannelSender,
+    now: Date,
+  ): Promise<DeliveryEventProcessResult | null> {
+    const pendingEvents = await this.options.storage.deliveryEvents.listPendingByTargetKey(
+      target.targetKey,
+    );
+
+    if (pendingEvents.length === 0) {
+      return null;
+    }
+
+    const claimedOthers: DeliveryEvent[] = [];
+
+    for (const event of pendingEvents) {
+      const claimed = await this.options.storage.deliveryEvents.claimDueForSending(
+        event.id,
+        now.toISOString(),
+      );
+
+      if (claimed !== null) {
+        claimedOthers.push(claimed);
+      }
+    }
+
+    if (claimedOthers.length === 0) {
+      return null;
+    }
+
+    const events = [claimedEvent, ...claimedOthers];
+    const posts: Array<Parameters<V1TextMessageFormatter['formatDigest']>[0][number]> = [];
+
+    for (const event of events) {
+      const post = await this.options.storage.xPosts.findByXPostId(event.xPostId);
+
+      if (post !== null) {
+        posts.push({
+          authorUsername: post.authorUsername,
+          permalinkUrl: post.permalinkUrl,
+          postedAt: post.postedAt,
+          textContent: post.textContent,
+          title: post.title,
+        });
+      }
+    }
+
+    if (posts.length === 0) {
+      await this.options.storage.deliveryEvents.releaseToPending(claimedEvent.id);
+
+      for (const event of claimedOthers) {
+        await this.options.storage.deliveryEvents.releaseToPending(event.id);
+      }
+
+      return null;
+    }
+
+    const digest = this.options.formatter.formatDigest(posts);
+    const sendResult = await channelSender.send({
+      config: target.config,
+      message: {
+        author: 'AI 前沿雷达',
+        postedAt: now.toISOString(),
+        text: digest.text,
+        title: digest.title,
+        url: posts[0]?.permalinkUrl ?? '',
+      },
+      targetKey: target.targetKey,
+      webhookUrl: target.webhookUrl,
+    });
+
+    if (!sendResult.ok) {
+      for (const event of claimedOthers) {
+        await this.options.storage.deliveryEvents.releaseToPending(event.id);
+      }
+
+      return this.recordFailure(claimedEvent, {
+        message: formatSendFailure(sendResult),
+        retryable: sendResult.error.retryable,
+      });
+    }
+
+    const sentAt = new Date().toISOString();
+
+    for (const event of events) {
+      await this.options.storage.deliveryEvents.updateSendingSuccess(event.id, {
+        attemptCount: event.attemptCount + 1,
+        sentAt,
+      });
+    }
+
+    this.options.logger?.info?.(
+      { digestCount: posts.length, targetKey: target.targetKey },
+      '夜间静默汇总投递完成',
+    );
+
+    return { eventId: claimedEvent.id, reason: `digest:${posts.length}`, status: 'sent' };
   }
 
   private async recordFailure(
