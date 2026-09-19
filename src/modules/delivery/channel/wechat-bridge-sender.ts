@@ -60,17 +60,20 @@ export class WechatBridgeSender implements DeliveryChannelSender {
       if (!response.ok || parsedBody?.ok === false) {
         const providerMessage =
           parsedBody?.error ?? (rawBody.length > 0 ? rawBody.slice(0, 300) : `HTTP ${response.status}`);
+        const isSessionExpired = /prepare failed|尚未登录|context_token|ret=-2/iu.test(providerMessage);
 
         return createChannelFailure({
           channel: this.channelType,
-          code: 'WECHAT_BRIDGE_HTTP_ERROR',
+          code: isSessionExpired ? 'WECHAT_SESSION_EXPIRED' : 'WECHAT_BRIDGE_HTTP_ERROR',
           diagnostics: {
             bodySnippet: rawBody.slice(0, 500),
             endpoint: input.webhookUrl,
             httpStatusCode: response.status,
           },
-          message: `微信桥返回失败：${providerMessage}`,
-          retryable: response.status >= 500,
+          message: isSessionExpired
+            ? `微信会话已过期（${providerMessage}）。请让该微信号给 ClawBot 发送任意消息后重试。`
+            : `微信桥返回失败：${providerMessage}`,
+          retryable: isSessionExpired ? false : response.status >= 500,
           targetKey: input.targetKey,
         });
       }

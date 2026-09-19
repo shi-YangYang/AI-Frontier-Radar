@@ -2921,6 +2921,16 @@ tr:last-child td {
   white-space: nowrap;
 }
 
+.me-session-warning {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius);
+  color: var(--warn);
+  font-size: 13px;
+  margin: 14px 0 0;
+  padding: 10px 12px;
+}
+
 .me-qr {
   align-items: center;
   border-top: 1px solid var(--border);

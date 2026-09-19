@@ -27,6 +27,42 @@ function fail(message, code = 1) {
   throw error;
 }
 
+function resolveContextTokensPath(accountId) {
+  return path.join(stateDir, 'openclaw-weixin', 'accounts', `${accountId}.context-tokens.json`);
+}
+
+function readContextTokens(accountId) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resolveContextTokensPath(accountId), 'utf-8'));
+
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveContextToken(accountId, userId, token) {
+  if (typeof token !== 'string' || token.length === 0) {
+    return;
+  }
+
+  const tokens = readContextTokens(accountId);
+
+  if (tokens[userId] === token) {
+    return;
+  }
+
+  tokens[userId] = token;
+  fs.mkdirSync(path.dirname(resolveContextTokensPath(accountId)), { recursive: true });
+  fs.writeFileSync(resolveContextTokensPath(accountId), JSON.stringify(tokens), 'utf-8');
+}
+
+function resolveContextToken(accountId, userId) {
+  const tokens = readContextTokens(accountId);
+
+  return typeof tokens[userId] === 'string' && tokens[userId].length > 0 ? tokens[userId] : undefined;
+}
+
 function resolveTargetsPath() {
   return path.join(stateDir, 'openclaw-weixin', TARGETS_FILE_NAME);
 }
@@ -62,12 +98,16 @@ function recordTarget(accountId, targetId, message) {
 function listAccounts(plugin) {
   return plugin.accounts.listIndexedWeixinAccountIds().map((accountId) => {
     const account = plugin.accounts.loadWeixinAccount(accountId) ?? {};
+    const userId = account.userId ?? null;
+    const tokens = readContextTokens(accountId);
 
     return {
       accountId,
       baseUrl: account.baseUrl ?? plugin.accounts.DEFAULT_BASE_URL,
+      contextUserIds: Object.keys(tokens),
       tokenMasked: maskToken(account.token),
-      userId: account.userId ?? null,
+      userId,
+      ...(userId === null ? {} : { hasContextToken: typeof tokens[userId] === 'string' }),
     };
   });
 }
@@ -189,10 +229,17 @@ async function sendText(plugin, options) {
     fail('缺少发送目标：请先给 ClawBot 发一条消息登记会话，或使用 --to 指定目标。');
   }
 
+  const contextToken = resolveContextToken(resolved.accountId, target);
+  log(
+    contextToken === undefined
+      ? `发送未携带 context_token（${target}）：请让该微信号给 ClawBot 发一条消息以激活会话`
+      : `发送携带 context_token（${target}）`,
+  );
   const result = await plugin.send.sendMessageWeixin({
     opts: {
       accountId: resolved.accountId,
       baseUrl: resolved.baseUrl,
+      ...(contextToken === undefined ? {} : { contextToken }),
       token: resolved.token,
     },
     text: options.text,
@@ -395,6 +442,7 @@ async function commandServe(plugin, args) {
                   .join(' ')
               : '';
             recordTarget(accountId, fromUserId, { preview });
+            saveContextToken(accountId, fromUserId, message?.context_token);
           }
         }
       } catch (error) {

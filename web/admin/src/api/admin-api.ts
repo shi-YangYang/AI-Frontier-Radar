@@ -1166,6 +1166,7 @@ export interface MyWechatAccount {
   displayName: string;
   enabled: boolean;
   quietHours: MyWechatQuietHours | null;
+  sessionActive: boolean;
   sourceIds: string[];
   userId?: string;
 }

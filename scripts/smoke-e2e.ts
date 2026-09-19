@@ -12,6 +12,7 @@ import { createApp } from '../src/app/create-app';
 import { createAuthService } from '../src/modules/auth';
 import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createAi2BlogSourceProvider, createAnthropicNewsSourceProvider, createGithubTrendingSourceProvider, createHfDailyPapersSourceProvider, createMoonshotBlogSourceProvider, createRssSourceProvider, createSourceProviderRegistry, createSubscriptionRuleMatcher, createXSourceProvider, normalizeMetaBlogRawEntries, parseAi2BlogHtml, parseMoonshotBlogHtml, parseXaiNewsHtml, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
 import { createV1TextMessageFormatter, isWithinQuietHours, runDeliveryWorkerJob } from '../src/modules/delivery';
+import { createWechatBridgeSender } from '../src/modules/delivery/channel';
 import { createRuntimeScheduler, createRuntimeSourceProviders } from '../src/modules/scheduler';
 import { applySourceGroup, createPrismaClient, createStorage, getSourceGroupStatuses } from '../src/modules/storage';
 import { SOURCE_GROUPS } from '../src/config/source-groups';
@@ -122,12 +123,14 @@ async function main(): Promise<void> {
     {
       accountId: 'wechat-a@im.bot',
       baseUrl: 'https://ilinkai.weixin.qq.com',
+      hasContextToken: true,
       tokenMasked: 'aaaa***bbbb',
       userId: 'user-a@im.wechat',
     },
     {
       accountId: 'wechat-b@im.bot',
       baseUrl: 'https://ilinkai.weixin.qq.com',
+      hasContextToken: false,
       tokenMasked: 'cccc***dddd',
       userId: 'user-b@im.wechat',
     },
@@ -2392,15 +2395,18 @@ async function main(): Promise<void> {
       await rawInject({ headers: { cookie: userCookie }, method: 'GET', url: '/user/api/wechat' })
     ).json() as {
       data: {
-        accounts: Array<{ accountId: string; sourceIds: string[] }>;
+        accounts: Array<{ accountId: string; sessionActive: boolean; sourceIds: string[] }>;
         sources: Array<{ id: string }>;
       };
     };
     assert(
       bindingAfterFilter.data.accounts.some(
-        (account) => account.accountId === boundAccountId && account.sourceIds.includes(seededAccount.id),
+        (account) =>
+          account.accountId === boundAccountId &&
+          account.sourceIds.includes(seededAccount.id) &&
+          account.sessionActive === true,
       ),
-      'saved source filter should be returned by the binding API',
+      `binding API should report sessionActive, got ${JSON.stringify(bindingAfterFilter.data.accounts)}`,
     );
     assert(
       bindingAfterFilter.data.sources.some((source) => source.id === seededAccount.id),
@@ -2617,6 +2623,27 @@ async function main(): Promise<void> {
       `failed digest must not leave events stuck in sending, got ${JSON.stringify({ one: failureEventOne?.status, two: failureEventTwo?.status })}`,
     );
     checks.push({ name: '汇总发送失败不会把其余事件卡在 sending' });
+
+    const expiredSender = createWechatBridgeSender({
+      fetchImplementation: async () =>
+        new Response(JSON.stringify({ error: 'sendMessage ret=-2 errmsg=prepare failed', ok: false }), {
+          headers: { 'content-type': 'application/json' },
+          status: 502,
+        }),
+    });
+    const expiredResult = await expiredSender.send({
+      config: {},
+      message: { author: 't', postedAt: new Date().toISOString(), text: 't', url: 'https://e.com' },
+      targetKey: wechatTargetKey,
+      webhookUrl: 'http://127.0.0.1:3991/send',
+    });
+    assert(
+      expiredResult.ok === false &&
+        expiredResult.error.code === 'WECHAT_SESSION_EXPIRED' &&
+        expiredResult.error.retryable === false,
+      `expired wechat session must fail fast without retry, got ${JSON.stringify(expiredResult)}`,
+    );
+    checks.push({ name: '微信会话失效判定为不可重试（避免烧掉重试额度）' });
 
     const selfDeleteResponse = await app.inject({
       method: 'DELETE',

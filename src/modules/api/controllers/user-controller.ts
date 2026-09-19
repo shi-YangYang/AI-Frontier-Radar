@@ -2,6 +2,7 @@ import { AuthValidationError, type AuthService } from '../../auth';
 import type { DeliveryTarget, StorageContext, User, UserRole } from '../../storage';
 import {
   syncWechatDeliveryTargets,
+  type WechatAccount,
   type WechatBindCoordinator,
   type WechatBridgeService,
   type WechatLoginState,
@@ -103,6 +104,7 @@ export async function getUserWechatBinding(
       displayName: string;
       enabled: boolean;
       quietHours: { enabled: boolean; endHour: number; startHour: number } | null;
+      sessionActive: boolean;
       sourceIds: string[];
       userId?: string;
     }>;
@@ -125,6 +127,7 @@ export async function getUserWechatBinding(
   const ownTargets = state.wechatTargets.filter((target) => target.ownerUserId === user.id);
   const isOwnBindPending = options.wechatBindCoordinator?.getPendingUserId() === user.id;
   const watchAccounts = await options.storage.watchAccounts.listAll();
+  const accountById = new Map(state.accounts.map((account) => [account.accountId, account]));
 
   return {
     ok: true,
@@ -134,6 +137,8 @@ export async function getUserWechatBinding(
         displayName: target.displayName,
         enabled: target.enabled,
         quietHours: target.config.quietHours ?? null,
+        sessionActive:
+          accountById.get(target.config.accountId ?? '')?.hasContextToken === true,
         sourceIds: target.config.sourceIds ?? [],
         ...(target.config.target === undefined ? {} : { userId: target.config.target }),
       })),
@@ -377,6 +382,7 @@ export async function unbindUserWechatAccount(
 }
 
 async function readSyncedWechatState(options: UserControllerOptions): Promise<{
+  accounts: WechatAccount[];
   loginState: WechatLoginState;
   wechatTargets: DeliveryTarget[];
 }> {
@@ -384,6 +390,7 @@ async function readSyncedWechatState(options: UserControllerOptions): Promise<{
 
   if (service === undefined) {
     return {
+      accounts: [],
       loginState: { loggedIn: false, status: 'unavailable' },
       wechatTargets: [],
     };
@@ -413,7 +420,7 @@ async function readSyncedWechatState(options: UserControllerOptions): Promise<{
     (target) => target.channelType === 'wechat_clawbot',
   );
 
-  return { loginState, wechatTargets };
+  return { accounts, loginState, wechatTargets };
 }
 
 async function findOwnWechatTarget(

@@ -62,6 +62,10 @@
           </button>
         </div>
 
+        <p v-if="hasBinding && boundAccount?.sessionActive === false" class="me-session-warning">
+          {{ t('portal.sessionInactive') }}
+        </p>
+
         <div v-if="qrVisible" class="me-qr">
           <p class="me-muted">{{ t('portal.scanHint') }}</p>
           <img v-if="qrDataUrl !== null" :src="qrDataUrl" alt="WeChat login QR" class="wechat-qr-image" />

@@ -29,6 +29,7 @@ export interface WechatLoginState {
 export interface WechatAccount {
   accountId: string;
   baseUrl: string;
+  hasContextToken?: boolean;
   tokenMasked: string;
   userId: string | null;
 }
