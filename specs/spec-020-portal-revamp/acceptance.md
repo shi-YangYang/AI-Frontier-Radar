@@ -17,6 +17,11 @@ PASS
 - `npm run typecheck` / `npm run build` / `npm run smoke:e2e`（93 项）通过。
 - 实机：`GET /accounts` 返回 `sendCount/sendLimit/hasContextToken`；注入计数 9 后发送日志显示 `当前消息[10/10] / 【容量已满】`。
 
+## UI 重构（第二轮）
+
+- 用户指出首版设计简陋：已按「紧凑头部（头像 + 问候 + 操作）、分段控件式页签、带图标卡片的设置行、iOS 风格开关、大数字额度面板」重做；
+- 修复：开关宽度被 `button { width: 100% }` 规则挤压成圆形（媒体查询误伤）、静默时段标签移动端竖排换行、卡片内按钮白字白底。
+
 ## Issues
 
 - 真实推送到达仍依赖用户给 ClawBot 发消息（平台限制）。
