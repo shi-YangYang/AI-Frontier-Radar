@@ -243,13 +243,28 @@
             <article v-for="post in posts" :key="post.id" class="me-post">
               <header class="me-post-head">
                 <span class="me-source-chip">{{ post.sourceDisplayName ?? post.authorUsername }}</span>
-                <time class="me-post-time" :datetime="post.postedAt">{{ formatDateTime(post.postedAt) }}</time>
+                <time class="me-post-time" :datetime="post.postedAt" :title="formatDateTime(post.postedAt)">
+                  {{ formatPostTime(post.postedAt) }}
+                </time>
               </header>
               <h3 v-if="post.title" class="me-post-title">{{ post.title }}</h3>
-              <p class="me-post-body">{{ post.textContent }}</p>
-              <a class="me-post-link" :href="post.permalinkUrl" rel="noreferrer" target="_blank">
-                {{ t('me.posts.openOriginal') }}
-              </a>
+              <p v-if="post.textContent.trim().length > 0" class="me-post-body" :class="{ clamped: isLongPost(post) && !expandedPostIds.has(post.id) }">
+                {{ post.textContent }}
+              </p>
+              <p v-else class="me-post-body me-post-body-empty">{{ t('me.posts.noBody') }}</p>
+              <div class="me-post-foot">
+                <a class="me-post-link" :href="post.permalinkUrl" rel="noreferrer" target="_blank">
+                  {{ t('me.posts.openOriginal') }}
+                </a>
+                <button
+                  v-if="isLongPost(post)"
+                  class="me-post-expand"
+                  type="button"
+                  @click="togglePostExpanded(post.id)"
+                >
+                  {{ expandedPostIds.has(post.id) ? t('me.posts.collapse') : t('me.posts.expand') }}
+                </button>
+              </div>
             </article>
           </div>
 
@@ -326,6 +341,7 @@ const quietEnabled = ref(false);
 const quietEndHour = ref(8);
 const quietStartHour = ref(23);
 const saveState = ref<'idle' | 'saving' | 'saved'>('idle');
+const expandedPostIds = ref(new Set<string>());
 const selectedSourceIds = ref<string[]>([]);
 const sourcesAll = ref(true);
 let pollTimer: number | null = null;
@@ -630,6 +646,34 @@ async function confirmUnbind(): Promise<void> {
 
 function formatHour(hour: number): string {
   return `${String(hour).padStart(2, '0')}:00`;
+}
+
+function formatPostTime(value: string): string {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  const pad = (input: number) => String(input).padStart(2, '0');
+
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function isLongPost(post: UserPostItem): boolean {
+  return post.textContent.length > 140 || post.textContent.split('\n').length > 4;
+}
+
+function togglePostExpanded(postId: string): void {
+  const next = new Set(expandedPostIds.value);
+
+  if (next.has(postId)) {
+    next.delete(postId);
+  } else {
+    next.add(postId);
+  }
+
+  expandedPostIds.value = next;
 }
 
 function markSaving(): void {

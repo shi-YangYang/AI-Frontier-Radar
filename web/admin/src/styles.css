@@ -3487,12 +3487,49 @@ tr:last-child td {
   white-space: pre-wrap;
 }
 
+.me-post-body.clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  overflow: hidden;
+}
+
+.me-post-body-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.me-post-foot {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.me-post-expand {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: 12.5px;
+  min-height: 28px;
+  padding: 0 4px;
+  width: auto;
+}
+
+.me-post-expand:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+  color: var(--accent);
+}
+
 .me-post-link {
   color: var(--accent);
   display: inline-block;
   font-size: 12.5px;
   font-weight: 550;
-  margin-top: 8px;
   text-decoration: none;
 }
 
