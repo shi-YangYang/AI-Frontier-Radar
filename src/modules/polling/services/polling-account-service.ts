@@ -57,6 +57,7 @@ export class PollingAccountService {
 
     const persistResult = await this.persistPosts(eligiblePosts, deliveryTargets, {
       createEvents: !baselineAllOnFirstRun,
+      sourceId: account.id,
     });
 
     return {
@@ -72,7 +73,7 @@ export class PollingAccountService {
   private async persistPosts(
     posts: StandardizedPost[],
     deliveryTargets: DeliveryTarget[],
-    options: { createEvents: boolean },
+    options: { createEvents: boolean; sourceId: string },
   ): Promise<{
     eventsCreated: number;
     newPostsDetected: number;
@@ -99,7 +100,7 @@ export class PollingAccountService {
   private async persistPost(
     post: StandardizedPost,
     deliveryTargets: DeliveryTarget[],
-    options: { createEvents: boolean },
+    options: { createEvents: boolean; sourceId: string },
   ): Promise<{
     eventsCreated: number;
     isNewPost: boolean;
@@ -138,6 +139,10 @@ export class PollingAccountService {
 
       for (const deliveryTarget of deliveryTargets) {
         if (!allowedTargetKeys.has(deliveryTarget.targetKey)) {
+          continue;
+        }
+
+        if (!acceptsSource(deliveryTarget, options.sourceId)) {
           continue;
         }
 
@@ -302,4 +307,14 @@ function toSourceDescriptor(account: WatchAccount): SourceDescriptor {
 
 function sortPostsAscending(posts: StandardizedPost[]): StandardizedPost[] {
   return [...posts].sort((left, right) => comparePostIds(left.xPostId, right.xPostId));
+}
+
+function acceptsSource(target: DeliveryTarget, sourceId: string): boolean {
+  const sourceIds = target.config.sourceIds;
+
+  if (sourceIds === undefined || sourceIds.length === 0) {
+    return true;
+  }
+
+  return sourceIds.includes(sourceId);
 }

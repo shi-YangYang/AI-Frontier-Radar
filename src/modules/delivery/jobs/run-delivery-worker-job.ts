@@ -15,6 +15,7 @@ export interface RunDeliveryWorkerJobOptions {
   channelRegistryOptions?: DeliveryChannelRegistryOptions;
   formatterOptions?: V1TextMessageFormatterOptions;
   logger?: AppLogger;
+  now?: () => Date;
   recoverStartupState?: boolean;
   retryPolicyOptions?: DeliveryRetryPolicyOptions;
   sendingTimeoutMs?: number;
@@ -34,6 +35,7 @@ export async function runDeliveryWorkerJob(
     logger: options.logger,
     retryPolicy,
     storage: options.storage,
+    ...(options.now === undefined ? {} : { now: options.now }),
   });
   const worker = createDeliveryWorker({
     logger: options.logger,

@@ -273,6 +273,32 @@ export async function deleteAdminWatchAccount(
   };
 }
 
+export async function deleteAllAdminWatchAccounts(options: AdminControllerOptions): Promise<{
+  ok: true;
+  data: { deletedAccounts: number; deletedEvents: number; deletedPosts: number };
+}> {
+  const accounts = await options.storage.watchAccounts.listAll();
+  let deletedEvents = 0;
+  let deletedPosts = 0;
+  let deletedAccounts = 0;
+
+  for (const account of accounts) {
+    if (account.xUserId !== null && account.xUserId.length > 0) {
+      deletedEvents += await options.storage.deliveryEvents.deleteByAuthorUserId(account.xUserId);
+      deletedPosts += await options.storage.xPosts.deleteByAuthorUserId(account.xUserId);
+    }
+
+    if (await options.storage.watchAccounts.delete(account.id)) {
+      deletedAccounts += 1;
+    }
+  }
+
+  return {
+    ok: true,
+    data: { deletedAccounts, deletedEvents, deletedPosts },
+  };
+}
+
 export async function listAdminPollRuns(
   query: unknown,
   options: AdminControllerOptions,

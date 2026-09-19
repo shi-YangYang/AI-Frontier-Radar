@@ -102,6 +102,7 @@ export const BACKEND_MESSAGE_EN: Record<string, string> = {
   "未安装微信桥依赖，请先运行 npm run wechat:install。": "WeChat bridge dependencies are missing; run npm run wechat:install first.",
   "微信桥进程未运行。": "WeChat bridge process is not running.",
   "微信桥服务未初始化。": "WeChat bridge service is not initialized.",
+  "每个账号只能绑定一个微信号，请先解绑当前微信。": "Each account can bind only one WeChat account. Unbind the current one first.",
   "微信桥登录失败。": "WeChat bridge login failed.",
   "读取微信账号失败。": "Failed to read WeChat accounts.",
   "删除微信账号失败。": "Failed to remove the WeChat account.",

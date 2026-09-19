@@ -824,6 +824,17 @@ export async function createWatchAccount(
   });
 }
 
+export async function deleteAllWatchAccounts(): Promise<{
+  deletedAccounts: number;
+  deletedEvents: number;
+  deletedPosts: number;
+}> {
+  return requestJson<{ deletedAccounts: number; deletedEvents: number; deletedPosts: number }>(
+    '/admin/api/watch-accounts/delete-all',
+    { method: 'POST' },
+  );
+}
+
 export async function deleteWatchAccount(
   id: string,
 ): Promise<{ deleted: true; deletedEvents: number; deletedPosts: number }> {
@@ -1144,11 +1155,25 @@ export async function resetUserPassword(id: string, password: string): Promise<b
   return data.updated;
 }
 
+export interface MyWechatQuietHours {
+  enabled: boolean;
+  endHour: number;
+  startHour: number;
+}
+
 export interface MyWechatAccount {
   accountId: string;
   displayName: string;
   enabled: boolean;
+  quietHours: MyWechatQuietHours | null;
+  sourceIds: string[];
   userId?: string;
+}
+
+export interface MyWechatSource {
+  displayName: string;
+  id: string;
+  sourceType: string;
 }
 
 export interface MyWechatBinding {
@@ -1159,6 +1184,7 @@ export interface MyWechatBinding {
     qrcodeUrl?: string;
     status: string;
   };
+  sources: MyWechatSource[];
 }
 
 export async function getMyWechatBinding(): Promise<MyWechatBinding> {
@@ -1181,6 +1207,36 @@ export async function submitMyWechatLoginCode(code: string): Promise<void> {
     body: JSON.stringify({ code }),
     method: 'POST',
   });
+}
+
+export async function updateMyWechatQuietHours(
+  accountId: string,
+  input: { enabled: boolean; endHour: number; startHour: number },
+): Promise<MyWechatQuietHours | null> {
+  const data = await requestJson<{ quietHours: MyWechatQuietHours | null }>(
+    `/user/api/wechat/accounts/${encodeURIComponent(accountId)}/quiet-hours`,
+    {
+      body: JSON.stringify(input),
+      method: 'PUT',
+    },
+  );
+
+  return data.quietHours;
+}
+
+export async function updateMyWechatSources(
+  accountId: string,
+  sourceIds: string[],
+): Promise<string[]> {
+  const data = await requestJson<{ sourceIds: string[] }>(
+    `/user/api/wechat/accounts/${encodeURIComponent(accountId)}/sources`,
+    {
+      body: JSON.stringify({ sourceIds }),
+      method: 'PUT',
+    },
+  );
+
+  return data.sourceIds;
 }
 
 export async function cancelMyWechatBind(): Promise<void> {

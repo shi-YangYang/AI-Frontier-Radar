@@ -350,10 +350,14 @@ function parseDeliveryTargetConfig(rawConfigJson: string): DeliveryTarget['confi
     const secret = typeof record.secret === 'string' ? record.secret.trim() : '';
     const target = typeof record.target === 'string' ? record.target.trim() : '';
     const accountId = typeof record.accountId === 'string' ? record.accountId.trim() : '';
+    const sourceIds = normalizeSourceIds(record.sourceIds);
+    const quietHours = normalizeQuietHours(record.quietHours);
 
     return {
       ...(accountId.length === 0 ? {} : { accountId }),
+      ...(quietHours === undefined ? {} : { quietHours }),
       ...(secret.length === 0 ? {} : { secret }),
+      ...(sourceIds.length === 0 ? {} : { sourceIds }),
       ...(target.length === 0 ? {} : { target }),
     };
   } catch {
@@ -365,10 +369,52 @@ function serializeDeliveryTargetConfig(config: DeliveryTarget['config'] | undefi
   const secret = config?.secret?.trim() ?? '';
   const target = config?.target?.trim() ?? '';
   const accountId = config?.accountId?.trim() ?? '';
+  const sourceIds = normalizeSourceIds(config?.sourceIds);
+  const quietHours = config?.quietHours;
 
   return JSON.stringify({
     ...(accountId.length === 0 ? {} : { accountId }),
+    ...(quietHours === undefined ? {} : { quietHours }),
     ...(secret.length === 0 ? {} : { secret }),
+    ...(sourceIds.length === 0 ? {} : { sourceIds }),
     ...(target.length === 0 ? {} : { target }),
   });
+}
+
+function normalizeSourceIds(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const normalized = value
+    .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    .map((entry) => entry.trim());
+
+  return [...new Set(normalized)];
+}
+
+function normalizeQuietHours(value: unknown): DeliveryTarget['config']['quietHours'] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  if (record.enabled !== true) {
+    return undefined;
+  }
+
+  return {
+    enabled: true,
+    endHour: normalizeHour(record.endHour, 8),
+    startHour: normalizeHour(record.startHour, 23),
+  };
+}
+
+function normalizeHour(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 23) {
+    return fallback;
+  }
+
+  return value;
 }

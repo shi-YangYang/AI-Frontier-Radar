@@ -178,6 +178,15 @@
         </label>
         <button class="primary" type="submit" :disabled="busy">{{ t('actions.query') }}</button>
         <button type="button" :disabled="busy" @click="clearQuery">{{ t('accounts.clearQuery') }}</button>
+        <button
+          v-if="pagination.total > 0"
+          class="danger accounts-delete-all"
+          type="button"
+          :disabled="busy"
+          @click="deleteAllOpen = true"
+        >
+          {{ t('accounts.deleteAll') }}
+        </button>
       </form>
       <EmptyState
         v-if="accounts.length === 0"
@@ -197,13 +206,15 @@
           <tbody>
             <tr v-for="account in accounts" :key="account.id">
               <td>
-                <strong>
+                <strong class="source-cell-title">
                   <span class="status-badge neutral source-type-badge">
                     {{ sourceBadge(account) }}
                   </span>
-                  {{ toAccountLabel(account) }}
+                  <span class="source-cell-name">{{ sourceLabel(account) }}</span>
                 </strong>
-                <div class="muted">{{ account.displayName ?? '-' }}</div>
+                <div v-if="sourceSubtitle(account).length > 0" class="muted source-cell-subtitle">
+                  {{ sourceSubtitle(account) }}
+                </div>
               </td>
               <td :title="formatDateTime(account.lastPolledAt)">
                 {{ formatRelativeTime(account.lastPolledAt) }}
@@ -229,10 +240,18 @@
     <ConfirmModal
       :open="deleteTarget !== null"
       :title="t('accounts.deleteTitle')"
-      :body="deleteTarget === null ? '' : toAccountLabel(deleteTarget)"
+      :body="deleteTarget === null ? '' : sourceLabel(deleteTarget)"
       :detail="t('accounts.deleteBody')"
       @cancel="deleteTarget = null"
       @confirm="confirmDelete"
+    />
+
+    <ConfirmModal
+      :open="deleteAllOpen"
+      :title="t('accounts.deleteAllTitle')"
+      :body="t('accounts.deleteAllBody', { count: pagination.total })"
+      @cancel="deleteAllOpen = false"
+      @confirm="confirmDeleteAll"
     />
   </section>
 </template>
@@ -243,6 +262,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import {
   AdminApiRequestError,
   createWatchAccount,
+  deleteAllWatchAccounts,
   deleteWatchAccount,
   getSourceGroups,
   listWatchAccounts,
@@ -261,6 +281,7 @@ import SelectControl from '../components/SelectControl.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import ToastNotice from '../components/ToastNotice.vue';
 import { t } from '../i18n';
+import { sourceLabel, sourceSubtitle } from '../source-labels';
 import { DEFAULT_PAGE_SIZE, formatDateTime, formatRelativeTime } from '../utils';
 
 type SourceKind =
@@ -298,6 +319,7 @@ const sourceGroups = ref<SourceGroupStatus[]>([]);
 const activeQuery = ref('');
 const addingAccount = ref(false);
 const busy = ref(false);
+const deleteAllOpen = ref(false);
 const deleteTarget = ref<WatchAccount | null>(null);
 const notice = ref('');
 const noticeDanger = ref(false);
@@ -864,6 +886,28 @@ function toAccountLabel(account: WatchAccount): string {
   }
 
   return account.xUsername === null ? account.id : `@${account.xUsername}`;
+}
+
+async function confirmDeleteAll(): Promise<void> {
+  deleteAllOpen.value = false;
+  busy.value = true;
+
+  try {
+    const result = await deleteAllWatchAccounts();
+
+    notice.value = t('accounts.deleteAllDone', {
+      accounts: result.deletedAccounts,
+      events: result.deletedEvents,
+      posts: result.deletedPosts,
+    });
+    noticeDanger.value = false;
+    await loadAccounts(1, { silent: true });
+  } catch (error) {
+    notice.value = error instanceof Error ? error.message : String(error);
+    noticeDanger.value = true;
+  } finally {
+    busy.value = false;
+  }
 }
 
 async function loadAccountsAfterDelete(): Promise<void> {

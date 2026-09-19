@@ -41,8 +41,11 @@ export type {
 export {
   createDeliveryEventProcessor,
   createDeliveryRetryPolicy,
+  DEFAULT_QUIET_HOURS,
   DeliveryEventProcessor,
   DeliveryRetryPolicy,
+  isWithinQuietHours,
+  resolveQuietHoursWindow,
 } from './services/index';
 export type {
   DeliveryEventProcessResult,
@@ -50,6 +53,7 @@ export type {
   DeliveryEventProcessStatus,
   DeliveryRetryDecision,
   DeliveryRetryPolicyOptions,
+  QuietHoursWindow,
 } from './services/index';
 export {
   createDeliveryWorker,

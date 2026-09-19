@@ -24,6 +24,7 @@ import {
   checkAdminXSourceLogin,
   applyAdminSourceGroup,
   clearAdminPostsHistory,
+  deleteAllAdminWatchAccounts,
   deleteAdminWechatAccount,
   downloadAdminBackup,
   exportAdminPosts,
@@ -558,6 +559,16 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
       },
     },
     async (_, reply) => sendAdminResponse(reply, () => runAdminRetentionCleanup(options)),
+  );
+
+  app.post(
+    '/admin/api/watch-accounts/delete-all',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => deleteAllAdminWatchAccounts(options)),
   );
 
   app.get(

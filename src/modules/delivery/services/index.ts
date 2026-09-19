@@ -8,6 +8,12 @@ export type {
   DeliveryEventProcessorOptions,
 } from './delivery-event-processor';
 export {
+  DEFAULT_QUIET_HOURS,
+  isWithinQuietHours,
+  resolveQuietHoursWindow,
+} from './quiet-hours';
+export type { QuietHoursWindow } from './quiet-hours';
+export {
   createDeliveryRetryPolicy,
   DeliveryRetryPolicy,
 } from './delivery-retry-policy';

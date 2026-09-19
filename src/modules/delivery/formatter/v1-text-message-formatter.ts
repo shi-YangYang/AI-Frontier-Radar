@@ -19,6 +19,7 @@ export interface FormattedTextMessage {
 }
 
 const DEFAULT_BODY_MAX_LENGTH = 1_500;
+const DEFAULT_DIGEST_MAX_LENGTH = 3_000;
 const TITLE_SNIPPET_MAX_LENGTH = 40;
 const EMPTY_CONTENT_PLACEHOLDER = '(no text content)';
 
@@ -66,6 +67,51 @@ export class V1TextMessageFormatter {
       truncated: truncationResult.truncated,
       type: 'text',
     };
+  }
+
+  public formatDigest(inputs: V1TextMessageFormatterInput[]): FormattedTextMessage {
+    const total = inputs.length;
+    const lines: string[] = [`🚀【AI前沿消息】夜间安静时段共 ${total} 条新帖`];
+    let included = 0;
+
+    for (const input of inputs) {
+      const block = this.formatDigestItem(input, included + 1);
+      const currentLength = lines.join('\n').length;
+
+      if (included > 0 && currentLength + block.length > DEFAULT_DIGEST_MAX_LENGTH) {
+        break;
+      }
+
+      lines.push('', block);
+      included += 1;
+    }
+
+    if (included < total) {
+      lines.push('', `……等 ${total} 条新帖`);
+    }
+
+    return {
+      text: lines.join('\n'),
+      title: `【AI前沿消息】安静时段 ${total} 条新帖`,
+      truncated: included < total,
+      type: 'text',
+    };
+  }
+
+  private formatDigestItem(input: V1TextMessageFormatterInput, index: number): string {
+    const rawTitle = normalizeOptionalDisplayName(input.title) ?? '';
+    const summarySource =
+      rawTitle.length > 0
+        ? rawTitle
+        : normalizePostBody(input.textContent).split('\n')[0]?.trim() ?? '';
+    const summary = truncateText(summarySource.length === 0 ? EMPTY_CONTENT_PLACEHOLDER : summarySource, 60).value;
+    const authorLabel = formatAuthorLabel(input.authorUsername, input.authorDisplayName);
+
+    return [
+      `${index}. ${summary}`,
+      `   👤 ${authorLabel} · 🕘 ${formatChinaTimestamp(input.postedAt)}`,
+      `   🔗 ${input.permalinkUrl.trim()}`,
+    ].join('\n');
   }
 }
 

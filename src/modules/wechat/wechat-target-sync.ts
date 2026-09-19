@@ -22,6 +22,7 @@ export async function syncWechatDeliveryTargets(
 ): Promise<SyncWechatDeliveryTargetsResult> {
   const result: SyncWechatDeliveryTargetsResult = { created: 0, removed: 0, updated: 0 };
   const knownTargets = await options.deliveryTargets.listAll();
+  let claimedOwnerForPendingUser = false;
   const wechatTargets = knownTargets.filter((target) => target.channelType === 'wechat_clawbot');
   const accountIds = new Set(options.accounts.map((account) => account.accountId));
 
@@ -36,20 +37,27 @@ export async function syncWechatDeliveryTargets(
     const webhookUrl = options.bridgeBaseUrl ?? DEFAULT_BRIDGE_SEND_URL;
 
     if (existing === undefined) {
+      const assignOwner: boolean =
+        !claimedOwnerForPendingUser &&
+        options.ownerUserIdForNewAccounts !== undefined &&
+        options.ownerUserIdForNewAccounts !== null;
+
       await options.deliveryTargets.create({
         channelType: 'wechat_clawbot',
         config,
         displayName,
         enabled: true,
-        ownerUserId: options.ownerUserIdForNewAccounts ?? null,
+        ownerUserId: assignOwner ? options.ownerUserIdForNewAccounts ?? null : null,
         targetKey,
         webhookUrl,
       });
       result.created += 1;
+      claimedOwnerForPendingUser = claimedOwnerForPendingUser || assignOwner;
       continue;
     }
 
     const shouldClaimOwner =
+      !claimedOwnerForPendingUser &&
       existing.ownerUserId === null &&
       options.ownerUserIdForNewAccounts !== undefined &&
       options.ownerUserIdForNewAccounts !== null;
@@ -68,6 +76,7 @@ export async function syncWechatDeliveryTargets(
         ...(shouldClaimOwner ? { ownerUserId: options.ownerUserIdForNewAccounts ?? null } : {}),
       });
       result.updated += 1;
+      claimedOwnerForPendingUser = claimedOwnerForPendingUser || shouldClaimOwner;
     }
   }
 
