@@ -71,7 +71,6 @@ export async function loadAppConfig(options: LoadAppConfigOption = {}): Promise<
       defaultValue: DEFAULT_X_BROWSER_USER_DATA_DIR,
     }),
   );
-  const xBrowserHeadless = reader.readBoolean('X_BROWSER_HEADLESS', { defaultValue: true });
   const xBrowserBaseUrl = reader.readUrl('X_BROWSER_BASE_URL', {
     defaultValue: DEFAULT_X_BROWSER_BASE_URL,
     protocols: ['http:', 'https:'],
@@ -158,7 +157,6 @@ export async function loadAppConfig(options: LoadAppConfigOption = {}): Promise<
         bearerToken: xApiBearerToken.length > 0 ? xApiBearerToken : undefined,
         browser: {
           baseUrl: xBrowserBaseUrl,
-          headless: xBrowserHeadless,
           navigationTimeoutMs: xBrowserNavigationTimeoutMs,
           postLoadTimeoutMs: xBrowserPostLoadTimeoutMs,
           ...(xBrowserProxyUrl.length === 0 ? {} : { proxyUrl: xBrowserProxyUrl }),

@@ -10,118 +10,147 @@ on:
         default: master
         type: string
       run_checks:
-        description: '部署前运行类型检查与 smoke 测试'
+        description: '构建镜像前运行类型检查与 smoke 测试'
         required: true
         default: true
         type: boolean
-      force_install:
-        description: '强制在服务器重装依赖（忽略 lockfile 缓存）'
-        required: true
-        default: false
-        type: boolean
+      image_tag:
+        description: '镜像标签（默认使用提交短 SHA；回滚时可填历史标签）'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
+  packages: write
 
 concurrency:
   group: cd-deploy
   cancel-in-progress: false
 
+env:
+  REGISTRY: ghcr.io
+
 jobs:
   build:
-    name: Build artifacts
+    name: Build & push image
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
     outputs:
-      revision: ${{ steps.revision.outputs.revision }}
+      image_name: ${{ steps.tag.outputs.image_name }}
+      image_tag: ${{ steps.tag.outputs.image_tag }}
+      revision: ${{ steps.tag.outputs.revision }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
 
-      - name: Resolve revision
-        id: revision
-        run: echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Resolve revision and image tag
+        id: tag
+        run: |
+          set -euo pipefail
+          revision="$(git rev-parse HEAD)"
+          short_sha="$(git rev-parse --short=12 HEAD)"
+          image_tag="${{ inputs.image_tag }}"
+          if [ -z "$image_tag" ]; then
+            image_tag="$short_sha"
+          fi
+          # GHCR 要求镜像名全小写
+          echo "image_name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$image_tag" >> "$GITHUB_OUTPUT"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js
+        if: inputs.run_checks
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
       - name: Install dependencies
+        if: inputs.run_checks
         run: npm ci
 
       - name: Generate Prisma Client
+        if: inputs.run_checks
         run: npm run prisma:generate
 
       - name: Typecheck (backend + admin)
         if: inputs.run_checks
         run: npm run typecheck
 
-      - name: Build (backend + admin)
-        run: npm run build
-
       - name: E2E smoke
         if: inputs.run_checks
         run: npm run smoke:e2e
 
-      - name: Pack release
-        run: |
-          set -euo pipefail
-          rm -rf release release.tar.gz
-          mkdir -p release/wechat-bridge
-          cp -R dist release/dist
-          cp -R dist-web release/dist-web
-          cp -R prisma release/prisma
-          cp -R scripts release/scripts
-          cp package.json package-lock.json .env.example release/
-          cp -R wechat-bridge/src release/wechat-bridge/src
-          cp -R wechat-bridge/shims release/wechat-bridge/shims
-          cp wechat-bridge/package.json wechat-bridge/package-lock.json release/wechat-bridge/
-          tar -czf release.tar.gz -C release .
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          name: release
-          path: release.tar.gz
-          retention-days: 7
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.tag.outputs.image_name }}:${{ steps.tag.outputs.image_tag }}
+            ${{ env.REGISTRY }}/${{ steps.tag.outputs.image_name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary (build)
+        run: |
+          {
+            echo "### 镜像已推送"
+            echo ""
+            echo "- 引用：\`${{ inputs.ref }}\`"
+            echo "- 提交：\`${{ steps.tag.outputs.revision }}\`"
+            echo "- 镜像：\`${{ env.REGISTRY }}/${{ steps.tag.outputs.image_name }}:${{ steps.tag.outputs.image_tag }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
     name: Deploy to server
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     env:
       SSH_HOST: ${{ secrets.SSH_HOST }}
       SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
       SSH_USER: ${{ secrets.SSH_USER }}
-      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/ai-frontier-radar' }}
+      IMAGE_REF: ghcr.io/${{ needs.build.outputs.image_name }}:${{ needs.build.outputs.image_tag }}
     steps:
-      - name: Download release artifact
-        uses: actions/download-artifact@v4
+      - name: Checkout (deploy files)
+        uses: actions/checkout@v4
         with:
-          name: release
-
-      - name: Extract release
-        run: |
-          set -euo pipefail
-          mkdir -p release
-          tar -xzf release.tar.gz -C release
+          ref: ${{ inputs.ref }}
+          sparse-checkout: deploy
 
       - name: Validate required secrets
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          for name in SSH_HOST SSH_USER DEPLOY_PATH; do
+          missing=0
+          for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY; do
             if [ -z "${!name}" ]; then
               echo "缺少必要 Secret：$name" >&2
-              exit 1
+              missing=1
             fi
           done
+          if [ "$missing" -ne 0 ]; then
+            echo "请配置 SSH_HOST、SSH_USER、SSH_PRIVATE_KEY 三个 Secrets 后重试。" >&2
+            exit 1
+          fi
 
       - name: Setup SSH
         env:
@@ -141,39 +170,59 @@ jobs:
           fi
           chmod 644 ~/.ssh/known_hosts
 
-      - name: Sync files (incremental rsync)
+      - name: Sync compose file
         run: |
           set -euo pipefail
-          rsync -azc --delete --human-readable \
-            --exclude 'node_modules/' \
-            --exclude 'wechat-bridge/node_modules/' \
-            --exclude 'wechat-bridge/.state/' \
-            --exclude '.env' \
-            --exclude '.env.local.ps1' \
-            --exclude '.deploy.env' \
-            --exclude '.deploy/' \
-            --exclude '.data/' \
-            --exclude '.tmp/' \
-            --exclude '.git/' \
-            --exclude '.x-browser-profile/' \
-            --exclude '.x-browser-public-profile/' \
-            -e "ssh -i ~/.ssh/deploy_key -p $SSH_PORT -o IdentitiesOnly=yes" \
-            release/ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
+          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" -o IdentitiesOnly=yes \
+            "$SSH_USER@$SSH_HOST" "mkdir -p '$DEPLOY_PATH'"
+          scp -i ~/.ssh/deploy_key -P "$SSH_PORT" -o IdentitiesOnly=yes \
+            deploy/docker-compose.yml "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/docker-compose.yml"
 
-      - name: Remote deploy (deps / migrate / restart / healthcheck)
+      - name: Pull and restart
+        env:
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" -o IdentitiesOnly=yes \
             "$SSH_USER@$SSH_HOST" \
-            "cd '$DEPLOY_PATH' && REVISION='${{ needs.build.outputs.revision }}' FORCE_INSTALL='${{ inputs.force_install }}' bash scripts/deploy/remote-deploy.sh"
+            "DEPLOY_PATH='$DEPLOY_PATH' IMAGE_REF='$IMAGE_REF' GHCR_PULL_TOKEN='$GHCR_PULL_TOKEN' GHCR_USER='${{ github.repository_owner }}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
 
-      - name: Summary
+          mkdir -p .data wechat-bridge/.state .x-browser-public-profile .deploy
+
+          if [ -n "${GHCR_PULL_TOKEN}" ]; then
+            echo "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
+          fi
+
+          echo "[deploy] 拉取镜像：$IMAGE_REF"
+          docker compose pull app
+
+          echo "[deploy] 启动容器"
+          docker compose up -d --remove-orphans
+
+          echo "[deploy] 健康检查"
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/health >/dev/null 2>&1; then
+              printf 'image=%s\ndeployed_at=%s\n' "$IMAGE_REF" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .deploy/last-deploy.txt
+              echo "[deploy] 健康检查通过"
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "[deploy] 健康检查失败，最近日志：" >&2
+          docker compose logs --tail 50 app >&2 || true
+          exit 1
+          REMOTE
+
+      - name: Summary (deploy)
         run: |
           {
             echo "### 部署完成"
             echo ""
             echo "- 引用：\`${{ inputs.ref }}\`"
             echo "- 提交：\`${{ needs.build.outputs.revision }}\`"
+            echo "- 镜像：\`${{ env.IMAGE_REF }}\`"
             echo "- 服务器：\`${{ env.SSH_USER }}@${{ env.SSH_HOST }}:${{ env.DEPLOY_PATH }}\`"
-            echo "- 依赖重装：\`${{ inputs.force_install }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

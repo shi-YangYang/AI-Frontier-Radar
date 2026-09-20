@@ -12,7 +12,6 @@ import { SourceProviderError } from './source-provider-error';
 
 export interface BrowserXSourceProviderOptions {
   baseUrl?: string;
-  headless?: boolean;
   navigationTimeoutMs?: number;
   postLoadTimeoutMs?: number;
   proxyUrl?: string;
@@ -60,7 +59,6 @@ const CDP_ARCHITECTURE_BY_CPU: Record<string, string> = {
 export class BrowserXSourceProvider implements SourceProvider {
   public readonly sourceType = 'x' as const;
   private readonly baseUrl: string;
-  private readonly headless: boolean;
   private readonly navigationTimeoutMs: number;
   private readonly postLoadTimeoutMs: number;
   private readonly proxyUrl?: string;
@@ -69,7 +67,6 @@ export class BrowserXSourceProvider implements SourceProvider {
 
   public constructor(options: BrowserXSourceProviderOptions = {}) {
     this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
-    this.headless = options.headless ?? false;
     this.navigationTimeoutMs = options.navigationTimeoutMs ?? DEFAULT_NAVIGATION_TIMEOUT_MS;
     this.postLoadTimeoutMs = options.postLoadTimeoutMs ?? DEFAULT_POST_LOAD_TIMEOUT_MS;
     this.proxyUrl = options.proxyUrl;
@@ -104,11 +101,11 @@ export class BrowserXSourceProvider implements SourceProvider {
     let context: BrowserContext | undefined;
     try {
       context = await chromium.launchPersistentContext(this.userDataDir, {
-        headless: this.headless,
+        headless: true,
         ...toLaunchProxyOption(this.proxyUrl),
       });
       const page = context.pages()[0] ?? (await context.newPage());
-      await applyHeadlessUserAgentMask(context, page, this.headless);
+      await applyHeadlessUserAgentMask(context, page);
       const profileUrl = `${this.baseUrl.replace(/\/$/u, '')}/${encodeURIComponent(xUsername)}`;
 
       await page.goto(profileUrl, {
@@ -174,11 +171,11 @@ export class BrowserXSourceProvider implements SourceProvider {
     let context: BrowserContext | undefined;
     try {
       context = await chromium.launchPersistentContext(this.userDataDir, {
-        headless: this.headless,
+        headless: true,
         ...toLaunchProxyOption(this.proxyUrl),
       });
       const page = context.pages()[0] ?? (await context.newPage());
-      await applyHeadlessUserAgentMask(context, page, this.headless);
+      await applyHeadlessUserAgentMask(context, page);
       const profileUrl = `${this.baseUrl.replace(/\/$/u, '')}/${encodeURIComponent(xUsername)}`;
 
       await page.goto(profileUrl, {
@@ -267,12 +264,7 @@ function toLaunchProxyOption(
 async function applyHeadlessUserAgentMask(
   context: BrowserContext,
   page: Page,
-  enabled: boolean,
 ): Promise<void> {
-  if (!enabled) {
-    return;
-  }
-
   const userAgent = await page.evaluate(() => navigator.userAgent).catch(() => '');
   if (userAgent.length === 0) {
     return;
@@ -498,7 +490,7 @@ async function waitForProfileOrKnownFailure(
   ) {
     throw new SourceProviderError(
       'SOURCE_AUTH_FAILED',
-      'X 浏览器源未登录：请以 headless=false 打开并登录账号。',
+      'X 浏览器源需要登录态，但当前 profile 未登录（匿名模式可能被限制）。',
       buildDiagnostics(options.input, options.operation, {
         endpoint: options.profileUrl,
         xUsername: options.xUsername,

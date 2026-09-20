@@ -21,7 +21,6 @@ import {
   deleteAdminDeliveryEvent,
   deleteAdminPollRun,
   deleteAdminWatchAccount,
-  checkAdminXSourceLogin,
   applyAdminSourceGroup,
   clearAdminPostsHistory,
   deleteAllAdminWatchAccounts,
@@ -43,7 +42,6 @@ import {
   listAdminPollRuns,
   listAdminPosts,
   listAdminWatchAccounts,
-  openAdminXLoginWindow,
   resolveAdminYoutubeChannel,
   runAdminDeliveryNow,
   runAdminPollingNow,
@@ -281,27 +279,6 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     },
     async (request, reply) =>
       sendAdminResponse(reply, () => testAdminXSourceAnonymous(request.body, options)),
-  );
-
-  app.post(
-    '/admin/api/settings/x-source/check-login',
-    {
-      schema: {
-        response: adminJsonResponseSchema,
-      },
-    },
-    async (request, reply) =>
-      sendAdminResponse(reply, () => checkAdminXSourceLogin(request.body, options)),
-  );
-
-  app.post(
-    '/admin/api/settings/x-source/open-login',
-    {
-      schema: {
-        response: adminJsonResponseSchema,
-      },
-    },
-    async (_, reply) => sendAdminResponse(reply, () => openAdminXLoginWindow(options)),
   );
 
   app.put(

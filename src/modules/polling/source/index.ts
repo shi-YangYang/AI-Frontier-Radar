@@ -70,7 +70,4 @@ export type {
   XSourceAnonymousCheckResult,
   XSourceAnonymousCheckStatus,
   XSourceDiagnosticsOptions,
-  XSourceLoginCheckResult,
-  XSourceLoginCheckStatus,
-  XSourceOpenLoginResult,
 } from './x-source-diagnostics';

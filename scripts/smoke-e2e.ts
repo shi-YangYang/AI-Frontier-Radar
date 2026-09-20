@@ -2837,7 +2837,6 @@ function createSmokeConfig(input: {
         bearerToken: 'smoke-token',
         browser: {
           baseUrl: 'https://x.com',
-          headless: true,
           navigationTimeoutMs: 30_000,
           postLoadTimeoutMs: 15_000,
           userDataDir: join(input.sqlitePath, '..', '.x-browser-profile'),
@@ -2882,7 +2881,6 @@ async function verifySourceModeConfig(
     cwd: tempDir,
     env: {
       ...baseEnv,
-      X_BROWSER_HEADLESS: 'true',
       X_BROWSER_USER_DATA_DIR: '.browser-profile',
       X_SOURCE_MODE: 'browser',
     },
@@ -2917,7 +2915,6 @@ function verifyRuntimeSourceProviderFactory(checks: SmokeCheck[], config: AppCon
       x: {
         browser: {
           baseUrl: 'https://x.com',
-          headless: true,
           navigationTimeoutMs: 30_000,
           postLoadTimeoutMs: 15_000,
           userDataDir: join(config.storage.sqlite.path, '..', '.x-browser-profile'),
