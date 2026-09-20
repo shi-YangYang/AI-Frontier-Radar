@@ -127,7 +127,7 @@ jobs:
       SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
       SSH_USER: ${{ secrets.SSH_USER }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/ai-frontier-radar' }}
-      IMAGE_REF: ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}:${{ needs.build.outputs.image_tag }}
+      IMAGE_REF: ghcr.io/${{ needs.build.outputs.image_name }}:${{ needs.build.outputs.image_tag }}
     steps:
       - name: Checkout (deploy files)
         uses: actions/checkout@v4
