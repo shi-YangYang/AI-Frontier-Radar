@@ -11,6 +11,7 @@
 | 产物 | 多阶段 Docker 镜像（含 Chromium 无头壳、微信桥、Prisma Client） |
 | 镜像仓库 | GHCR：`ghcr.io/<owner>/<repo>:<短SHA>` 与 `:latest` |
 | 服务器更新 | `docker compose pull` + `up -d`，只拉取变化的镜像层 |
+| HTTPS | Caddy 容器自动申请/续期 Let's Encrypt 证书，HTTP 自动跳转 |
 | 数据库迁移 | 容器启动时自动执行 `prisma migrate deploy`（只应用未执行的迁移） |
 | 数据持久化 | 卷挂载：`.data/`（SQLite/备份）、`wechat-bridge/.state/`（微信登录态）、`.x-browser-public-profile/`（X 浏览器资料） |
 
@@ -154,61 +155,65 @@ IMAGE_REF=ghcr.io/shi-yangyang/ai-frontier-radar:<历史标签> docker compose u
 
 ---
 
-## 五、Nginx 反向代理 + HTTPS（Let's Encrypt）
+## 五、HTTPS（Caddy 容器，自动证书）
 
-前置条件：域名已解析到服务器 IP，且云安全组放行 80/443。
+网关已容器化：`deploy/docker-compose.yml` 内含 **Caddy** 服务，启动时自动申请并续期 Let's Encrypt 证书（无需 certbot、无需 cron），HTTP 自动 301 跳转 HTTPS。
 
-```bash
-# 1) 安装 Nginx 与 Certbot
-sudo apt-get update
-sudo apt-get install -y nginx certbot python3-certbot-nginx
+```yaml
+# deploy/docker-compose.yml（节选）
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # 证书持久化（换机器时保留此卷或重新签发）
+      - caddy_config:/config
+```
 
-# 2) 站点配置（HTTP → 反代到应用）
-sudo tee /etc/nginx/sites-available/leida520.site >/dev/null <<'EOF'
-server {
-    listen 80;
-    listen [::]:80;
-    server_name leida520.site www.leida520.site;
-
-    client_max_body_size 20m;
-
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
-    }
+```caddyfile
+# deploy/Caddyfile
+{
+	email you@example.com
 }
-EOF
-sudo ln -sf /etc/nginx/sites-available/leida520.site /etc/nginx/sites-enabled/leida520.site
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo nginx -t && sudo systemctl reload nginx
 
-# 3) 签发证书并自动配置 HTTPS + HTTP 跳转（邮箱换成你的）
-sudo certbot --nginx -d leida520.site -d www.leida520.site \
-  --non-interactive --agree-tos -m you@example.com --redirect
+leida520.site, www.leida520.site {
+	encode zstd gzip
+	reverse_proxy app:3000
+}
 ```
 
-**自动续期**：certbot 安装时已注册 `certbot.timer`（每天检查、到期前自动续期并重载 Nginx）。验证：
+**换域名/加域名**：修改 `deploy/Caddyfile` 后推送到仓库，重新触发 CD（会自动同步 Caddyfile），或手动：
 
 ```bash
-systemctl list-timers certbot.timer
-sudo certbot renew --dry-run     # 模拟续期，成功即配置无误
+ssh leida
+cd /opt/ai-frontier-radar
+docker compose restart caddy
 ```
 
-**安全建议**：应用端口 3000 只对本机开放（`deploy/docker-compose.yml` 已配置为 `127.0.0.1:3000:3000`），外网只经 Nginx 的 80/443。
+**验证**：
+
+```bash
+curl -sI https://leida520.site/login | head -1          # HTTP/2 200
+curl -sI http://leida520.site/login | grep -i location  # 308 → https
+docker compose logs caddy | grep "certificate obtained" # 证书签发日志
+```
+
+**安全**：应用端口 3000 仅绑定 `127.0.0.1`（宿主机健康检查用），外网只能经 Caddy 的 80/443；云安全组放行 80/443 与 SSH 即可。
 
 ## 六、首次部署后收尾
 
 1. 浏览器打开 `https://<你的域名>/`，用 `.env` 的管理员账号登录；
 2. 微信推送：进入「配置 → 微信」扫码绑定，并给 ClawBot 发一条消息激活会话；
 3. 云安全组只需放行 80/443 与 SSH 端口。
+
+> 旧版本曾使用宿主机 Nginx + certbot，已迁移为 Caddy 容器方案；宿主机上的 nginx/certbot 已卸载。
 
 ---
 

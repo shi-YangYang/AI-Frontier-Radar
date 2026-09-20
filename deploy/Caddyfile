@@ -1,0 +1,8 @@
+{
+	email 1600472625@qq.com
+}
+
+leida520.site, www.leida520.site {
+	encode zstd gzip
+	reverse_proxy app:3000
+}

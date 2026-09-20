@@ -170,13 +170,13 @@ jobs:
           fi
           chmod 644 ~/.ssh/known_hosts
 
-      - name: Sync compose file
+      - name: Sync deploy files (compose + Caddyfile)
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" -o IdentitiesOnly=yes \
             "$SSH_USER@$SSH_HOST" "mkdir -p '$DEPLOY_PATH'"
           scp -i ~/.ssh/deploy_key -P "$SSH_PORT" -o IdentitiesOnly=yes \
-            deploy/docker-compose.yml "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/docker-compose.yml"
+            deploy/docker-compose.yml deploy/Caddyfile "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
 
       - name: Pull and restart
         env:
