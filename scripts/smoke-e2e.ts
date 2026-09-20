@@ -12,6 +12,7 @@ import { createApp } from '../src/app/create-app';
 import { createAuthService } from '../src/modules/auth';
 import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createAi2BlogSourceProvider, createAnthropicNewsSourceProvider, createGithubTrendingSourceProvider, createHfDailyPapersSourceProvider, createMoonshotBlogSourceProvider, createRssSourceProvider, createSourceProviderRegistry, createSubscriptionRuleMatcher, createXSourceProvider, normalizeMetaBlogRawEntries, parseAi2BlogHtml, parseMoonshotBlogHtml, parseXaiNewsHtml, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
 import { createV1TextMessageFormatter, isWithinQuietHours, runDeliveryWorkerJob } from '../src/modules/delivery';
+import { createWechatBridgeSender } from '../src/modules/delivery/channel';
 import { createRuntimeScheduler, createRuntimeSourceProviders } from '../src/modules/scheduler';
 import { applySourceGroup, createPrismaClient, createStorage, getSourceGroupStatuses } from '../src/modules/storage';
 import { SOURCE_GROUPS } from '../src/config/source-groups';
@@ -122,12 +123,14 @@ async function main(): Promise<void> {
     {
       accountId: 'wechat-a@im.bot',
       baseUrl: 'https://ilinkai.weixin.qq.com',
+      hasContextToken: true,
       tokenMasked: 'aaaa***bbbb',
       userId: 'user-a@im.wechat',
     },
     {
       accountId: 'wechat-b@im.bot',
       baseUrl: 'https://ilinkai.weixin.qq.com',
+      hasContextToken: false,
       tokenMasked: 'cccc***dddd',
       userId: 'user-b@im.wechat',
     },
@@ -2392,15 +2395,24 @@ async function main(): Promise<void> {
       await rawInject({ headers: { cookie: userCookie }, method: 'GET', url: '/user/api/wechat' })
     ).json() as {
       data: {
-        accounts: Array<{ accountId: string; sourceIds: string[] }>;
+        accounts: Array<{
+          accountId: string;
+          sendLimit: number;
+          sessionActive: boolean;
+          sourceIds: string[];
+        }>;
         sources: Array<{ id: string }>;
       };
     };
     assert(
       bindingAfterFilter.data.accounts.some(
-        (account) => account.accountId === boundAccountId && account.sourceIds.includes(seededAccount.id),
+        (account) =>
+          account.accountId === boundAccountId &&
+          account.sourceIds.includes(seededAccount.id) &&
+          account.sessionActive === true &&
+          account.sendLimit === 10,
       ),
-      'saved source filter should be returned by the binding API',
+      `binding API should report sessionActive, got ${JSON.stringify(bindingAfterFilter.data.accounts)}`,
     );
     assert(
       bindingAfterFilter.data.sources.some((source) => source.id === seededAccount.id),
@@ -2417,6 +2429,73 @@ async function main(): Promise<void> {
       `other user setting sources should return 404, got ${overreachSourcesResponse.statusCode}`,
     );
     checks.push({ name: '绑定端保存接收源并拒绝越权修改' });
+
+    await prisma.xPostRaw.create({
+      data: {
+        authorUserId: 'user-posts-probe',
+        authorUsername: 'posts-probe',
+        createdAt: new Date().toISOString(),
+        detectedAt: new Date().toISOString(),
+        id: 'posts-probe-1',
+        isReply: false,
+        isRepost: false,
+        permalinkUrl: 'https://example.com/posts-probe-1',
+        postedAt: new Date().toISOString(),
+        rawPayloadJson: '{}',
+        textContent: '用户端消息列表探针',
+        title: '探针标题',
+        xPostId: '9000000000000000001',
+      },
+    });
+    const userPostsResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: '/user/api/posts?page=1&pageSize=5',
+    });
+    assert(
+      userPostsResponse.statusCode === 200,
+      `user posts returned ${userPostsResponse.statusCode}`,
+    );
+    const userPosts = userPostsResponse.json() as {
+      data: {
+        pagination: { total: number };
+        posts: Array<{ permalinkUrl: string; textContent: string; title: string | null }>;
+      };
+    };
+    assert(
+      userPosts.data.pagination.total >= 1 &&
+        userPosts.data.posts.some((post) => post.textContent === '用户端消息列表探针'),
+      `user posts should return stored posts, got ${JSON.stringify(userPosts.data)}`,
+    );
+    const unauthorizedPostsResponse = await rawInject({ method: 'GET', url: '/user/api/posts' });
+    assert(
+      unauthorizedPostsResponse.statusCode === 401,
+      'user posts should require a session',
+    );
+    checks.push({ name: '用户端可浏览消息列表（/user/api/posts，含鉴权）' });
+
+    const searchResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: '/user/api/posts?page=1&pageSize=5&query=%E6%8E%A2%E9%92%88',
+    });
+    const searchBody = searchResponse.json() as {
+      data: { pagination: { total: number }; posts: Array<{ title: string | null }> };
+    };
+    assert(
+      searchResponse.statusCode === 200 &&
+        searchBody.data.pagination.total === 1 &&
+        searchBody.data.posts[0]?.title === '探针标题',
+      `search should match title, got ${JSON.stringify(searchBody.data)}`,
+    );
+    const missResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: '/user/api/posts?page=1&pageSize=5&query=zzz-not-exist',
+    });
+    const missBody = missResponse.json() as { data: { pagination: { total: number } } };
+    assert(missBody.data.pagination.total === 0, 'search should return empty for no match');
+    checks.push({ name: '用户端消息搜索（标题/正文，空结果）' });
 
     const secondBindResponse = await rawInject({
       headers: { cookie: userCookie },
@@ -2617,6 +2696,27 @@ async function main(): Promise<void> {
       `failed digest must not leave events stuck in sending, got ${JSON.stringify({ one: failureEventOne?.status, two: failureEventTwo?.status })}`,
     );
     checks.push({ name: '汇总发送失败不会把其余事件卡在 sending' });
+
+    const expiredSender = createWechatBridgeSender({
+      fetchImplementation: async () =>
+        new Response(JSON.stringify({ error: 'sendMessage ret=-2 errmsg=prepare failed', ok: false }), {
+          headers: { 'content-type': 'application/json' },
+          status: 502,
+        }),
+    });
+    const expiredResult = await expiredSender.send({
+      config: {},
+      message: { author: 't', postedAt: new Date().toISOString(), text: 't', url: 'https://e.com' },
+      targetKey: wechatTargetKey,
+      webhookUrl: 'http://127.0.0.1:3991/send',
+    });
+    assert(
+      expiredResult.ok === false &&
+        expiredResult.error.code === 'WECHAT_SESSION_EXPIRED' &&
+        expiredResult.error.retryable === false,
+      `expired wechat session must fail fast without retry, got ${JSON.stringify(expiredResult)}`,
+    );
+    checks.push({ name: '微信会话失效判定为不可重试（避免烧掉重试额度）' });
 
     const selfDeleteResponse = await app.inject({
       method: 'DELETE',

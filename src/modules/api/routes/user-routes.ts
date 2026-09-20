@@ -6,6 +6,7 @@ import { toAdminApiErrorPayload } from '../controllers/admin-controller';
 import {
   cancelUserWechatBind,
   getUserWechatBinding,
+  listUserPosts,
   startUserWechatBind,
   submitUserWechatLoginCode,
   unbindUserWechatAccount,
@@ -21,6 +22,16 @@ export interface RegisterUserRoutesOptions {
 }
 
 export function registerUserRoutes(app: FastifyInstance, options: RegisterUserRoutesOptions): void {
+  app.get('/user/api/posts', async (request, reply) => {
+    const user = await requireSession(request, reply, options.auth);
+
+    if (user === null) {
+      return reply;
+    }
+
+    return sendUserResponse(reply, () => listUserPosts(request.query, options.userControllerOptions));
+  });
+
   app.get('/user/api/wechat', async (request, reply) => {
     const user = await requireSession(request, reply, options.auth);
 

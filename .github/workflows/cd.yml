@@ -1,0 +1,179 @@
+name: CD
+
+# 手动触发：GitHub → Actions → CD → Run workflow
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: '要部署的 Git 引用（分支 / 标签 / 提交 SHA）'
+        required: true
+        default: master
+        type: string
+      run_checks:
+        description: '部署前运行类型检查与 smoke 测试'
+        required: true
+        default: true
+        type: boolean
+      force_install:
+        description: '强制在服务器重装依赖（忽略 lockfile 缓存）'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    outputs:
+      revision: ${{ steps.revision.outputs.revision }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Resolve revision
+        id: revision
+        run: echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Typecheck (backend + admin)
+        if: inputs.run_checks
+        run: npm run typecheck
+
+      - name: Build (backend + admin)
+        run: npm run build
+
+      - name: E2E smoke
+        if: inputs.run_checks
+        run: npm run smoke:e2e
+
+      - name: Pack release
+        run: |
+          set -euo pipefail
+          rm -rf release release.tar.gz
+          mkdir -p release/wechat-bridge
+          cp -R dist release/dist
+          cp -R dist-web release/dist-web
+          cp -R prisma release/prisma
+          cp -R scripts release/scripts
+          cp package.json package-lock.json .env.example release/
+          cp -R wechat-bridge/src release/wechat-bridge/src
+          cp -R wechat-bridge/shims release/wechat-bridge/shims
+          cp wechat-bridge/package.json wechat-bridge/package-lock.json release/wechat-bridge/
+          tar -czf release.tar.gz -C release .
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: release.tar.gz
+          retention-days: 7
+
+  deploy:
+    name: Deploy to server
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+    steps:
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release
+
+      - name: Extract release
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          tar -xzf release.tar.gz -C release
+
+      - name: Validate required secrets
+        run: |
+          set -euo pipefail
+          for name in SSH_HOST SSH_USER DEPLOY_PATH; do
+            if [ -z "${!name}" ]; then
+              echo "缺少必要 Secret：$name" >&2
+              exit 1
+            fi
+          done
+
+      - name: Setup SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "$SSH_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            echo "未配置 SSH_KNOWN_HOSTS，改用 ssh-keyscan（建议后续固定 host key）"
+            ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          fi
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Sync files (incremental rsync)
+        run: |
+          set -euo pipefail
+          rsync -azc --delete --human-readable \
+            --exclude 'node_modules/' \
+            --exclude 'wechat-bridge/node_modules/' \
+            --exclude 'wechat-bridge/.state/' \
+            --exclude '.env' \
+            --exclude '.env.local.ps1' \
+            --exclude '.deploy.env' \
+            --exclude '.deploy/' \
+            --exclude '.data/' \
+            --exclude '.tmp/' \
+            --exclude '.git/' \
+            --exclude '.x-browser-profile/' \
+            --exclude '.x-browser-public-profile/' \
+            -e "ssh -i ~/.ssh/deploy_key -p $SSH_PORT -o IdentitiesOnly=yes" \
+            release/ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
+
+      - name: Remote deploy (deps / migrate / restart / healthcheck)
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" -o IdentitiesOnly=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "cd '$DEPLOY_PATH' && REVISION='${{ needs.build.outputs.revision }}' FORCE_INSTALL='${{ inputs.force_install }}' bash scripts/deploy/remote-deploy.sh"
+
+      - name: Summary
+        run: |
+          {
+            echo "### 部署完成"
+            echo ""
+            echo "- 引用：\`${{ inputs.ref }}\`"
+            echo "- 提交：\`${{ needs.build.outputs.revision }}\`"
+            echo "- 服务器：\`${{ env.SSH_USER }}@${{ env.SSH_HOST }}:${{ env.DEPLOY_PATH }}\`"
+            echo "- 依赖重装：\`${{ inputs.force_install }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

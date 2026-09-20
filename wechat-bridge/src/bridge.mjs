@@ -27,6 +27,116 @@ function fail(message, code = 1) {
   throw error;
 }
 
+function resolveContextTokensPath(accountId) {
+  return path.join(stateDir, 'openclaw-weixin', 'accounts', `${accountId}.context-tokens.json`);
+}
+
+function readContextTokens(accountId) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resolveContextTokensPath(accountId), 'utf-8'));
+
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveContextToken(accountId, userId, token) {
+  if (typeof token !== 'string' || token.length === 0) {
+    return;
+  }
+
+  const tokens = readContextTokens(accountId);
+
+  if (tokens[userId] === token) {
+    return;
+  }
+
+  tokens[userId] = token;
+  fs.mkdirSync(path.dirname(resolveContextTokensPath(accountId)), { recursive: true });
+  fs.writeFileSync(resolveContextTokensPath(accountId), JSON.stringify(tokens), 'utf-8');
+}
+
+function resolveContextToken(accountId, userId) {
+  const tokens = readContextTokens(accountId);
+
+  return typeof tokens[userId] === 'string' && tokens[userId].length > 0 ? tokens[userId] : undefined;
+}
+
+function resolveSendCounterPath(accountId) {
+  return path.join(stateDir, 'openclaw-weixin', 'accounts', `${accountId}.send-counter.json`);
+}
+
+const SEND_QUOTA_WINDOW_MS = 24 * 60 * 60 * 1_000;
+const SEND_QUOTA_LIMIT = 10;
+
+function readSendCounter(accountId, userId) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resolveSendCounterPath(accountId), 'utf-8'));
+
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return undefined;
+    }
+
+    const entry = parsed[userId];
+
+    if (typeof entry !== 'object' || entry === null) {
+      return undefined;
+    }
+
+    return {
+      count: typeof entry.count === 'number' && entry.count >= 0 ? entry.count : 0,
+      windowStartedAt:
+        typeof entry.windowStartedAt === 'string' ? entry.windowStartedAt : new Date().toISOString(),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function bumpSendCounter(accountId, userId) {
+  const existing = readSendCounter(accountId, userId);
+  const now = Date.now();
+  const windowStartedAtMs =
+    existing === undefined ? now : Date.parse(existing.windowStartedAt);
+  const withinWindow =
+    Number.isFinite(windowStartedAtMs) && now - windowStartedAtMs < SEND_QUOTA_WINDOW_MS;
+  const count = withinWindow ? existing.count + 1 : 1;
+  let all = {};
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resolveSendCounterPath(accountId), 'utf-8'));
+
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      all = parsed;
+    }
+  } catch {
+    all = {};
+  }
+
+  all[userId] = {
+    count,
+    windowStartedAt: withinWindow ? existing.windowStartedAt : new Date().toISOString(),
+  };
+  fs.mkdirSync(path.dirname(resolveSendCounterPath(accountId)), { recursive: true });
+  fs.writeFileSync(resolveSendCounterPath(accountId), JSON.stringify(all), 'utf-8');
+
+  return count;
+}
+
+function resetSendCounter(accountId, userId) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resolveSendCounterPath(accountId), 'utf-8'));
+    const all =
+      typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+
+    delete all[userId];
+    fs.writeFileSync(resolveSendCounterPath(accountId), JSON.stringify(all), 'utf-8');
+  } catch {
+    // no counter file yet
+  }
+}
+
 function resolveTargetsPath() {
   return path.join(stateDir, 'openclaw-weixin', TARGETS_FILE_NAME);
 }
@@ -62,12 +172,25 @@ function recordTarget(accountId, targetId, message) {
 function listAccounts(plugin) {
   return plugin.accounts.listIndexedWeixinAccountIds().map((accountId) => {
     const account = plugin.accounts.loadWeixinAccount(accountId) ?? {};
+    const userId = account.userId ?? null;
+    const tokens = readContextTokens(accountId);
+
+    const counter = userId === null ? undefined : readSendCounter(accountId, userId);
+    const counterStartedMs = counter === undefined ? 0 : Date.parse(counter.windowStartedAt);
+    const counterActive =
+      counter !== undefined &&
+      Number.isFinite(counterStartedMs) &&
+      Date.now() - counterStartedMs < SEND_QUOTA_WINDOW_MS;
 
     return {
       accountId,
       baseUrl: account.baseUrl ?? plugin.accounts.DEFAULT_BASE_URL,
+      contextUserIds: Object.keys(tokens),
       tokenMasked: maskToken(account.token),
-      userId: account.userId ?? null,
+      userId,
+      ...(userId === null ? {} : { hasContextToken: typeof tokens[userId] === 'string' }),
+      sendCount: counterActive ? counter.count : 0,
+      sendLimit: SEND_QUOTA_LIMIT,
     };
   });
 }
@@ -189,17 +312,42 @@ async function sendText(plugin, options) {
     fail('缺少发送目标：请先给 ClawBot 发一条消息登记会话，或使用 --to 指定目标。');
   }
 
+  const contextToken = resolveContextToken(resolved.accountId, target);
+  log(
+    contextToken === undefined
+      ? `发送未携带 context_token（${target}）：请让该微信号给 ClawBot 发一条消息以激活会话`
+      : `发送携带 context_token（${target}）`,
+  );
+
+  const counter = readSendCounter(resolved.accountId, target);
+  const counterStartedMs = counter === undefined ? 0 : Date.parse(counter.windowStartedAt);
+  const counterActive =
+    counter !== undefined &&
+    Number.isFinite(counterStartedMs) &&
+    Date.now() - counterStartedMs < SEND_QUOTA_WINDOW_MS;
+  const nextCount = (counterActive ? counter.count : 0) + 1;
+  const tipLines = [`当前消息[${Math.min(nextCount, SEND_QUOTA_LIMIT)}/${SEND_QUOTA_LIMIT}]`];
+
+  if (nextCount >= SEND_QUOTA_LIMIT) {
+    tipLines.push('【当前消息容量已满，请发送一条消息重置】');
+  }
+
+  const text = `${options.text}\n\n---\n${tipLines.join('\n')}`;
+  log(`发送 tip：${tipLines.join(' / ')}`);
   const result = await plugin.send.sendMessageWeixin({
     opts: {
       accountId: resolved.accountId,
       baseUrl: resolved.baseUrl,
+      ...(contextToken === undefined ? {} : { contextToken }),
       token: resolved.token,
     },
-    text: options.text,
+    text,
     to: target,
   });
 
-  log(`已发送到 ${target}（messageId=${result.messageId ?? 'unknown'}）`);
+  const sentCount = bumpSendCounter(resolved.accountId, target);
+
+  log(`已发送到 ${target}（messageId=${result.messageId ?? 'unknown'}，本窗口第 ${sentCount} 条）`);
 
   return result;
 }
@@ -395,6 +543,8 @@ async function commandServe(plugin, args) {
                   .join(' ')
               : '';
             recordTarget(accountId, fromUserId, { preview });
+            saveContextToken(accountId, fromUserId, message?.context_token);
+            resetSendCounter(accountId, fromUserId);
           }
         }
       } catch (error) {

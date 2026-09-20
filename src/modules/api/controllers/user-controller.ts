@@ -2,6 +2,7 @@ import { AuthValidationError, type AuthService } from '../../auth';
 import type { DeliveryTarget, StorageContext, User, UserRole } from '../../storage';
 import {
   syncWechatDeliveryTargets,
+  type WechatAccount,
   type WechatBindCoordinator,
   type WechatBridgeService,
   type WechatLoginState,
@@ -103,6 +104,9 @@ export async function getUserWechatBinding(
       displayName: string;
       enabled: boolean;
       quietHours: { enabled: boolean; endHour: number; startHour: number } | null;
+      sendCount: number;
+      sendLimit: number;
+      sessionActive: boolean;
       sourceIds: string[];
       userId?: string;
     }>;
@@ -125,6 +129,7 @@ export async function getUserWechatBinding(
   const ownTargets = state.wechatTargets.filter((target) => target.ownerUserId === user.id);
   const isOwnBindPending = options.wechatBindCoordinator?.getPendingUserId() === user.id;
   const watchAccounts = await options.storage.watchAccounts.listAll();
+  const accountById = new Map(state.accounts.map((account) => [account.accountId, account]));
 
   return {
     ok: true,
@@ -134,6 +139,10 @@ export async function getUserWechatBinding(
         displayName: target.displayName,
         enabled: target.enabled,
         quietHours: target.config.quietHours ?? null,
+        sendCount: accountById.get(target.config.accountId ?? '')?.sendCount ?? 0,
+        sendLimit: accountById.get(target.config.accountId ?? '')?.sendLimit ?? 10,
+        sessionActive:
+          accountById.get(target.config.accountId ?? '')?.hasContextToken === true,
         sourceIds: target.config.sourceIds ?? [],
         ...(target.config.target === undefined ? {} : { userId: target.config.target }),
       })),
@@ -377,6 +386,7 @@ export async function unbindUserWechatAccount(
 }
 
 async function readSyncedWechatState(options: UserControllerOptions): Promise<{
+  accounts: WechatAccount[];
   loginState: WechatLoginState;
   wechatTargets: DeliveryTarget[];
 }> {
@@ -384,6 +394,7 @@ async function readSyncedWechatState(options: UserControllerOptions): Promise<{
 
   if (service === undefined) {
     return {
+      accounts: [],
       loginState: { loggedIn: false, status: 'unavailable' },
       wechatTargets: [],
     };
@@ -413,7 +424,7 @@ async function readSyncedWechatState(options: UserControllerOptions): Promise<{
     (target) => target.channelType === 'wechat_clawbot',
   );
 
-  return { loginState, wechatTargets };
+  return { accounts, loginState, wechatTargets };
 }
 
 async function findOwnWechatTarget(
@@ -462,6 +473,84 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readHour(value: unknown, fallback: number): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 23) {
+    return fallback;
+  }
+
+  return value;
+}
+
+export interface UserPostItem {
+  authorDisplayName: string | null;
+  authorUsername: string;
+  detectedAt: string;
+  id: string;
+  isReply: boolean;
+  isRepost: boolean;
+  permalinkUrl: string;
+  postedAt: string;
+  sourceDisplayName: string | null;
+  sourceType: string;
+  textContent: string;
+  title: string | null;
+}
+
+export async function listUserPosts(
+  query: unknown,
+  options: UserControllerOptions,
+): Promise<{
+  ok: true;
+  data: {
+    pagination: { page: number; pageSize: number; total: number; totalPages: number };
+    posts: UserPostItem[];
+  };
+}> {
+  const record = isRecord(query) ? query : {};
+  const page = readPositiveInt(record.page, 1);
+  const pageSize = Math.min(readPositiveInt(record.pageSize, 20), 50);
+  const searchQuery =
+    typeof record.query === 'string' && record.query.trim().length > 0
+      ? record.query.trim()
+      : undefined;
+  const filter = searchQuery === undefined ? {} : { query: searchQuery };
+  const total = await options.storage.xPosts.countAll(filter);
+  const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
+  const resolvedPage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+  const [posts, watchAccounts] = await Promise.all([
+    options.storage.xPosts.listPage({ page: resolvedPage, pageSize, ...filter }),
+    options.storage.watchAccounts.listAll(),
+  ]);
+  const accountByAuthorUserId = new Map(
+    watchAccounts.map((account) => [account.xUserId ?? '', account]),
+  );
+
+  return {
+    ok: true,
+    data: {
+      pagination: { page: resolvedPage, pageSize, total, totalPages },
+      posts: posts.map((post) => {
+        const account = accountByAuthorUserId.get(post.authorUserId ?? '');
+
+        return {
+          authorDisplayName: account?.displayName ?? null,
+          authorUsername: post.authorUsername,
+          detectedAt: post.detectedAt,
+          id: post.id,
+          isReply: post.isReply,
+          isRepost: post.isRepost,
+          permalinkUrl: post.permalinkUrl,
+          postedAt: post.postedAt,
+          sourceDisplayName: account?.displayName ?? null,
+          sourceType: account?.sourceType ?? 'x',
+          textContent: post.textContent,
+          title: post.title,
+        };
+      }),
+    },
+  };
+}
+
+function readPositiveInt(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
     return fallback;
   }
 
