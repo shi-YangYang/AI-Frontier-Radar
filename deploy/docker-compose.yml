@@ -9,9 +9,8 @@ services:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: "3000"
-    ipc: host
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./.data:/app/.data
       - ./wechat-bridge/.state:/app/wechat-bridge/.state
@@ -26,3 +25,26 @@ services:
       timeout: 5s
       retries: 3
       start_period: 40s
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: ai-frontier-radar-caddy
+    restart: unless-stopped
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:-example.com}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_config:
+  caddy_data:

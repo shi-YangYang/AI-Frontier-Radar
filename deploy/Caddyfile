@@ -1,0 +1,10 @@
+# 域名与证书邮箱来自服务器 .env（SITE_DOMAIN / ACME_EMAIL），仓库中不保存真实值。
+# 修改后：重新触发 CD 或在服务器执行 docker compose restart caddy
+{
+	email {$ACME_EMAIL:admin@example.com}
+}
+
+{$SITE_DOMAIN:example.com}, www.{$SITE_DOMAIN:example.com} {
+	encode zstd gzip
+	reverse_proxy app:3000
+}

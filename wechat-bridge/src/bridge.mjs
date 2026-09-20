@@ -100,7 +100,9 @@ function bumpSendCounter(accountId, userId) {
   const windowStartedAtMs =
     existing === undefined ? now : Date.parse(existing.windowStartedAt);
   const withinWindow =
-    Number.isFinite(windowStartedAtMs) && now - windowStartedAtMs < SEND_QUOTA_WINDOW_MS;
+    existing !== undefined &&
+    Number.isFinite(windowStartedAtMs) &&
+    now - windowStartedAtMs < SEND_QUOTA_WINDOW_MS;
   const count = withinWindow ? existing.count + 1 : 1;
   let all = {};
 
@@ -345,9 +347,19 @@ async function sendText(plugin, options) {
     to: target,
   });
 
-  const sentCount = bumpSendCounter(resolved.accountId, target);
+  let sentCount = null;
 
-  log(`已发送到 ${target}（messageId=${result.messageId ?? 'unknown'}，本窗口第 ${sentCount} 条）`);
+  try {
+    sentCount = bumpSendCounter(resolved.accountId, target);
+  } catch (error) {
+    log(`发送计数写入失败（不影响本次发送）：${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  log(
+    `已发送到 ${target}（messageId=${result.messageId ?? 'unknown'}${
+      sentCount === null ? '' : `，本窗口第 ${sentCount} 条`
+    }）`,
+  );
 
   return result;
 }

@@ -47,13 +47,16 @@ export class PollingAccountService {
       excludeReplies: this.excludeReplies,
       excludeReposts: this.excludeReposts,
     });
-    const baselineAllOnFirstRun =
-      fetchCursor === undefined && sourceProvider.firstRunBaseline === 'all';
-    const eligiblePosts = resolveEligiblePosts({
-      cursor: fetchCursor,
-      includeAllWithoutCursor: baselineAllOnFirstRun,
-      posts: filteredPosts,
-    });
+    const isFirstRun = fetchCursor === undefined;
+    const baselineAllOnFirstRun = isFirstRun && sourceProvider.firstRunBaseline === 'all';
+    const anchorOnlyOnFirstRun = isFirstRun && !baselineAllOnFirstRun;
+    const eligiblePosts = anchorOnlyOnFirstRun
+      ? []
+      : resolveEligiblePosts({
+          cursor: fetchCursor,
+          includeAllWithoutCursor: baselineAllOnFirstRun,
+          posts: filteredPosts,
+        });
 
     const persistResult = await this.persistPosts(eligiblePosts, deliveryTargets, {
       createEvents: !baselineAllOnFirstRun,
@@ -184,13 +187,7 @@ function resolveEligiblePosts(input: {
   posts: StandardizedPost[];
 }): StandardizedPost[] {
   if (input.cursor === undefined) {
-    if (input.includeAllWithoutCursor === true) {
-      return sortPostsAscending(input.posts);
-    }
-
-    const newestPost = pickNewestPost(input.posts);
-
-    return newestPost === undefined ? [] : [newestPost];
+    return input.includeAllWithoutCursor === true ? sortPostsAscending(input.posts) : [];
   }
 
   return sortPostsAscending(
@@ -251,16 +248,6 @@ function isPostIdGreaterThan(xPostId: string, cursor: string | undefined): boole
 
 function isPresent(value: string | null | undefined): value is string {
   return typeof value === 'string' && value.length > 0;
-}
-
-function pickNewestPost(posts: StandardizedPost[]): StandardizedPost | undefined {
-  return posts.reduce<StandardizedPost | undefined>((newestPost, post) => {
-    if (newestPost === undefined || comparePostIds(post.xPostId, newestPost.xPostId) > 0) {
-      return post;
-    }
-
-    return newestPost;
-  }, undefined);
 }
 
 function pickHigherPostId(

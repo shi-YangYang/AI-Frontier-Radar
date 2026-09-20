@@ -361,6 +361,32 @@ async function main(): Promise<void> {
     ]);
 
     await storage.deliveryTargets.update(seededTarget.id, { enabled: false });
+    const anchorPoll = await runPollingJob({
+      config,
+      logger,
+      sourceProviders,
+      storage,
+    });
+    assert(anchorPoll.status === 'success', 'first polling run with posts should succeed');
+    assert(anchorPoll.newPostsDetected === 0, 'first polling run should only anchor the newest post');
+    assert(anchorPoll.eventsCreated === 0, 'first polling run should not create events');
+    const anchorPost = await storage.xPosts.findByXPostId('1000000000000000000');
+    assert(anchorPost === null, 'first polling run should not store the anchor post');
+    const accountAfterAnchorPoll = await storage.watchAccounts.findByUsername(WATCH_USERNAME);
+    assert(
+      accountAfterAnchorPoll?.baselinePostId === '1000000000000000000' &&
+        accountAfterAnchorPoll?.lastSeenPostId === '1000000000000000000',
+      'first polling run should anchor the newest fetched post',
+    );
+    checks.push({ name: '首轮仅锚定最新帖，不落库不投递' });
+
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T01:00:00.000Z',
+        id: '1000000000000000001',
+        text: 'Smoke test new AI frontier post',
+      },
+    ]);
     const noTargetPoll = await runPollingJob({
       config,
       logger,
@@ -374,10 +400,10 @@ async function main(): Promise<void> {
     );
     assert(noTargetPoll.eventsCreated === 0, 'polling without targets should not create events');
 
-    const noTargetPost = await storage.xPosts.findByXPostId('1000000000000000000');
+    const noTargetPost = await storage.xPosts.findByXPostId('1000000000000000001');
     assert(noTargetPost !== null, 'post should be stored without enabled delivery targets');
     const noTargetEvent = await storage.deliveryEvents.findByPostAndTarget(
-      '1000000000000000000',
+      '1000000000000000001',
       TARGET_KEY,
     );
     assert(noTargetEvent === null, 'no delivery event should be created without enabled targets');
@@ -387,8 +413,8 @@ async function main(): Promise<void> {
 
     xApi.setPosts([
       {
-        created_at: '2026-04-24T01:00:00.000Z',
-        id: '1000000000000000001',
+        created_at: '2026-04-24T02:00:00.000Z',
+        id: '1000000000000000002',
         text: 'Smoke test new AI frontier post',
       },
     ]);
@@ -403,12 +429,12 @@ async function main(): Promise<void> {
     assert(newPostPoll.newPostsDetected === 1, 'polling should detect exactly one new post');
     assert(newPostPoll.eventsCreated === 1, 'polling should create exactly one delivery event');
 
-    const rawPost = await storage.xPosts.findByXPostId('1000000000000000001');
+    const rawPost = await storage.xPosts.findByXPostId('1000000000000000002');
     assert(rawPost !== null, 'new post was not written to x_posts_raw');
     checks.push({ name: '后续首条新帖会写入 x_posts_raw' });
 
     const deliveryEvent = await storage.deliveryEvents.findByPostAndTarget(
-      '1000000000000000001',
+      '1000000000000000002',
       TARGET_KEY,
     );
     assert(deliveryEvent !== null, 'delivery event was not created');
@@ -425,7 +451,7 @@ async function main(): Promise<void> {
     checks.push({ name: 'delivery worker 会发送到 mock webhook' });
 
     const sentEvent = await storage.deliveryEvents.findByPostAndTarget(
-      '1000000000000000001',
+      '1000000000000000002',
       TARGET_KEY,
     );
     assert(sentEvent?.status === 'sent', 'delivery event status should be sent');
@@ -576,41 +602,22 @@ async function main(): Promise<void> {
       where: { authorUserId: rssSourceId },
     });
     assert(
-      rssPostsAfterFirstPoll.length === 1,
-      `first RSS poll should store exactly one baseline post, got ${rssPostsAfterFirstPoll.length}`,
+      rssPostsAfterFirstPoll.length === 0,
+      `first RSS poll should only anchor without storing, got ${rssPostsAfterFirstPoll.length}`,
     );
-    const baselineRssPost = rssPostsAfterFirstPoll[0];
-    assert(/^\d{24}$/u.test(baselineRssPost.xPostId), 'RSS post id should be 16+8 numeric digits');
-    assert(
-      baselineRssPost.postedAt === '2026-05-01T08:00:00.000Z',
-      `RSS baseline post should keep its pubDate, got ${baselineRssPost.postedAt}`,
-    );
-    assert(
-      baselineRssPost.textContent === '新版本发布\n\nHello & world',
-      `RSS textContent should strip HTML and decode entities, got ${JSON.stringify(baselineRssPost.textContent)}`,
-    );
-    assert(
-      baselineRssPost.authorUsername === 'Mock AI Feed',
-      'RSS post should fall back to the feed title as author',
-    );
-
-    const baselineRssEvent = await storage.deliveryEvents.findByPostAndTarget(
-      baselineRssPost.xPostId,
+    assert(firstRssPoll.newPostsDetected === 0, 'first RSS poll should not detect posts');
+    assert(firstRssPoll.eventsCreated === 0, 'first RSS poll should not create delivery events');
+    const rssAnchorEvent = await storage.deliveryEvents.findByPostAndTarget(
+      rssAccountAfterFirstPoll?.baselinePostId ?? '',
       TARGET_KEY,
     );
-    assert(baselineRssEvent !== null, 'RSS baseline post should create a delivery event');
-    const baselineDeliveryResult = await runDeliveryWorkerJob({ logger, storage });
-    assert(
-      baselineDeliveryResult.processed.length === 1,
-      'delivery worker should process the RSS baseline event',
-    );
-    assert(webhook.requests.length === 2, 'mock webhook should receive the RSS baseline request');
-    checks.push({ name: 'RSS 首次轮询只建基线 1 条并跳过缺 link / 重复 guid 条目' });
+    assert(rssAnchorEvent === null, 'RSS anchor post must not create a delivery event');
+    checks.push({ name: 'RSS 首轮仅锚定最新 1 条（不落库不投递）并跳过缺 link / 重复 guid 条目' });
 
     rssApi.setFeed(RSS_FEED_PATH, {
       body: createRssDocument('Mock AI Feed', [
         createRssItem({
-          description: '<p>三号条目</p>',
+          description: '<p>Hello &amp; <b>world</b></p>',
           guid: 'rss-item-3',
           link: 'https://example.com/posts/3',
           pubDate: 'Sun, 03 May 2026 09:00:00 GMT',
@@ -649,16 +656,21 @@ async function main(): Promise<void> {
       where: { authorUserId: rssSourceId },
     });
     assert(
-      rssPostsAfterIncrement.length === 2,
-      `incremental RSS poll should store one additional post, got ${rssPostsAfterIncrement.length}`,
+      rssPostsAfterIncrement.length === 1,
+      `incremental RSS poll should store exactly one post, got ${rssPostsAfterIncrement.length}`,
     );
     const incrementalRssPost = rssPostsAfterIncrement.find(
       (post) => post.postedAt === '2026-05-03T09:00:00.000Z',
     );
     assert(incrementalRssPost !== undefined, 'incremental RSS post was not stored with its pubDate');
+    assert(/^\d{24}$/u.test(incrementalRssPost.xPostId), 'RSS post id should be 16+8 numeric digits');
     assert(
-      incrementalRssPost.textContent === '三号条目\n\n三号条目',
-      'incremental RSS post should merge title and content',
+      incrementalRssPost.textContent === '三号条目\n\nHello & world',
+      `RSS post should strip HTML and decode entities, got ${JSON.stringify(incrementalRssPost.textContent)}`,
+    );
+    assert(
+      incrementalRssPost.authorUsername === 'Mock AI Feed',
+      'RSS post should fall back to the feed title as author',
     );
     const incrementalRssEvent = await storage.deliveryEvents.findByPostAndTarget(
       incrementalRssPost.xPostId,
@@ -670,7 +682,7 @@ async function main(): Promise<void> {
       incrementalDeliveryResult.processed.length === 1,
       'delivery worker should process the incremental RSS event',
     );
-    assert(webhook.requests.length === 3, 'mock webhook should receive the incremental RSS request');
+    assert(webhook.requests.length === 2, 'mock webhook should receive the incremental RSS request');
     checks.push({ name: 'RSS 增量检测、入库并投递' });
 
     const dedupPoll = await runPollingJob({
@@ -684,7 +696,7 @@ async function main(): Promise<void> {
     const rssPostsAfterDedup = await prisma.xPostRaw.findMany({
       where: { authorUserId: rssSourceId },
     });
-    assert(rssPostsAfterDedup.length === 2, 'dedup RSS polling should not add duplicate rows');
+    assert(rssPostsAfterDedup.length === 1, 'dedup RSS polling should not add duplicate rows');
     checks.push({ name: 'RSS 重复轮询不重复入库' });
 
     const emptyFeedUrl = `${rssApi.url}${EMPTY_FEED_PATH}`;
@@ -760,16 +772,56 @@ async function main(): Promise<void> {
     const atomAccountAfterPoll = await storage.watchAccounts.findById(atomAccount.id);
     const atomSourceId = atomAccountAfterPoll?.xUserId ?? '';
     const atomPosts = await prisma.xPostRaw.findMany({ where: { authorUserId: atomSourceId } });
-    assert(atomPosts.length === 1, `Atom poll should store one baseline post, got ${atomPosts.length}`);
     assert(
-      atomPosts[0].postedAt === '2026-05-04T10:00:00.000Z',
-      `Atom post should use published time, got ${atomPosts[0].postedAt}`,
+      atomPosts.length === 0,
+      `first Atom poll should only anchor without storing, got ${atomPosts.length}`,
+    );
+    assert(atomAccountAfterPoll?.baselinePostId !== null, 'first Atom poll should set a baseline');
+    checks.push({ name: 'Atom feed 首轮仅锚定最新条目' });
+
+    rssApi.setFeed(ATOM_FEED_PATH, {
+      body: createAtomDocument('Mock Atom Feed', [
+        createAtomEntry({
+          contentHtml: '<p>Atom &amp; <b>content</b></p>',
+          id: 'atom-3',
+          link: 'https://example.com/atom/3',
+          published: '2026-05-05T10:00:00.000Z',
+          title: 'Atom 条目三',
+        }),
+        createAtomEntry({
+          contentHtml: '<p>Atom &amp; content</p>',
+          id: 'atom-1',
+          link: 'https://example.com/atom/1',
+          published: '2026-05-04T10:00:00.000Z',
+          title: 'Atom 条目一',
+        }),
+      ]),
+      contentType: 'application/atom+xml; charset=utf-8',
+      statusCode: 200,
+    });
+    const atomIncrementalPoll = await runPollingJob({
+      config,
+      logger,
+      sourceProviders,
+      storage,
+    });
+    assert(atomIncrementalPoll.status === 'success', 'incremental Atom polling should succeed');
+    const atomPostsAfterIncrement = await prisma.xPostRaw.findMany({
+      where: { authorUserId: atomSourceId },
+    });
+    assert(
+      atomPostsAfterIncrement.length === 1,
+      `incremental Atom poll should store exactly one post, got ${atomPostsAfterIncrement.length}`,
     );
     assert(
-      atomPosts[0].textContent === 'Atom 条目一\n\nAtom & content',
-      `Atom textContent should strip HTML and decode entities, got ${JSON.stringify(atomPosts[0].textContent)}`,
+      atomPostsAfterIncrement[0].postedAt === '2026-05-05T10:00:00.000Z',
+      `Atom post should use published time, got ${atomPostsAfterIncrement[0].postedAt}`,
     );
-    checks.push({ name: 'Atom feed 解析与入库' });
+    assert(
+      atomPostsAfterIncrement[0].textContent === 'Atom 条目三\n\nAtom & content',
+      `Atom textContent should strip HTML and decode entities, got ${JSON.stringify(atomPostsAfterIncrement[0].textContent)}`,
+    );
+    checks.push({ name: 'Atom feed 解析与增量入库' });
 
     rssApi.setFeed(ATOM_FEED_PATH, {
       body: createAtomDocument('Mock Atom Feed', [
@@ -1215,22 +1267,18 @@ async function main(): Promise<void> {
       where: { authorUserId: anthropicAccountAfterFirstPoll?.xUserId ?? '' },
     });
     assert(
-      anthropicPostsAfterFirstPoll === 1,
-      `first anthropic poll should store only the newest article, got ${anthropicPostsAfterFirstPoll}`,
+      anthropicPostsAfterFirstPoll === 0,
+      `first anthropic poll should only anchor without storing, got ${anthropicPostsAfterFirstPoll}`,
     );
     const anthropicBaselinePost = await storage.xPosts.findByDedupeKey('anthropic:news:article-two');
-    assert(anthropicBaselinePost !== null, 'anthropic baseline article was not stored');
+    assert(anthropicBaselinePost === null, 'anthropic anchor article must not be stored');
     const anthropicSkippedPost = await storage.xPosts.findByDedupeKey('anthropic:news:article-one');
     assert(anthropicSkippedPost === null, 'older anthropic article must not be ingested on first poll');
-    const anthropicBaselineEvent = await storage.deliveryEvents.findByPostAndTarget(
-      anthropicBaselinePost.xPostId,
-      TARGET_KEY,
-    );
     assert(
-      anthropicBaselineEvent !== null,
-      'anthropic baseline post should be delivered like the RSS baseline',
+      anthropicAccountAfterFirstPoll?.baselinePostId !== null,
+      'first anthropic poll should set a baseline',
     );
-    checks.push({ name: 'Anthropic 首轮仅锚定最新 1 条并投递' });
+    checks.push({ name: 'Anthropic 首轮仅锚定最新 1 条（不落库不投递）' });
 
     rssApi.setFeed(anthropicPath, {
       body: createAnthropicHtml(true),
@@ -1252,8 +1300,8 @@ async function main(): Promise<void> {
       where: { authorUserId: anthropicAccountAfterPoll?.xUserId ?? '' },
     });
     assert(
-      anthropicPostsAfterRepeat === 2,
-      `repeat anthropic poll should keep 2 posts, got ${anthropicPostsAfterRepeat}`,
+      anthropicPostsAfterRepeat === 1,
+      `repeat anthropic poll should keep 1 post, got ${anthropicPostsAfterRepeat}`,
     );
     checks.push({ name: 'Anthropic 增量入库并投递' });
 
@@ -1304,15 +1352,9 @@ async function main(): Promise<void> {
 
     await runPollingJob({ config, logger, sourceProviders, storage });
     const ai2BaselinePost = await storage.xPosts.findByDedupeKey('ai2:blog:olmo-eval');
-    assert(ai2BaselinePost !== null, 'ai2 baseline post was not stored');
-    const ai2BaselineEvent = await storage.deliveryEvents.findByPostAndTarget(
-      ai2BaselinePost.xPostId,
-      TARGET_KEY,
-    );
-    assert(
-      ai2BaselineEvent !== null,
-      'ai2 baseline post should be delivered like the RSS baseline',
-    );
+    assert(ai2BaselinePost === null, 'ai2 anchor post must not be stored');
+    const ai2AccountAfterFirstPoll = await storage.watchAccounts.findById(ai2Account.id);
+    assert(ai2AccountAfterFirstPoll?.baselinePostId !== null, 'first ai2 poll should set a baseline');
 
     rssApi.setFeed(ai2Path, {
       body: createAi2Html(true),
@@ -1333,7 +1375,7 @@ async function main(): Promise<void> {
     const ai2PostsAfterRepeat = await prisma.xPostRaw.count({
       where: { authorUserId: ai2AccountAfterPoll?.xUserId ?? '' },
     });
-    assert(ai2PostsAfterRepeat === 2, `repeat ai2 poll should keep 2 posts, got ${ai2PostsAfterRepeat}`);
+    assert(ai2PostsAfterRepeat === 1, `repeat ai2 poll should keep 1 post, got ${ai2PostsAfterRepeat}`);
     const ai2SkippedPost = await storage.xPosts.findByDedupeKey('ai2:blog:olmoearth-v1-1');
     assert(ai2SkippedPost === null, 'older ai2 post must not be ingested after the baseline');
     checks.push({ name: 'AI2 首轮仅锚定最新 1 条 + 增量入库并投递' });
@@ -2116,7 +2158,7 @@ async function main(): Promise<void> {
         cleanupBody.data.settings.lastCleanupAt !== null,
       `cleanup mismatch: ${JSON.stringify(cleanupBody.data)}`,
     );
-    const recentPostAfterCleanup = await storage.xPosts.findByDedupeKey('anthropic:news:article-two');
+    const recentPostAfterCleanup = await storage.xPosts.findByDedupeKey('anthropic:news:article-three');
     assert(recentPostAfterCleanup !== null, 'recent posts should survive retention cleanup');
     checks.push({ name: '数据保留策略（预览计数、立即清理、保留最近帖子）' });
 
@@ -2193,7 +2235,7 @@ async function main(): Promise<void> {
     const anthropicPostsBeforeCascade = await prisma.xPostRaw.count({
       where: { authorUserId: anthropicAuthorId },
     });
-    assert(anthropicPostsBeforeCascade === 2, 'anthropic posts should exist before cascade delete');
+    assert(anthropicPostsBeforeCascade === 1, 'anthropic posts should exist before cascade delete');
 
     const deleteAccountResponse = await app.inject({
       method: 'DELETE',
@@ -2548,6 +2590,28 @@ async function main(): Promise<void> {
       excludedCreateResponse.statusCode === 200,
       `excluded source create returned ${excludedCreateResponse.statusCode}`,
     );
+    await runPollingJob({ config, logger, sourceProviders, storage });
+
+    rssApi.setFeed(excludedFeedPath, {
+      body: createRssDocument('Excluded Source', [
+        createRssItem({
+          description: '<p>Excluded source new body</p>',
+          guid: 'excluded-item-2',
+          link: 'https://example.com/excluded/2',
+          pubDate: 'Fri, 24 Apr 2026 04:00:00 GMT',
+          title: 'Excluded source new post',
+        }),
+        createRssItem({
+          description: '<p>Excluded source body</p>',
+          guid: 'excluded-item-1',
+          link: 'https://example.com/excluded/1',
+          pubDate: 'Fri, 24 Apr 2026 03:30:00 GMT',
+          title: 'Excluded source post',
+        }),
+      ]),
+      contentType: 'application/rss+xml; charset=utf-8',
+      statusCode: 200,
+    });
     await runPollingJob({ config, logger, sourceProviders, storage });
     const excludedAccountRow = await storage.watchAccounts.findBySource({
       sourceType: 'rss',
