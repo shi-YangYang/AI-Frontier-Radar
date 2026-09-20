@@ -178,15 +178,22 @@ IMAGE_REF=ghcr.io/shi-yangyang/ai-frontier-radar:<历史标签> docker compose u
 ```
 
 ```caddyfile
-# deploy/Caddyfile
+# deploy/Caddyfile（域名与邮箱来自服务器 .env，仓库不含真实值）
 {
-	email you@example.com
+	email {$ACME_EMAIL:admin@example.com}
 }
 
-leida520.site, www.leida520.site {
+{$SITE_DOMAIN:example.com}, www.{$SITE_DOMAIN:example.com} {
 	encode zstd gzip
 	reverse_proxy app:3000
 }
+```
+
+服务器 `.env` 需包含（参考 `.env.example`）：
+
+```bash
+SITE_DOMAIN=你的域名
+ACME_EMAIL=你的邮箱
 ```
 
 **换域名/加域名**：修改 `deploy/Caddyfile` 后推送到仓库，重新触发 CD（会自动同步 Caddyfile），或手动：
@@ -200,8 +207,8 @@ docker compose restart caddy
 **验证**：
 
 ```bash
-curl -sI https://leida520.site/login | head -1          # HTTP/2 200
-curl -sI http://leida520.site/login | grep -i location  # 308 → https
+curl -sI https://<你的域名>/login | head -1          # HTTP/2 200
+curl -sI http://<你的域名>/login | grep -i location  # 308 → https
 docker compose logs caddy | grep "certificate obtained" # 证书签发日志
 ```
 
