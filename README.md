@@ -509,6 +509,12 @@ npm run prisma:generate → npm run typecheck → npm run build → npm run smok
 
 工作流文件：`.github/workflows/ci.yml`。推送分支本身不触发；只有 PR 打开/更新时运行（上方 CI 徽章跟踪 `dev` 分支最近一次运行）。
 
+## CD（部署到自己的服务器）
+
+在 GitHub Actions 手动触发 **CD** 工作流即可部署：GitHub 负责构建，rsync 增量同步到服务器，按需安装依赖、应用数据库迁移并重启服务。
+
+完整步骤（服务器初始化、Secrets 配置、触发方式、回滚与常见问题）见 [docs/deployment.md](docs/deployment.md)。
+
 ## 常用命令
 
 | 命令 | 用途 |
