@@ -154,16 +154,65 @@ IMAGE_REF=ghcr.io/shi-yangyang/ai-frontier-radar:<历史标签> docker compose u
 
 ---
 
-## 五、首次部署后收尾
+## 五、Nginx 反向代理 + HTTPS（Let's Encrypt）
 
-1. 浏览器打开 `http://<服务器IP>:3000/`，用 `.env` 的管理员账号登录；
+前置条件：域名已解析到服务器 IP，且云安全组放行 80/443。
+
+```bash
+# 1) 安装 Nginx 与 Certbot
+sudo apt-get update
+sudo apt-get install -y nginx certbot python3-certbot-nginx
+
+# 2) 站点配置（HTTP → 反代到应用）
+sudo tee /etc/nginx/sites-available/leida520.site >/dev/null <<'EOF'
+server {
+    listen 80;
+    listen [::]:80;
+    server_name leida520.site www.leida520.site;
+
+    client_max_body_size 20m;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+}
+EOF
+sudo ln -sf /etc/nginx/sites-available/leida520.site /etc/nginx/sites-enabled/leida520.site
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl reload nginx
+
+# 3) 签发证书并自动配置 HTTPS + HTTP 跳转（邮箱换成你的）
+sudo certbot --nginx -d leida520.site -d www.leida520.site \
+  --non-interactive --agree-tos -m you@example.com --redirect
+```
+
+**自动续期**：certbot 安装时已注册 `certbot.timer`（每天检查、到期前自动续期并重载 Nginx）。验证：
+
+```bash
+systemctl list-timers certbot.timer
+sudo certbot renew --dry-run     # 模拟续期，成功即配置无误
+```
+
+**安全建议**：应用端口 3000 只对本机开放（`deploy/docker-compose.yml` 已配置为 `127.0.0.1:3000:3000`），外网只经 Nginx 的 80/443。
+
+## 六、首次部署后收尾
+
+1. 浏览器打开 `https://<你的域名>/`，用 `.env` 的管理员账号登录；
 2. 微信推送：进入「配置 → 微信」扫码绑定，并给 ClawBot 发一条消息激活会话；
-3. 建议前置 Nginx/Caddy 做 HTTPS 与域名；
-4. 防火墙只需放行 80/443（或 3000）与 SSH 端口。
+3. 云安全组只需放行 80/443 与 SSH 端口。
 
 ---
 
-## 六、常见问题
+## 七、常见问题
 
 **Q：服务器拉不动镜像（超时/403）？**
 私有镜像需配置 `GHCR_PULL_TOKEN`（PAT 勾选 `read:packages`）；或到 GitHub Packages 把镜像可见性改为 public。

@@ -11,7 +11,7 @@ services:
       PORT: "3000"
     ipc: host
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./.data:/app/.data
       - ./wechat-bridge/.state:/app/wechat-bridge/.state
