@@ -2474,6 +2474,29 @@ async function main(): Promise<void> {
     );
     checks.push({ name: '用户端可浏览消息列表（/user/api/posts，含鉴权）' });
 
+    const searchResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: '/user/api/posts?page=1&pageSize=5&query=%E6%8E%A2%E9%92%88',
+    });
+    const searchBody = searchResponse.json() as {
+      data: { pagination: { total: number }; posts: Array<{ title: string | null }> };
+    };
+    assert(
+      searchResponse.statusCode === 200 &&
+        searchBody.data.pagination.total === 1 &&
+        searchBody.data.posts[0]?.title === '探针标题',
+      `search should match title, got ${JSON.stringify(searchBody.data)}`,
+    );
+    const missResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: '/user/api/posts?page=1&pageSize=5&query=zzz-not-exist',
+    });
+    const missBody = missResponse.json() as { data: { pagination: { total: number } } };
+    assert(missBody.data.pagination.total === 0, 'search should return empty for no match');
+    checks.push({ name: '用户端消息搜索（标题/正文，空结果）' });
+
     const secondBindResponse = await rawInject({
       headers: { cookie: userCookie },
       method: 'POST',

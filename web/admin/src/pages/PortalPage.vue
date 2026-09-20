@@ -37,7 +37,7 @@
       </div>
     </nav>
 
-    <main class="me-content">
+    <main class="me-content" :class="{ 'me-content-wide': activeTab === 'messages' }">
       <ToastNotice :message="notice" :danger="noticeDanger" />
 
       <template v-if="activeTab === 'wechat'">
@@ -235,6 +235,26 @@
             </button>
           </header>
 
+          <form class="me-search" @submit.prevent="applySearch">
+            <span class="me-search-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" />
+              </svg>
+            </span>
+            <input
+              v-model="searchInput"
+              autocomplete="off"
+              :placeholder="t('me.posts.searchPlaceholder')"
+            />
+            <button v-if="activeQuery.length > 0" class="me-search-clear" type="button" @click="clearSearch">
+              {{ t('me.posts.searchClear') }}
+            </button>
+            <button class="me-search-submit" type="submit" :disabled="postsLoading">
+              {{ t('me.posts.searchAction') }}
+            </button>
+          </form>
+
           <div v-if="posts.length === 0" class="me-empty">
             {{ postsLoading ? t('me.posts.loading') : t('me.posts.empty') }}
           </div>
@@ -342,6 +362,8 @@ const quietEndHour = ref(8);
 const quietStartHour = ref(23);
 const saveState = ref<'idle' | 'saving' | 'saved'>('idle');
 const expandedPostIds = ref(new Set<string>());
+const activeQuery = ref('');
+const searchInput = ref('');
 const selectedSourceIds = ref<string[]>([]);
 const sourcesAll = ref(true);
 let pollTimer: number | null = null;
@@ -437,7 +459,7 @@ async function loadPosts(page: number, replace = false): Promise<void> {
   postsLoading.value = true;
 
   try {
-    const result = await listMyPosts(page, postsPagination.value.pageSize);
+    const result = await listMyPosts(page, postsPagination.value.pageSize, activeQuery.value);
 
     posts.value = replace ? result.posts : [...posts.value, ...result.posts];
     postsPagination.value = result.pagination;
@@ -446,6 +468,19 @@ async function loadPosts(page: number, replace = false): Promise<void> {
   } finally {
     postsLoading.value = false;
   }
+}
+
+function applySearch(): void {
+  activeQuery.value = searchInput.value.trim();
+  expandedPostIds.value = new Set();
+  void loadPosts(1, true);
+}
+
+function clearSearch(): void {
+  searchInput.value = '';
+  activeQuery.value = '';
+  expandedPostIds.value = new Set();
+  void loadPosts(1, true);
 }
 
 async function startBind(): Promise<void> {

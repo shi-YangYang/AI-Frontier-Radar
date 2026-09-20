@@ -1175,10 +1175,21 @@ export interface UserPostsPage {
   posts: UserPostItem[];
 }
 
-export async function listMyPosts(page = 1, pageSize = 20): Promise<UserPostsPage> {
-  return requestJson<UserPostsPage>(
-    `/user/api/posts?page=${encodeURIComponent(String(page))}&pageSize=${encodeURIComponent(String(pageSize))}`,
-  );
+export async function listMyPosts(
+  page = 1,
+  pageSize = 20,
+  query = '',
+): Promise<UserPostsPage> {
+  const params = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+  });
+
+  if (query.trim().length > 0) {
+    params.set('query', query.trim());
+  }
+
+  return requestJson<UserPostsPage>(`/user/api/posts?${params.toString()}`);
 }
 
 export interface MyWechatQuietHours {

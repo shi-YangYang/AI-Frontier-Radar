@@ -328,9 +328,10 @@ function toXPostWhereInput(input: Partial<XPostPageQuery>): Prisma.XPostRawWhere
     ...(input.query === undefined
       ? {}
       : {
-          textContent: {
-            contains: input.query,
-          },
+          OR: [
+            { textContent: { contains: input.query } },
+            { title: { contains: input.query } },
+          ],
         }),
     ...(input.postedFrom === undefined && input.postedTo === undefined
       ? {}

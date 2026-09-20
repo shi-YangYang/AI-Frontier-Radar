@@ -507,11 +507,16 @@ export async function listUserPosts(
   const record = isRecord(query) ? query : {};
   const page = readPositiveInt(record.page, 1);
   const pageSize = Math.min(readPositiveInt(record.pageSize, 20), 50);
-  const total = await options.storage.xPosts.countAll();
+  const searchQuery =
+    typeof record.query === 'string' && record.query.trim().length > 0
+      ? record.query.trim()
+      : undefined;
+  const filter = searchQuery === undefined ? {} : { query: searchQuery };
+  const total = await options.storage.xPosts.countAll(filter);
   const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
   const resolvedPage = totalPages === 0 ? 1 : Math.min(page, totalPages);
   const [posts, watchAccounts] = await Promise.all([
-    options.storage.xPosts.listPage({ page: resolvedPage, pageSize }),
+    options.storage.xPosts.listPage({ page: resolvedPage, pageSize, ...filter }),
     options.storage.watchAccounts.listAll(),
   ]);
   const accountByAuthorUserId = new Map(
