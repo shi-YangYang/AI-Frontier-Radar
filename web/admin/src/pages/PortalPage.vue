@@ -3,7 +3,9 @@
     <header class="me-hero">
       <div class="me-hero-inner">
         <div class="me-hero-row">
-          <div class="me-avatar" aria-hidden="true">{{ avatarLetter }}</div>
+          <span class="me-avatar">
+            <BrandLogo :alt="t('brand.name')" />
+          </span>
           <div class="me-hero-text">
             <strong>{{ t('portal.greeting', { username: currentUser?.username ?? '' }) }}</strong>
             <small>{{ t('portal.tagline') }}</small>
@@ -326,6 +328,7 @@ import {
   type UserPostItem,
 } from '../api/admin-api';
 import { signOut, useAuth } from '../auth';
+import BrandLogo from '../components/BrandLogo.vue';
 import ConfirmModal from '../components/ConfirmModal.vue';
 import ToastNotice from '../components/ToastNotice.vue';
 import { useI18n, type MessageKey } from '../i18n';
@@ -374,7 +377,6 @@ const tabs: Array<{ key: PortalTabKey; labelKey: MessageKey }> = [
   { key: 'messages', labelKey: 'me.nav.messages' },
 ];
 const hourOptions = Array.from({ length: 24 }, (_, index) => index);
-const avatarLetter = computed(() => (currentUser.value?.username ?? '?').slice(0, 1).toUpperCase());
 const hasBinding = computed(() => (binding.value?.accounts.length ?? 0) > 0);
 const boundAccount = computed<MyWechatAccount | null>(() => binding.value?.accounts[0] ?? null);
 const quotaLimit = computed(() => boundAccount.value?.sendLimit ?? 10);
