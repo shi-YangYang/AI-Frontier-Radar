@@ -221,19 +221,6 @@
                 <dd><code class="wrap">{{ xSourceSettings.browser.userDataDir }}</code></dd>
               </div>
               <div>
-                <dt>{{ t('settings.xSource.headless') }}</dt>
-                <dd>
-                  <span class="status-badge" :class="xSourceSettings.browser.headless ? 'neutral' : 'good'">
-                    {{
-                      xSourceSettings.browser.headless
-                        ? t('settings.xSource.headlessEnabled')
-                        : t('settings.xSource.headlessDisabled')
-                    }}
-                  </span>
-                  <span class="muted">({{ sourceLabel(xSourceSettings.browser.headlessSource) }})</span>
-                </dd>
-              </div>
-              <div>
                 <dt>{{ t('settings.xSource.proxyPreview') }}</dt>
                 <dd>
                   <code class="wrap">
@@ -248,33 +235,6 @@
                 </dd>
               </div>
             </dl>
-          </article>
-
-          <article class="panel settings-form-panel">
-            <header class="panel-header">
-              <div>
-                <h2>{{ t('settings.xSource.runModeTitle') }}</h2>
-                <p>{{ t('settings.xSource.runModeDescription') }}</p>
-              </div>
-            </header>
-
-            <form class="settings-form x-source-form" @submit.prevent="saveXRunMode">
-              <div class="settings-field">
-                <span>{{ t('settings.xSource.runModeLabel') }}</span>
-                <SelectControl
-                  v-model="xRunModeForm.mode"
-                  :aria-label="t('settings.xSource.runModeLabel')"
-                  :disabled="!isBrowserSourceMode()"
-                  :options="runModeOptions"
-                />
-                <small>{{ t('settings.xSource.runModeHelp') }}</small>
-              </div>
-              <div class="form-actions x-source-actions">
-                <button class="primary" type="submit" :disabled="busy || !isBrowserSourceMode()">
-                  {{ t('settings.xSource.saveRunMode') }}
-                </button>
-              </div>
-            </form>
           </article>
 
           <article class="panel settings-form-panel">
@@ -364,51 +324,6 @@
             </section>
           </article>
 
-          <article class="panel settings-form-panel settings-wide">
-            <header class="panel-header">
-              <div>
-                <h2>{{ t('settings.xSource.loginTitle') }}</h2>
-                <p>{{ t('settings.xSource.loginDescription') }}</p>
-              </div>
-            </header>
-
-            <div class="settings-form x-source-form">
-              <div v-if="!isBrowserSourceMode()" class="inline-alert warn">
-                {{ t('settings.xSource.browserModeRequired') }}
-              </div>
-              <div class="inline-alert warn">
-                {{ t('settings.xSource.noGuiHint') }}
-              </div>
-              <div class="form-actions x-source-actions">
-                <button type="button" :disabled="busy || !isBrowserSourceMode()" @click="runLoginCheck">
-                  {{ t('settings.xSource.checkLogin') }}
-                </button>
-                <button class="primary" type="button" :disabled="busy || !isBrowserSourceMode()" @click="openLoginWindow">
-                  {{ t('settings.xSource.openLoginWindow') }}
-                </button>
-              </div>
-            </div>
-
-            <section
-              v-if="loginCheckResult !== null"
-              class="x-source-result"
-              :aria-label="t('settings.xSource.loginResultAria')"
-            >
-              <span class="status-badge" :class="loginStatusClass(loginCheckResult.status)">
-                {{ t(loginStatusLabelKey(loginCheckResult.status)) }}
-              </span>
-              <p>
-                {{
-                  t(loginStatusDetailKey(loginCheckResult.status), {
-                    xUsername: '@' + loginCheckResult.xUsername,
-                  })
-                }}
-              </p>
-              <small v-if="loginCheckResult.sourceCode !== undefined">
-                sourceCode=<code>{{ loginCheckResult.sourceCode }}</code>
-              </small>
-            </section>
-          </article>
         </section>
 
         <section v-else-if="activeSettingsTab === 'rss'" class="settings-layout single-column">
@@ -932,7 +847,6 @@
                     {{
                       t('settings.runtime.xBrowserSummary', {
                         baseUrl: settings.readonly.xBrowserBaseUrl,
-                        headless: settings.readonly.xBrowserHeadless ? 'true' : 'false',
                         userDataDir: settings.readonly.xBrowserUserDataDir,
                       })
                     }}
@@ -1109,7 +1023,6 @@ import {
   deleteUser,
   listUsers,
   resetUserPassword,
-  checkXSourceLogin,
   deleteWechatAccount,
   getWechatStatus,
   startWechatLogin,
@@ -1129,7 +1042,6 @@ import {
   getSubscriptionRules,
   getXSourceSettings,
   listDeliveryTargets,
-  openXLoginWindow,
   testDeliveryTarget,
   testXSourceAnonymous,
   updateDeliveryTarget,
@@ -1155,8 +1067,6 @@ import {
   type RuntimeXSourceSettings,
   type XSourceAnonymousCheckResult,
   type XSourceAnonymousCheckStatus,
-  type XSourceLoginCheckResult,
-  type XSourceLoginCheckStatus,
 } from '../api/admin-api';
 import ConfirmModal from '../components/ConfirmModal.vue';
 import EmptyState from '../components/EmptyState.vue';
@@ -1187,7 +1097,6 @@ const noticeDanger = ref(false);
 const settings = ref<RuntimeSettingsSummary | null>(null);
 const xSourceSettings = ref<RuntimeXSourceSettings | null>(null);
 const anonymousCheckResult = ref<XSourceAnonymousCheckResult | null>(null);
-const loginCheckResult = ref<XSourceLoginCheckResult | null>(null);
 
 const wechatAccountToDelete = ref<WechatAccount | null>(null);
 const wechatCodeInput = ref('');
@@ -1662,14 +1571,6 @@ function ruleChannelsLabel(rule: SubscriptionRule): string {
     .join(' / ');
 }
 
-const xRunModeForm = reactive({
-  mode: 'headless' as 'headless' | 'headed',
-});
-
-const runModeOptions = computed<{ label: string; value: 'headless' | 'headed' }[]>(() => [
-  { label: t('settings.xSource.runModeHeadless'), value: 'headless' },
-  { label: t('settings.xSource.runModeHeaded'), value: 'headed' },
-]);
 
 const xDiagnosticUsername = ref('openai');
 
@@ -1899,22 +1800,6 @@ async function deleteSubscriptionRule(rule: SubscriptionRule): Promise<void> {
   await persistSubscriptionRules(subscriptionRules.value.filter((entry) => entry.id !== rule.id));
 }
 
-async function saveXRunMode(): Promise<void> {
-  busy.value = true;
-
-  try {
-    const xSource = await updateXBrowserSettings({
-      headless: xRunModeForm.mode === 'headless',
-    });
-    applyXSourceSettings(xSource);
-    setNotice(t('settings.notice.saveXRunModeSuccess'));
-  } catch (error) {
-    setNotice(t('settings.notice.saveXRunModeFailure', { error: toErrorMessage(error) }), true);
-  } finally {
-    busy.value = false;
-  }
-}
-
 async function clearXProxy(): Promise<void> {
   busy.value = true;
 
@@ -1943,39 +1828,7 @@ async function runAnonymousTest(): Promise<void> {
       result.status !== 'available',
     );
   } catch (error) {
-    setNotice(t('settings.notice.anonymousTestFailure', { error: toXSourceActionErrorMessage(error) }), true);
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function runLoginCheck(): Promise<void> {
-  busy.value = true;
-
-  try {
-    const result = await checkXSourceLogin(normalizeXDiagnosticUsername());
-    loginCheckResult.value = result;
-    setNotice(
-      t('settings.notice.loginCheckComplete', {
-        status: t(loginStatusLabelKey(result.status)),
-      }),
-      result.status !== 'logged_in_or_public_available',
-    );
-  } catch (error) {
-    setNotice(t('settings.notice.loginCheckFailure', { error: toXSourceActionErrorMessage(error) }), true);
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function openLoginWindow(): Promise<void> {
-  busy.value = true;
-
-  try {
-    await openXLoginWindow();
-    setNotice(t('settings.notice.openXLoginSuccess'));
-  } catch (error) {
-    setNotice(t('settings.notice.openXLoginFailure', { error: toXSourceActionErrorMessage(error) }), true);
+    setNotice(t('settings.notice.anonymousTestFailure', { error: toErrorMessage(error) }), true);
   } finally {
     busy.value = false;
   }
@@ -2156,7 +2009,6 @@ function applyRssSettings(loadedRssSettings: RuntimeRssSettings): void {
 
 function applyXSourceSettings(loadedXSourceSettings: RuntimeXSourceSettings): void {
   xSourceSettings.value = loadedXSourceSettings;
-  xRunModeForm.mode = loadedXSourceSettings.browser.headless ? 'headless' : 'headed';
 
   if (settings.value === null) {
     return;
@@ -2168,7 +2020,6 @@ function applyXSourceSettings(loadedXSourceSettings: RuntimeXSourceSettings): vo
       ...settings.value.readonly,
       sourceMode: loadedXSourceSettings.mode,
       xBrowserBaseUrl: loadedXSourceSettings.browser.baseUrl,
-      xBrowserHeadless: loadedXSourceSettings.browser.headless,
       xBrowserProxyConfigured: loadedXSourceSettings.browser.proxyConfigured,
       xBrowserProxyPreview: loadedXSourceSettings.browser.proxyPreview,
       xBrowserProxySource: loadedXSourceSettings.browser.proxySource,
@@ -2338,18 +2189,6 @@ function anonymousStatusClass(status: XSourceAnonymousCheckStatus): string {
   return 'bad';
 }
 
-function loginStatusClass(status: XSourceLoginCheckStatus): string {
-  if (status === 'logged_in_or_public_available') {
-    return 'good';
-  }
-
-  if (status === 'login_required' || status === 'rate_limited') {
-    return 'warn';
-  }
-
-  return 'bad';
-}
-
 function anonymousStatusLabelKey(status: XSourceAnonymousCheckStatus): MessageKey {
   const statusKeys: Record<XSourceAnonymousCheckStatus, MessageKey> = {
     account_not_found: 'settings.xSource.anonymousStatus.accountNotFound',
@@ -2376,30 +2215,6 @@ function anonymousStatusDetailKey(status: XSourceAnonymousCheckStatus): MessageK
   return statusKeys[status];
 }
 
-function loginStatusLabelKey(status: XSourceLoginCheckStatus): MessageKey {
-  const statusKeys: Record<XSourceLoginCheckStatus, MessageKey> = {
-    logged_in_or_public_available: 'settings.xSource.loginStatus.loggedInOrPublic',
-    login_required: 'settings.xSource.loginStatus.loginRequired',
-    network_error: 'settings.xSource.loginStatus.networkError',
-    page_unreadable: 'settings.xSource.loginStatus.pageUnreadable',
-    rate_limited: 'settings.xSource.loginStatus.rateLimited',
-  };
-
-  return statusKeys[status];
-}
-
-function loginStatusDetailKey(status: XSourceLoginCheckStatus): MessageKey {
-  const statusKeys: Record<XSourceLoginCheckStatus, MessageKey> = {
-    logged_in_or_public_available: 'settings.xSource.loginDetail.loggedInOrPublic',
-    login_required: 'settings.xSource.loginDetail.loginRequired',
-    network_error: 'settings.xSource.loginDetail.networkError',
-    page_unreadable: 'settings.xSource.loginDetail.pageUnreadable',
-    rate_limited: 'settings.xSource.loginDetail.rateLimited',
-  };
-
-  return statusKeys[status];
-}
-
 function setNotice(message: string, danger = false): void {
   notice.value = message;
   noticeDanger.value = danger;
@@ -2408,24 +2223,6 @@ function setNotice(message: string, danger = false): void {
 function toDeliveryTargetErrorMessage(error: unknown): string {
   const message = toErrorMessage(error);
   return message.includes('\u5df2\u5b58\u5728') ? t('settings.notice.duplicateWebhook') : sanitizeWebhookMessage(message);
-}
-
-function toXSourceActionErrorMessage(error: unknown): string {
-  if (error instanceof AdminApiRequestError) {
-    if (error.code === 'GRAPHICAL_ENV_UNAVAILABLE') {
-      return t('settings.xSource.openLoginNoGui');
-    }
-
-    if (error.code === 'X_SOURCE_MODE_NOT_BROWSER') {
-      return t('settings.xSource.browserModeRequired');
-    }
-
-    if (error.code === 'X_LOGIN_WINDOW_OPEN_FAILED') {
-      return t('settings.xSource.openLoginGenericFailure');
-    }
-  }
-
-  return toErrorMessage(error);
 }
 
 function toErrorMessage(error: unknown): string {

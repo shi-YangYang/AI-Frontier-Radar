@@ -74,7 +74,7 @@ export const BACKEND_MESSAGE_EN: Record<string, string> = {
   "X 浏览器源被限流。": "Browser X source was rate limited.",
   "X 浏览器源账号校验失败。": "Browser X source account validation failed.",
   "X 浏览器源未能渲染可读的主页。": "Browser X source did not render a readable profile.",
-  "X 浏览器源未登录：请以 headless=false 打开并登录账号。": "Browser X source is not logged in. Open with headless=false and sign in with the user account.",
+  "X 浏览器源需要登录态，但当前 profile 未登录（匿名模式可能被限制）。": "The browser X source requires a signed-in profile, but the current profile is not signed in.",
   "X 浏览器源请求失败。": "Browser X source request failed.",
   "未找到指定的 X 账号。": "The requested X account was not found.",
   "X 源请求失败。": "The X source request failed.",

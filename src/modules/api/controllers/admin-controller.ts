@@ -18,8 +18,6 @@ import {
   XSourceDiagnosticError,
   createXSourceDiagnostics,
   type XSourceAnonymousCheckResult,
-  type XSourceLoginCheckResult,
-  type XSourceOpenLoginResult,
 } from '../../polling/source/x-source-diagnostics';
 import type { RuntimeSchedulerRunNowResult } from '../../scheduler';
 import {
@@ -1159,38 +1157,6 @@ export async function testAdminXSourceAnonymous(
     getEffectiveAppConfig: () => runtimeSettings.getEffectiveAppConfig(),
   });
   const result = await runXSourceDiagnostic(() => diagnostics.testAnonymous(xUsername));
-
-  return {
-    ok: true,
-    data: result,
-  };
-}
-
-export async function checkAdminXSourceLogin(
-  body: unknown,
-  options: AdminControllerOptions,
-): Promise<{ ok: true; data: XSourceLoginCheckResult }> {
-  const xUsername = readXSourceUsernameBody(body);
-  const runtimeSettings = resolveRuntimeSettings(options);
-  const diagnostics = createXSourceDiagnostics({
-    getEffectiveAppConfig: () => runtimeSettings.getEffectiveAppConfig(),
-  });
-  const result = await runXSourceDiagnostic(() => diagnostics.checkLogin(xUsername));
-
-  return {
-    ok: true,
-    data: result,
-  };
-}
-
-export async function openAdminXLoginWindow(
-  options: AdminControllerOptions,
-): Promise<{ ok: true; data: XSourceOpenLoginResult }> {
-  const runtimeSettings = resolveRuntimeSettings(options);
-  const diagnostics = createXSourceDiagnostics({
-    getEffectiveAppConfig: () => runtimeSettings.getEffectiveAppConfig(),
-  });
-  const result = await runXSourceDiagnostic(() => diagnostics.openLoginWindow());
 
   return {
     ok: true,

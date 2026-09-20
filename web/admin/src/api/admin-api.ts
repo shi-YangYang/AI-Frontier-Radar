@@ -242,8 +242,6 @@ export interface RuntimeSettingsSummary {
 export interface RuntimeXSourceSettings {
   browser: {
     baseUrl: string;
-    headless: boolean;
-    headlessSource: RuntimeSettingSource;
     navigationTimeoutMs: number;
     postLoadTimeoutMs: number;
     proxyConfigured: boolean;
@@ -262,7 +260,6 @@ export interface UpdatePollingSettingsInput {
 }
 
 export interface UpdateXBrowserSettingsInput {
-  headless?: boolean;
   proxyUrl?: string;
 }
 
@@ -274,32 +271,11 @@ export type XSourceAnonymousCheckStatus =
   | 'page_unreadable'
   | 'rate_limited';
 
-export type XSourceLoginCheckStatus =
-  | 'logged_in_or_public_available'
-  | 'login_required'
-  | 'network_error'
-  | 'page_unreadable'
-  | 'rate_limited';
-
 export interface XSourceAnonymousCheckResult {
   message: string;
   sourceCode?: string;
   status: XSourceAnonymousCheckStatus;
   xUsername: string;
-}
-
-export interface XSourceLoginCheckResult {
-  message: string;
-  sourceCode?: string;
-  status: XSourceLoginCheckStatus;
-  xUsername: string;
-}
-
-export interface XSourceOpenLoginResult {
-  loginUrl: string;
-  message: string;
-  status: 'opened';
-  userDataDir: string;
 }
 
 export class AdminApiRequestError extends Error {
@@ -703,19 +679,6 @@ export async function testXSourceAnonymous(
       method: 'POST',
     },
   );
-}
-
-export async function checkXSourceLogin(xUsername: string): Promise<XSourceLoginCheckResult> {
-  return requestJson<XSourceLoginCheckResult>('/admin/api/settings/x-source/check-login', {
-    body: JSON.stringify({ xUsername }),
-    method: 'POST',
-  });
-}
-
-export async function openXLoginWindow(): Promise<XSourceOpenLoginResult> {
-  return requestJson<XSourceOpenLoginResult>('/admin/api/settings/x-source/open-login', {
-    method: 'POST',
-  });
 }
 
 export async function updateFeishuSettings(webhookUrl: string): Promise<RuntimeFeishuSettings> {

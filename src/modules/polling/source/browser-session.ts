@@ -1,7 +1,6 @@
 import { chromium, type BrowserContext, type Page } from 'playwright';
 
 export interface BrowserSessionOptions {
-  headless?: boolean;
   proxyUrl?: string;
   userAgent?: string;
 }
@@ -19,13 +18,11 @@ const CDP_ARCHITECTURE_BY_CPU: Record<string, string> = {
 };
 
 export class BrowserSession {
-  private readonly headless: boolean;
   private readonly proxyUrl?: string;
   private readonly userAgent: string;
   private queue: Promise<void> = Promise.resolve();
 
   public constructor(options: BrowserSessionOptions = {}) {
-    this.headless = options.headless ?? true;
     this.proxyUrl = options.proxyUrl;
     this.userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
   }
@@ -33,7 +30,7 @@ export class BrowserSession {
   public withPage<T>(task: (page: Page) => Promise<T>): Promise<T> {
     return this.runExclusive(async () => {
       const browser = await chromium.launch({
-        headless: this.headless,
+        headless: true,
         ...toLaunchProxyOption(this.proxyUrl),
       });
       const context = await browser.newContext({
@@ -44,7 +41,7 @@ export class BrowserSession {
 
       try {
         const page = await context.newPage();
-        await applyHeadlessUserAgentMask(context, page, this.headless, this.userAgent);
+        await applyHeadlessUserAgentMask(context, page, this.userAgent);
 
         return await task(page);
       } finally {
@@ -81,13 +78,8 @@ function toLaunchProxyOption(proxyUrl: string | undefined): { proxy?: { server: 
 async function applyHeadlessUserAgentMask(
   context: BrowserContext,
   page: Page,
-  enabled: boolean,
   maskedUserAgent: string,
 ): Promise<void> {
-  if (!enabled) {
-    return;
-  }
-
   const version = context.browser()?.version() ?? '';
   const majorVersion = version.split('.')[0] || '0';
   const brands = [

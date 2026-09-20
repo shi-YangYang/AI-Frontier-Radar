@@ -99,7 +99,6 @@ function createRuntimeXSourceProvider(config: AppConfig): SourceProvider {
   if (config.source.mode === 'browser') {
     return createBrowserXSourceProvider({
       baseUrl: config.source.x.browser.baseUrl,
-      headless: config.source.x.browser.headless,
       navigationTimeoutMs: config.source.x.browser.navigationTimeoutMs,
       postLoadTimeoutMs: config.source.x.browser.postLoadTimeoutMs,
       proxyUrl: config.source.x.browser.proxyUrl,

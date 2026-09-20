@@ -33,7 +33,6 @@ export type WatchAccountsSourceConfig =
 
 export interface XBrowserSourceConfig {
   baseUrl: string;
-  headless: boolean;
   navigationTimeoutMs: number;
   postLoadTimeoutMs: number;
   proxyUrl?: string;

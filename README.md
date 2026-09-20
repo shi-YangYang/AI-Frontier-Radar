@@ -245,7 +245,6 @@ npm run dev
 | --- | --- | --- |
 | `X_SOURCE_MODE` | `browser` | `browser` 或 `api` |
 | `X_BROWSER_BASE_URL` | `https://x.com` | 浏览器模式访问入口 |
-| `X_BROWSER_HEADLESS` | `true` | 是否无头运行，可在 Web 控制台 X 数据源中覆盖 |
 | `X_BROWSER_USER_DATA_DIR` | `.x-browser-public-profile` | 浏览器 profile 目录 |
 | `X_BROWSER_PROXY_URL` | 空 | 浏览器代理 URL，可在 Web 控制台覆盖 |
 | `X_BROWSER_NAVIGATION_TIMEOUT_MS` | `30000` | 页面导航超时 |
@@ -280,7 +279,7 @@ X_SOURCE_MODE=browser
 X_BROWSER_PROXY_URL=http://127.0.0.1:7890
 ```
 
-> 注意：X 会拦截暴露 `HeadlessChrome` 标识的无头浏览器。本项目在无头模式下会自动伪装该标识（UA 与 Client Hints）；如需切换无头/有头，到 `/settings -> X 数据源 -> 浏览器运行模式` 设置即可，无需修改 `.env`。
+> 注意：X 会拦截暴露 `HeadlessChrome` 标识的无头浏览器。本项目会自动伪装该标识（UA 与 Client Hints），始终以无头模式运行（服务器无需图形界面）。
 
 支持协议：
 
@@ -511,7 +510,7 @@ npm run prisma:generate → npm run typecheck → npm run build → npm run smok
 
 ## CD（部署到自己的服务器）
 
-在 GitHub Actions 手动触发 **CD** 工作流即可部署：GitHub 负责构建，rsync 增量同步到服务器，按需安装依赖、应用数据库迁移并重启服务。
+在 GitHub Actions 手动触发 **CD** 工作流即可部署：GitHub 构建 Docker 镜像推送到 GHCR，服务器 `docker compose pull` 拉取更新（只拉变化的层），容器启动时自动应用数据库迁移。
 
 完整步骤（服务器初始化、Secrets 配置、触发方式、回滚与常见问题）见 [docs/deployment.md](docs/deployment.md)。
 
