@@ -100,7 +100,7 @@ jobs:
       SSH_HOST: ${{ secrets.SSH_HOST }}
       SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
       SSH_USER: ${{ secrets.SSH_USER }}
-      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/ai-frontier-radar' }}
     steps:
       - name: Download release artifact
         uses: actions/download-artifact@v4
@@ -114,14 +114,21 @@ jobs:
           tar -xzf release.tar.gz -C release
 
       - name: Validate required secrets
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          for name in SSH_HOST SSH_USER DEPLOY_PATH; do
+          missing=0
+          for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY; do
             if [ -z "${!name}" ]; then
               echo "缺少必要 Secret：$name" >&2
-              exit 1
+              missing=1
             fi
           done
+          if [ "$missing" -ne 0 ]; then
+            echo "请配置 SSH_HOST、SSH_USER、SSH_PRIVATE_KEY 三个 Secrets 后重试。" >&2
+            exit 1
+          fi
 
       - name: Setup SSH
         env:

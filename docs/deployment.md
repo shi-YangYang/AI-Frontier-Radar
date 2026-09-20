@@ -122,16 +122,23 @@ ssh -i ~/.ssh/ai-frontier-radar-deploy deploy@<服务器IP> 'echo ok'
 
 仓库 → **Settings → Secrets and variables → Actions → New repository secret**，添加：
 
-| Secret | 必填 | 说明 |
-| --- | --- | --- |
-| `SSH_HOST` | ✅ | 服务器 IP 或域名 |
-| `SSH_USER` | ✅ | 部署用户，例如 `deploy` |
-| `SSH_PRIVATE_KEY` | ✅ | 上一步生成的私钥**全文**（含 `-----BEGIN/END-----`） |
-| `DEPLOY_PATH` | ✅ | 部署目录，例如 `/opt/ai-frontier-radar` |
-| `SSH_PORT` | 可选 | SSH 端口，默认 `22` |
-| `SSH_KNOWN_HOSTS` | 推荐 | 服务器 host key（防中间人）。本机执行 `ssh-keyscan -p 22 <服务器IP>`，把输出整段粘贴；不配置时工作流会临时 `ssh-keyscan` |
+**必需（3 个）**：
 
-> 私钥内容：`cat ~/.ssh/ai-frontier-radar-deploy` 全选复制。
+| Secret | 说明 |
+| --- | --- |
+| `SSH_HOST` | 服务器 IP 或域名 |
+| `SSH_USER` | 部署用户，例如 `ubuntu` |
+| `SSH_PRIVATE_KEY` | 部署私钥**全文**（含 `-----BEGIN/END-----`） |
+
+**可选（不填有默认值）**：
+
+| Secret | 默认 | 说明 |
+| --- | --- | --- |
+| `DEPLOY_PATH` | `/opt/ai-frontier-radar` | 服务器部署目录 |
+| `SSH_PORT` | `22` | SSH 端口 |
+| `SSH_KNOWN_HOSTS` | 自动 `ssh-keyscan` | 固定服务器 host key（防中间人，推荐） |
+
+> 私钥内容：`cat ~/.ssh/leida_deploy` 全选复制。
 
 ---
 
