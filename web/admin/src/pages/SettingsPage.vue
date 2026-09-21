@@ -509,7 +509,7 @@
             <div class="settings-section-body">
 
             <div class="settings-form wechat-form">
-              <div v-if="wechatStatus === null" class="empty-panel">{{ t('settings.loading') }}</div>
+              <div v-if="wechatStatus === null" class="empty-panel">{{ t(wechatStatusFailed ? 'wechat.statusUnavailable' : 'settings.loading') }}</div>
               <template v-else>
               <div
                 v-if="!wechatStatus.installed"
@@ -522,8 +522,8 @@
                 <div>
                   <dt>{{ t('settings.wechat.bridgeStatus') }}</dt>
                   <dd>
-                    <span class="status-badge" :class="wechatStatus.running ? 'good' : 'neutral'">
-                      {{ wechatStatus.running ? t('settings.wechat.running') : t('settings.wechat.stopped') }}
+                    <span class="status-badge" :class="wechatUnavailable ? 'neutral' : 'good'">
+                      {{ t(wechatStatus.running ? (wechatUnavailable ? 'settings.wechat.unavailable' : 'settings.wechat.running') : 'settings.wechat.stopped') }}
                     </span>
                     <span class="muted"> :{{ wechatStatus.port }}</span>
                   </dd>
@@ -541,19 +541,20 @@
                   <dd>{{ wechatStatus.message }}</dd>
                 </div>
               </dl>
+              <p v-if="wechatUnavailable" class="inline-alert" role="status">{{ t('wechat.statusUnavailable') }}</p>
 
               <div class="settings-actions">
                 <button
                   class="primary"
                   type="button"
-                  :disabled="busy || !wechatStatus.installed || !wechatStatus.running"
+                  :disabled="busy || !wechatStatus.installed || wechatUnavailable"
                   @click="startWechatLoginNow"
                 >
                   {{ wechatStatus.accounts.length > 0 ? t('settings.wechat.addAccount') : t('settings.wechat.login') }}
                 </button>
                 <button
                   type="button"
-                  :disabled="busy || !wechatStatus.loggedIn"
+                  :disabled="busy || wechatUnavailable || wechatStatus.accounts.length === 0"
                   @click="sendWechatTest"
                 >
                   {{ t('settings.wechat.testSend') }}
@@ -580,7 +581,8 @@
               <div class="settings-field">
                 <span>{{ t('settings.wechat.accountsTitle') }}</span>
                 <p class="muted wechat-delivery-hint">{{ t('settings.wechat.accountsAutoPush') }}</p>
-                <div v-if="wechatStatus.accounts.length === 0" class="empty-panel">
+                <div v-if="wechatUnavailable" class="empty-panel">{{ t('settings.wechat.accountsUnavailable') }}</div>
+                <div v-else-if="wechatStatus.accounts.length === 0" class="empty-panel">
                   {{ t('settings.wechat.accountsEmpty') }}
                 </div>
                 <div v-else class="table-wrap"><table class="data-table">
@@ -1099,7 +1101,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import {
@@ -1191,19 +1193,43 @@ const anonymousCheckResult = ref<XSourceAnonymousCheckResult | null>(null);
 
 const wechatAccountToDelete = ref<WechatAccount | null>(null);
 const wechatCodeInput = ref('');
-const wechatQrCode = ref<{ qrcodeDataUrl?: string; qrcodeUrl?: string } | null>(null);
 const wechatStatus = ref<WechatStatus | null>(null);
+const wechatStatusFailed = ref(false);
+const wechatUnavailable = computed(() => wechatStatusFailed.value ||
+  (wechatStatus.value !== null && (!wechatStatus.value.running || wechatStatus.value.loginStatus === 'unavailable')));
+const wechatQrCode = computed(() => {
+  const status = wechatStatus.value;
+  return !wechatUnavailable.value && status !== null && ['pending', 'scanned', 'need-code'].includes(status.loginStatus) &&
+    (status.qrcodeDataUrl || status.qrcodeUrl) ? status : null;
+});
 let wechatPollTimer: ReturnType<typeof setInterval> | null = null;
+let wechatStatusLoading = false;
+let wechatStatusRequestId = 0;
+let settingsDisposed = false;
+
+watch(busy, (value) => {
+  if (value) {
+    wechatStatusRequestId++;
+    wechatStatusLoading = false;
+  }
+}, { flush: 'sync' });
 
 async function loadWechatStatus(): Promise<void> {
+  if (settingsDisposed || activeSettingsTab.value !== 'wechat') return;
+  const requestId = ++wechatStatusRequestId;
+  wechatStatusLoading = true;
   try {
-    wechatStatus.value = await getWechatStatus();
-
-    if (wechatStatus.value.loginStatus === 'connected' || wechatStatus.value.loginStatus === 'failed') {
-      stopWechatPolling();
+    const status = await getWechatStatus();
+    if (requestId === wechatStatusRequestId) {
+      wechatStatus.value = status;
+      wechatStatusFailed.value = false;
     }
-  } catch (error) {
-    showSettingsError(error);
+  } catch {
+    if (requestId === wechatStatusRequestId) {
+      wechatStatusFailed.value = true;
+    }
+  } finally {
+    if (requestId === wechatStatusRequestId) wechatStatusLoading = false;
   }
 }
 
@@ -1212,12 +1238,14 @@ function stopWechatPolling(): void {
     clearInterval(wechatPollTimer);
     wechatPollTimer = null;
   }
+  wechatStatusRequestId++;
+  wechatStatusLoading = false;
 }
 
 function startWechatPolling(): void {
-  stopWechatPolling();
+  if (wechatPollTimer !== null) return;
   wechatPollTimer = setInterval(() => {
-    void loadWechatStatus();
+    if (!busy.value && !wechatStatusLoading) void loadWechatStatus();
   }, 3_000);
 }
 
@@ -1226,7 +1254,7 @@ async function toggleWechatAccountPush(account: WechatAccount): Promise<void> {
 
   try {
     await updateWechatAccountPush(account.accountId, !account.pushEnabled);
-    wechatStatus.value = await getWechatStatus();
+    await loadWechatStatus();
     notice.value = t('settings.wechat.accountPushSaved');
     noticeDanger.value = false;
   } catch (error) {
@@ -1247,8 +1275,8 @@ async function confirmRemoveWechatAccount(): Promise<void> {
   busy.value = true;
 
   try {
-    await deleteWechatAccount(account.accountId);
-    notice.value = t('settings.wechat.accountDeleted', { account: account.accountId });
+    const deleted = await deleteWechatAccount(account.accountId);
+    notice.value = deleted ? t('settings.wechat.accountDeleted', { account: account.accountId }) : t('portal.bindingGone');
     noticeDanger.value = false;
     await loadWechatStatus();
   } catch (error) {
@@ -1262,10 +1290,8 @@ async function startWechatLoginNow(): Promise<void> {
   busy.value = true;
 
   try {
-    const result = await startWechatLogin(wechatStatus.value?.loggedIn === true);
-    wechatQrCode.value = { qrcodeDataUrl: result.qrcodeDataUrl, qrcodeUrl: result.qrcodeUrl };
+    await startWechatLogin(wechatStatus.value?.loggedIn === true);
     await loadWechatStatus();
-    startWechatPolling();
     notice.value = t('settings.wechat.loginStarted');
     noticeDanger.value = false;
   } catch (error) {
@@ -1741,7 +1767,10 @@ onMounted(() => {
   void loadSettings({ silent: true });
   void loadDataSettings();
   void loadBackups();
-  void loadWechatStatus();
+  if (activeSettingsTab.value === 'wechat') {
+    void loadWechatStatus();
+    startWechatPolling();
+  }
 
   if (activeSettingsTab.value === 'users') {
     void loadUsers();
@@ -1752,11 +1781,19 @@ onMounted(() => {
   }
 });
 
+onBeforeUnmount(() => {
+  settingsDisposed = true;
+  stopWechatPolling();
+});
+
 watch(activeSettingsTab, (tab) => {
   targetCreateOpen.value = false;
   userCreateOpen.value = false;
   if (tab === 'wechat') {
     void loadWechatStatus();
+    startWechatPolling();
+  } else {
+    stopWechatPolling();
   }
 
   if (tab === 'users') {

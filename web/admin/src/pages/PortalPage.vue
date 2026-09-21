@@ -46,6 +46,9 @@
         <p>{{ t(activeTab === 'wechat' ? 'portal.tagline' : 'me.posts.description') }}</p>
       </header>
       <ToastNotice :message="notice" :danger="noticeDanger" />
+      <p v-if="activeTab === 'wechat' && bindingUnavailable" class="inline-alert" role="status">
+        {{ t('wechat.statusUnavailable') }}
+      </p>
 
       <div v-if="activeTab === 'wechat'" class="me-wechat-layout" :class="{ 'is-bound': hasBinding }">
         <section class="me-card me-connection-card">
@@ -78,7 +81,7 @@
               <li>{{ t('me.bind.step1') }}</li>
               <li>{{ t('me.bind.step2') }}</li>
             </ol>
-            <button class="me-primary" type="button" :disabled="busy || qrVisible" @click="startBind">
+            <button class="me-primary" type="button" :disabled="busy || loginPending || bindingUnavailable" @click="startBind">
               {{ t('portal.bindAction') }}
             </button>
           </div>
@@ -89,17 +92,17 @@
                 <span class="me-account-label">{{ t('portal.boundWechat') }}</span>
                 <code class="me-account-id" :title="boundAccount?.accountId">{{ boundAccount?.accountId }}</code>
               </div>
-              <button class="me-link-button" type="button" :disabled="busy" @click="accountToUnbind = boundAccount">
+              <button class="me-link-button" type="button" :disabled="busy || bindingUnavailable" @click="accountToUnbind = boundAccount">
                 {{ t('portal.unbindAction') }}
               </button>
             </div>
 
-            <div class="me-status" :class="sessionActive ? 'ok' : 'warn'">
+            <div class="me-status" :class="sessionActive && boundAccount?.enabled ? 'ok' : 'warn'">
               <span class="me-status-dot" aria-hidden="true"></span>
               <span>{{ sessionStateLabel }}</span>
             </div>
 
-            <div class="me-quota">
+            <div v-if="!bindingUnavailable" class="me-quota">
               <div class="me-quota-head">
                 <span class="me-quota-label">{{ t('me.quota.title') }}</span>
                 <span class="me-quota-value" :class="{ full: quotaFull }">
@@ -113,8 +116,8 @@
             </div>
           </template>
 
-          <div v-if="qrVisible" class="me-qr">
-            <p class="me-qr-hint">{{ t('portal.scanHint') }}</p>
+          <div v-if="loginPending && !bindingUnavailable" class="me-qr">
+            <p class="me-qr-hint">{{ t(qrVisible ? 'portal.scanHint' : 'portal.qrLoading') }}</p>
             <img v-if="qrDataUrl !== null" :src="qrDataUrl" alt="WeChat login QR" class="wechat-qr-image" />
             <a v-if="qrUrl !== null" :href="qrUrl" rel="noreferrer" target="_blank">{{ t('portal.openQrLink') }}</a>
             <p class="me-bind-hint">{{ t('me.bind.hintAfterScan') }}</p>
@@ -125,7 +128,7 @@
               </label>
               <button class="me-primary" type="submit" :disabled="busy">{{ t('portal.submitCode') }}</button>
             </form>
-            <button class="me-ghost-button" type="button" @click="cancelBind">{{ t('portal.cancelBind') }}</button>
+            <button class="me-ghost-button" type="button" :disabled="busy" @click="cancelBind">{{ t('portal.cancelBind') }}</button>
           </div>
         </section>
 
@@ -438,7 +441,11 @@ const postsFailed = ref(false);
 const postsPagination = ref({ page: 1, pageSize: 18, total: 0, totalPages: 0 });
 const qrDataUrl = ref<string | null>(null);
 const qrUrl = ref<string | null>(null);
-const qrVisible = ref(false);
+const bindingRefreshFailed = ref(false);
+const bindingUnavailable = computed(() => bindingRefreshFailed.value || binding.value?.login.status === 'unavailable');
+const loginPending = computed(() => isPendingLogin(loginStatus.value));
+const qrVisible = computed(() => !bindingUnavailable.value && loginPending.value &&
+  (qrDataUrl.value !== null || qrUrl.value !== null));
 const quietEnabled = ref(false);
 const quietEndHour = ref(8);
 const quietStartHour = ref(23);
@@ -450,6 +457,9 @@ const selectedSourceIds = ref<string[]>([]);
 const sourcesAll = ref(true);
 let pollTimer: number | null = null;
 let saveStateTimer: number | null = null;
+let bindingRequestId = 0;
+let bindingRefreshing = false;
+let disposed = false;
 
 const tabs: Array<{ key: PortalTabKey; labelKey: MessageKey }> = [
   { key: 'wechat', labelKey: 'me.nav.wechat' },
@@ -464,13 +474,17 @@ const quotaFull = computed(() => quotaCount.value >= quotaLimit.value);
 const quotaPercent = computed(() =>
   quotaLimit.value === 0 ? '0%' : `${Math.min(100, Math.round((quotaCount.value / quotaLimit.value) * 100))}%`,
 );
-const sessionActive = computed(() => boundAccount.value?.sessionActive === true);
+const sessionActive = computed(() => !bindingUnavailable.value && boundAccount.value?.sessionActive === true);
 const sessionStateLabel = computed(() =>
-  sessionActive.value
-    ? t('me.session.active')
+  bindingUnavailable.value
+    ? t('me.session.unavailable')
     : binding.value === null
       ? t('me.session.checking')
-      : t('me.session.inactive'),
+      : boundAccount.value?.enabled === false
+        ? t('portal.pushOff')
+        : sessionActive.value
+          ? t('me.session.active')
+          : t('me.session.inactive'),
 );
 const saveStateLabel = computed(() =>
   saveState.value === 'saving'
@@ -529,39 +543,49 @@ const paginationItems = computed<PaginationItem[]>(() => {
 
 onMounted(() => {
   void loadBinding();
+  startPolling();
   void loadPosts(1);
 });
 
 onBeforeUnmount(() => {
+  disposed = true;
   stopPolling();
   stopSaveStateTimer();
 });
 
 function switchTab(tab: PortalTabKey): void {
+  if (activeTab.value === tab) return;
   activeTab.value = tab;
+  if (tab === 'wechat') {
+    void refreshBindStatus();
+    startPolling();
+  } else {
+    stopPolling();
+  }
 }
 
 async function loadBinding(): Promise<void> {
   bindingLoading.value = true;
 
-  try {
-    binding.value = await getMyWechatBinding();
-    syncBindingState();
-  } catch (error) {
-    showError(error);
-  } finally {
-    bindingLoading.value = false;
-  }
+  await refreshBindStatus(true);
+  bindingLoading.value = false;
 }
 
-function syncBindingState(): void {
+function syncBindingState(previous: MyWechatAccount | null, resetSettings: boolean): void {
   const account = boundAccount.value;
+  const accountChanged = previous?.accountId !== account?.accountId;
 
-  selectedSourceIds.value = account?.sourceIds ?? [];
-  sourcesAll.value = selectedSourceIds.value.length === 0;
-  quietEnabled.value = account?.quietHours?.enabled === true;
-  quietStartHour.value = account?.quietHours?.startHour ?? 23;
-  quietEndHour.value = account?.quietHours?.endHour ?? 8;
+  // A status poll must not reset the unsaved choice to switch to custom sources.
+  if (resetSettings || accountChanged || JSON.stringify(previous?.sourceIds) !== JSON.stringify(account?.sourceIds)) {
+    selectedSourceIds.value = [...(account?.sourceIds ?? [])];
+    sourcesAll.value = selectedSourceIds.value.length === 0;
+  }
+  if (resetSettings || accountChanged || JSON.stringify(previous?.quietHours) !== JSON.stringify(account?.quietHours)) {
+    quietEnabled.value = account?.quietHours?.enabled === true;
+    quietStartHour.value = account?.quietHours?.startHour ?? 23;
+    quietEndHour.value = account?.quietHours?.endHour ?? 8;
+  }
+  if (accountChanged) accountToUnbind.value = null;
 }
 
 async function loadPosts(page: number): Promise<void> {
@@ -604,17 +628,17 @@ function clearSearch(): void {
 }
 
 async function startBind(): Promise<void> {
-  busy.value = true;
+  beginBindingOperation();
   notice.value = '';
 
   try {
     const state = await startMyWechatBind();
+    if (disposed) return;
 
     qrDataUrl.value = state.qrcodeDataUrl ?? null;
     qrUrl.value = state.qrcodeUrl ?? null;
     loginStatus.value = state.status;
-    qrVisible.value = state.qrcodeDataUrl !== undefined || state.qrcodeUrl !== undefined;
-    startPolling();
+    await refreshBindStatus();
   } catch (error) {
     showError(error);
   } finally {
@@ -623,9 +647,9 @@ async function startBind(): Promise<void> {
 }
 
 function startPolling(): void {
-  stopPolling();
+  if (pollTimer !== null || disposed) return;
   pollTimer = window.setInterval(() => {
-    void refreshBindStatus();
+    if (!busy.value && !bindingRefreshing && !bindingLoading.value) void refreshBindStatus();
   }, 3000);
 }
 
@@ -634,47 +658,59 @@ function stopPolling(): void {
     window.clearInterval(pollTimer);
     pollTimer = null;
   }
+  invalidateBindingRequest();
 }
 
-async function refreshBindStatus(): Promise<void> {
+function invalidateBindingRequest(): void {
+  bindingRequestId++;
+  bindingRefreshing = false;
+}
+
+function beginBindingOperation(): void {
+  busy.value = true;
+  invalidateBindingRequest();
+}
+
+function isPendingLogin(status: string): boolean {
+  return ['pending', 'scanned', 'need-code'].includes(status);
+}
+
+async function refreshBindStatus(resetSettings = false): Promise<void> {
+  if (disposed || activeTab.value !== 'wechat') return;
+  const requestId = ++bindingRequestId;
+  bindingRefreshing = true;
   try {
     const next = await getMyWechatBinding();
+    if (requestId !== bindingRequestId || disposed) return;
+    const previousAccount = boundAccount.value;
+    const wasPending = isPendingLogin(loginStatus.value);
+    const loginChanged = loginStatus.value !== next.login.status || binding.value?.login.message !== next.login.message;
 
     binding.value = next;
+    bindingRefreshFailed.value = false;
     loginStatus.value = next.login.status;
     qrDataUrl.value = next.login.qrcodeDataUrl ?? null;
     qrUrl.value = next.login.qrcodeUrl ?? null;
+    syncBindingState(previousAccount, resetSettings);
 
-    if (next.login.status === 'failed' || (qrVisible.value && next.login.status === 'idle' && next.accounts.length === 0)) {
-      qrVisible.value = false;
-      stopPolling();
+    if ((next.login.status === 'failed' && loginChanged) || (wasPending && next.login.status === 'idle' && next.accounts.length === 0)) {
       noticeDanger.value = true;
       notice.value = tBackend(next.login.message ?? t('portal.bindFailed'));
-      return;
+    } else if (wasPending && next.accounts.length > 0 && !isPendingLogin(next.login.status) && next.login.status !== 'unavailable') {
+      noticeDanger.value = false;
+      notice.value = t('portal.bindSuccess');
     }
-
-    if (next.accounts.length > 0) {
-      const active = next.accounts[0]?.sessionActive === true;
-
-      if (active) {
-        qrVisible.value = false;
-        stopPolling();
-        noticeDanger.value = false;
-        notice.value = t('portal.bindSuccess');
-      } else if (qrVisible.value) {
-        noticeDanger.value = false;
-        notice.value = t('me.bind.waitingMessage');
-      }
-
-      syncBindingState();
+  } catch {
+    if (requestId === bindingRequestId && !disposed) {
+      bindingRefreshFailed.value = true;
     }
-  } catch (error) {
-    showError(error);
+  } finally {
+    if (requestId === bindingRequestId) bindingRefreshing = false;
   }
 }
 
 async function submitCode(): Promise<void> {
-  busy.value = true;
+  beginBindingOperation();
 
   try {
     await submitMyWechatLoginCode(codeInput.value.trim());
@@ -687,10 +723,19 @@ async function submitCode(): Promise<void> {
   }
 }
 
-function cancelBind(): void {
-  qrVisible.value = false;
-  stopPolling();
-  void cancelMyWechatBind().catch(() => undefined);
+async function cancelBind(): Promise<void> {
+  beginBindingOperation();
+  try {
+    await cancelMyWechatBind();
+    if (disposed) return;
+    loginStatus.value = 'idle';
+    codeInput.value = '';
+    await refreshBindStatus();
+  } catch (error) {
+    showError(error);
+  } finally {
+    busy.value = false;
+  }
 }
 
 async function toggleQuietHours(): Promise<void> {
@@ -705,7 +750,7 @@ async function saveQuietHours(): Promise<void> {
     return;
   }
 
-  busy.value = true;
+  beginBindingOperation();
   markSaving();
 
   try {
@@ -718,8 +763,10 @@ async function saveQuietHours(): Promise<void> {
     quietEnabled.value = result?.enabled === true;
     quietStartHour.value = result?.startHour ?? quietStartHour.value;
     quietEndHour.value = result?.endHour ?? quietEndHour.value;
+    account.quietHours = result;
     markSaved();
   } catch (error) {
+    saveState.value = 'idle';
     showError(error);
     await loadBinding();
   } finally {
@@ -773,7 +820,7 @@ async function saveSources(): Promise<void> {
     return;
   }
 
-  busy.value = true;
+  beginBindingOperation();
   markSaving();
 
   try {
@@ -782,8 +829,10 @@ async function saveSources(): Promise<void> {
 
     selectedSourceIds.value = saved;
     sourcesAll.value = saved.length === 0;
+    account.sourceIds = [...saved];
     markSaved();
   } catch (error) {
+    saveState.value = 'idle';
     showError(error);
     await loadBinding();
   } finally {
@@ -800,13 +849,13 @@ async function confirmUnbind(): Promise<void> {
     return;
   }
 
-  busy.value = true;
+  beginBindingOperation();
   notice.value = '';
 
   try {
-    await unbindMyWechatAccount(account.accountId);
+    const deleted = await unbindMyWechatAccount(account.accountId);
     noticeDanger.value = false;
-    notice.value = t('portal.unbindSuccess');
+    notice.value = t(deleted ? 'portal.unbindSuccess' : 'portal.bindingGone');
     await loadBinding();
   } catch (error) {
     showError(error);
@@ -853,6 +902,7 @@ function markSaving(): void {
 }
 
 function markSaved(): void {
+  if (disposed) return;
   saveState.value = 'saved';
   stopSaveStateTimer();
   saveStateTimer = window.setTimeout(() => {
