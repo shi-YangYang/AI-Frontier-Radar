@@ -86,45 +86,28 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
-import { signIn } from '../auth';
+import { resolveAuthProviders, signIn, useAuth } from '../auth';
 import BrandLogo from '../components/BrandLogo.vue';
 import { useI18n } from '../i18n';
 
-const { t, toggleLanguage } = useI18n();
+const { htmlLanguage, t, toggleLanguage } = useI18n();
+const { authProviders } = useAuth();
 const route = useRoute();
 const router = useRouter();
 const busy = ref(false);
-const dingtalkEnabled = ref(false);
 const errorMessage = ref<string | null>(null);
 const password = ref('');
 const username = ref('');
 const resetNotice = route.query.reset === '1';
+const dingtalkEnabled = computed(() => authProviders.value?.dingtalk.enabled === true);
 
 onMounted(() => {
   resolveErrorNotice();
-  void loadProviders();
+  void resolveAuthProviders(true);
 });
-
-async function loadProviders(): Promise<void> {
-  try {
-    const response = await fetch('/auth/providers', { headers: { Accept: 'application/json' } });
-
-    if (!response.ok) {
-      return;
-    }
-
-    const payload = (await response.json()) as {
-      data?: { dingtalk?: { enabled?: boolean } };
-    };
-
-    dingtalkEnabled.value = payload.data?.dingtalk?.enabled === true;
-  } catch {
-    dingtalkEnabled.value = false;
-  }
-}
 
 function resolveErrorNotice(): void {
   const error = typeof route.query.error === 'string' ? route.query.error : '';

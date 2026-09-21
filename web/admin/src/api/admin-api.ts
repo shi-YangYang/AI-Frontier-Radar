@@ -1063,6 +1063,22 @@ export interface AuthUser {
   username: string;
 }
 
+export interface AuthProviders {
+  dingtalk: {
+    enabled: boolean;
+  };
+}
+
+export async function fetchAuthProviders(): Promise<AuthProviders> {
+  const response = await fetch('/auth/providers', { headers: { Accept: 'application/json' } });
+
+  if (!response.ok) {
+    throw new Error('providers request failed');
+  }
+
+  return ((await response.json()) as { data: AuthProviders }).data;
+}
+
 export interface UserRecord {
   createdAt: string;
   id: string;
