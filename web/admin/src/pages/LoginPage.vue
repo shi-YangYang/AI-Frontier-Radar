@@ -2,6 +2,7 @@
   <div class="auth-shell">
     <aside class="auth-brand">
       <div class="auth-brand-decor" aria-hidden="true"></div>
+      <div class="auth-brand-grid" aria-hidden="true"></div>
       <div class="auth-brand-inner">
         <div class="auth-brand-head">
           <BrandLogo :alt="t('brand.name')" class="auth-brand-logo" />
