@@ -70,6 +70,37 @@ function resolveSendCounterPath(accountId) {
 const SEND_QUOTA_WINDOW_MS = 24 * 60 * 60 * 1_000;
 const SEND_QUOTA_LIMIT = 10;
 
+function hardenLineBreaksForWeixin(text) {
+  // 微信桌面端把 ClawBot 文本按 Markdown 渲染：单个 \n 是软换行，会被折叠成
+  // 空格；只有空行（\n\n）才产生段落换行。手机端按纯文本渲染。这里把相邻
+  // 非空行之间的单个换行升级为空行，并归并连续空行，保证两端换行语义一致。
+  const result = [];
+  let previousEmpty = true;
+
+  for (const line of text.split('\n')) {
+    const isEmpty = line.trim().length === 0;
+
+    if (isEmpty) {
+      if (!previousEmpty) {
+        result.push('');
+      }
+
+      previousEmpty = true;
+
+      continue;
+    }
+
+    if (!previousEmpty) {
+      result.push('');
+    }
+
+    result.push(line);
+    previousEmpty = false;
+  }
+
+  return result.join('\n');
+}
+
 function readSendCounter(accountId, userId) {
   try {
     const parsed = JSON.parse(fs.readFileSync(resolveSendCounterPath(accountId), 'utf-8'));
@@ -334,7 +365,7 @@ async function sendText(plugin, options) {
     tipLines.push('【当前消息容量已满，请发送一条消息重置】');
   }
 
-  const text = `${options.text}\n\n---\n${tipLines.join('\n')}`;
+  const text = hardenLineBreaksForWeixin(`${options.text}\n\n---\n${tipLines.join('\n')}`);
   log(`发送 tip：${tipLines.join(' / ')}`);
   const result = await plugin.send.sendMessageWeixin({
     opts: {
