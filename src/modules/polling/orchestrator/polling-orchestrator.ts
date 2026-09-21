@@ -135,19 +135,6 @@ export class PollingOrchestrator {
         }
       }
 
-      this.logger?.info(
-        {
-          accountsFailed,
-          accountsSucceeded,
-          accountsTotal,
-          eventsCreated,
-          newPostsDetected,
-          pollRunId: pollRun.id,
-          status,
-        },
-        '轮询完成。',
-      );
-
       return {
         accountsFailed,
         accountsSucceeded,

@@ -346,11 +346,6 @@ async function sendText(plugin, options) {
   }
 
   const contextToken = resolveContextToken(resolved.accountId, target);
-  log(
-    contextToken === undefined
-      ? `发送未携带 context_token（${target}）：请让该微信号给 ClawBot 发一条消息以激活会话`
-      : `发送携带 context_token（${target}）`,
-  );
 
   const counter = readSendCounter(resolved.accountId, target);
   const counterStartedMs = counter === undefined ? 0 : Date.parse(counter.windowStartedAt);
@@ -366,7 +361,6 @@ async function sendText(plugin, options) {
   }
 
   const text = hardenLineBreaksForWeixin(`${options.text}\n\n---\n${tipLines.join('\n')}`);
-  log(`发送 tip：${tipLines.join(' / ')}`);
   const result = await plugin.send.sendMessageWeixin({
     opts: {
       accountId: resolved.accountId,
