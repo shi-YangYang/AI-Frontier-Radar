@@ -9,6 +9,11 @@ import {
 } from '../../delivery';
 import { createFeishuWebhookClient, type FeishuWebhookFailureResult } from '../../delivery';
 import {
+  DingtalkLoginService,
+  type DingtalkAdminSettingsView,
+  type SaveDingtalkSettingsInput,
+} from '../../auth';
+import {
   SourceProviderError,
   YoutubeChannelResolveError,
   resolveYoutubeChannel,
@@ -80,6 +85,7 @@ export interface AdminActions {
 export interface AdminControllerOptions {
   actions?: AdminActions;
   config: AppConfig;
+  dingtalkLogin?: DingtalkLoginService;
   runtimeSettings?: RuntimeSettingsService;
   storage: StorageContext;
   wechatBindCoordinator?: WechatBindCoordinator;
@@ -563,6 +569,74 @@ export async function updateAdminRssSettings(
     ok: true,
     data: settings,
   };
+}
+
+export async function getAdminDingtalkSettings(
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: DingtalkAdminSettingsView }> {
+  const service = resolveDingtalkLogin(options);
+  const settings = await service.getAdminSettings();
+
+  return {
+    ok: true,
+    data: settings,
+  };
+}
+
+export async function updateAdminDingtalkSettings(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: DingtalkAdminSettingsView }> {
+  const service = resolveDingtalkLogin(options);
+  const input = readDingtalkSettingsBody(body);
+  const settings = await service.saveAdminSettings(input);
+
+  return {
+    ok: true,
+    data: settings,
+  };
+}
+
+function resolveDingtalkLogin(options: AdminControllerOptions): DingtalkLoginService {
+  if (options.dingtalkLogin === undefined) {
+    throw new AdminApiError(503, 'DINGTALK_UNAVAILABLE', '钉钉登录服务不可用。');
+  }
+
+  return options.dingtalkLogin;
+}
+
+function readDingtalkSettingsBody(body: unknown): SaveDingtalkSettingsInput {
+  if (!isRecordBody(body)) {
+    throw new AdminApiError(400, 'INVALID_BODY', '请求体格式无效。');
+  }
+
+  const input: SaveDingtalkSettingsInput = {};
+
+  if (body.appKey !== undefined) {
+    if (typeof body.appKey !== 'string') {
+      throw new AdminApiError(400, 'INVALID_BODY', 'AppKey 必须是字符串。');
+    }
+
+    input.appKey = body.appKey;
+  }
+
+  if (body.appSecret !== undefined) {
+    if (typeof body.appSecret !== 'string') {
+      throw new AdminApiError(400, 'INVALID_BODY', 'AppSecret 必须是字符串。');
+    }
+
+    input.appSecret = body.appSecret;
+  }
+
+  if (body.enabled !== undefined) {
+    if (typeof body.enabled !== 'boolean') {
+      throw new AdminApiError(400, 'INVALID_BODY', '启用状态必须是布尔值。');
+    }
+
+    input.enabled = body.enabled;
+  }
+
+  return input;
 }
 
 export async function clearAdminPostsHistory(
@@ -2996,4 +3070,8 @@ function readIdsBody(body: unknown): string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isRecordBody(value: unknown): value is Record<string, unknown> {
+  return isRecord(value);
 }

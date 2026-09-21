@@ -115,13 +115,14 @@ model PollRun {
 }
 
 model User {
-  id           String        @id
-  username     String        @unique
-  passwordHash String        @map("password_hash")
-  role         String        @default("user")
-  createdAt    String        @map("created_at")
-  updatedAt    String        @map("updated_at")
-  sessions     UserSession[]
+  id              String        @id
+  username        String        @unique
+  passwordHash    String        @map("password_hash")
+  role            String        @default("user")
+  dingtalkUnionId String?       @unique @map("dingtalk_union_id")
+  createdAt       String        @map("created_at")
+  updatedAt       String        @map("updated_at")
+  sessions        UserSession[]
 
   @@map("users")
 }

@@ -425,6 +425,30 @@ export async function updateRssSettings(input: {
   });
 }
 
+export interface DingtalkAdminSettings {
+  appKey: string;
+  appSecretConfigured: boolean;
+  appSecretPreview: string | null;
+  callbackPath: string;
+  enabled: boolean;
+}
+
+export async function getDingtalkSettings(): Promise<DingtalkAdminSettings> {
+  return requestJson<DingtalkAdminSettings>('/admin/api/settings/dingtalk');
+}
+
+export async function updateDingtalkSettings(input: {
+  appKey: string;
+  /** 空字符串 = 保持不变 */
+  appSecret?: string;
+  enabled: boolean;
+}): Promise<DingtalkAdminSettings> {
+  return requestJson<DingtalkAdminSettings>('/admin/api/settings/dingtalk', {
+    body: JSON.stringify(input),
+    method: 'PUT',
+  });
+}
+
 export interface ResolvedYoutubeChannel {
   feedUrl: string;
   label?: string;

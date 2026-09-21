@@ -737,6 +737,55 @@
         </section>
 
         <section v-else-if="activeSettingsTab === 'users'" class="settings-layout single-column">
+          <article class="panel settings-section">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.dingtalk.sectionTitle') }}</h2>
+                <p>{{ t('settings.dingtalk.description') }}</p>
+              </div>
+            </header>
+            <div class="settings-section-body">
+              <form class="settings-form dingtalk-form" @submit.prevent="submitDingtalkSettings">
+                <label>
+                  <span>{{ t('settings.dingtalk.appKeyLabel') }}</span>
+                  <input
+                    v-model="dingtalkForm.appKey"
+                    autocomplete="off"
+                    :placeholder="t('settings.dingtalk.appKeyPlaceholder')"
+                  />
+                </label>
+                <label>
+                  <span>{{ t('settings.dingtalk.appSecretLabel') }}</span>
+                  <input
+                    v-model="dingtalkForm.appSecret"
+                    autocomplete="new-password"
+                    :placeholder="
+                      dingtalkSettings !== null && dingtalkSettings.appSecretConfigured
+                        ? t('settings.dingtalk.appSecretConfigured', {
+                            preview: dingtalkSettings.appSecretPreview ?? '',
+                          })
+                        : t('settings.dingtalk.appSecretPlaceholder')
+                    "
+                    type="password"
+                  />
+                  <small>{{ t('settings.dingtalk.appSecretHelp') }}</small>
+                </label>
+                <label class="checkbox-row">
+                  <input v-model="dingtalkForm.enabled" type="checkbox" />
+                  <span>{{ t('settings.dingtalk.enabledLabel') }}</span>
+                </label>
+                <div class="inline-alert">
+                  {{ t('settings.dingtalk.callbackHint', { callback: dingtalkCallbackUrl }) }}
+                </div>
+                <div class="form-actions">
+                  <button class="primary" type="submit" :disabled="busy">
+                    {{ t('settings.dingtalk.save') }}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </article>
+
           <article class="panel settings-list-panel">
             <header class="panel-header">
               <div>
@@ -1062,6 +1111,7 @@ import {
   runRetentionCleanup,
   updateDataSettings,
   deleteDeliveryTarget,
+  getDingtalkSettings,
   getRssSettings,
   getSettings,
   getSubscriptionRules,
@@ -1071,6 +1121,7 @@ import {
   testXSourceAnonymous,
   updateDeliveryTarget,
   updateDeliveryTargetEnabled,
+  updateDingtalkSettings,
   updateRssSettings,
   updateSubscriptionRules,
   updateXBrowserSettings,
@@ -1078,6 +1129,7 @@ import {
   type AdminPagination,
   type DeliveryChannelType,
   type DeliveryTarget,
+  type DingtalkAdminSettings,
   type DeliveryTargetSummary,
   type RuntimeRssSettings,
   type SubscriptionRule,
@@ -1367,10 +1419,49 @@ const newPasswordInput = ref('');
 const passwordTarget = ref<UserRecord | null>(null);
 const userToDelete = ref<UserRecord | null>(null);
 const users = ref<UserRecord[]>([]);
+const dingtalkSettings = ref<DingtalkAdminSettings | null>(null);
+const dingtalkForm = reactive({ appKey: '', appSecret: '', enabled: false });
 const userRoleOptions = computed(() => [
   { label: t('auth.roleUser'), value: 'user' },
   { label: t('auth.roleAdmin'), value: 'admin' },
 ]);
+
+const dingtalkCallbackUrl = computed(
+  () => `${window.location.origin}${dingtalkSettings.value?.callbackPath ?? '/auth/dingtalk/callback'}`,
+);
+
+async function loadDingtalkSettings(): Promise<void> {
+  try {
+    const settings = await getDingtalkSettings();
+    dingtalkSettings.value = settings;
+    dingtalkForm.appKey = settings.appKey;
+    dingtalkForm.appSecret = '';
+    dingtalkForm.enabled = settings.enabled;
+  } catch (error) {
+    showSettingsError(error);
+  }
+}
+
+async function submitDingtalkSettings(): Promise<void> {
+  busy.value = true;
+
+  try {
+    dingtalkSettings.value = await updateDingtalkSettings({
+      appKey: dingtalkForm.appKey.trim(),
+      appSecret: dingtalkForm.appSecret,
+      enabled: dingtalkForm.enabled,
+    });
+    dingtalkForm.appKey = dingtalkSettings.value.appKey;
+    dingtalkForm.appSecret = '';
+    dingtalkForm.enabled = dingtalkSettings.value.enabled;
+    notice.value = t('settings.users.saved');
+    noticeDanger.value = false;
+  } catch (error) {
+    showSettingsError(error);
+  } finally {
+    busy.value = false;
+  }
+}
 
 async function loadUsers(): Promise<void> {
   try {
@@ -1624,6 +1715,7 @@ onMounted(() => {
 
   if (activeSettingsTab.value === 'users') {
     void loadUsers();
+    void loadDingtalkSettings();
   }
 });
 
@@ -1636,6 +1728,7 @@ watch(activeSettingsTab, (tab) => {
 
   if (tab === 'users') {
     void loadUsers();
+    void loadDingtalkSettings();
   }
 });
 

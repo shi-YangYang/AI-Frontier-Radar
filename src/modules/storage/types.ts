@@ -284,6 +284,7 @@ export interface UserWithPassword extends User {
 }
 
 export interface CreateUserInput {
+  dingtalkUnionId?: string;
   id?: string;
   passwordHash: string;
   role: UserRole;

@@ -21,6 +21,9 @@ export class UserRepository {
     const user = await this.prisma.user.create({
       data: {
         createdAt: now,
+        ...(input.dingtalkUnionId === undefined
+          ? {}
+          : { dingtalkUnionId: input.dingtalkUnionId }),
         id: input.id ?? createDatabaseId(),
         passwordHash: input.passwordHash,
         role: input.role,
@@ -51,6 +54,14 @@ export class UserRepository {
   public async findByUsername(username: string): Promise<UserWithPassword | null> {
     const user = await this.prisma.user.findUnique({
       where: { username },
+    });
+
+    return user === null ? null : mapUserWithPassword(user);
+  }
+
+  public async findByDingtalkUnionId(unionId: string): Promise<UserWithPassword | null> {
+    const user = await this.prisma.user.findUnique({
+      where: { dingtalkUnionId: unionId },
     });
 
     return user === null ? null : mapUserWithPassword(user);
