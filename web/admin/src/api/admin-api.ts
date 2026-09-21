@@ -1227,6 +1227,7 @@ export interface MyWechatBinding {
   accounts: MyWechatAccount[];
   login: {
     loggedIn: boolean;
+    message?: string;
     qrcodeDataUrl?: string;
     qrcodeUrl?: string;
     status: string;

@@ -3,6 +3,8 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { LoginSessions } from './login-sessions.mjs';
+
 const bridgeDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const stateDir = process.env.OPENCLAW_STATE_DIR?.trim() || path.join(bridgeDir, '.state');
 
@@ -401,113 +403,8 @@ async function commandSend(plugin, args) {
   await sendText(plugin, { accountId, text, to });
 }
 
-let webLoginState = {
-  accountId: undefined,
-  message: undefined,
-  qrcodeDataUrl: undefined,
-  qrcodeUrl: undefined,
-  sessionKey: undefined,
-  status: 'idle',
-};
-let webLoginGeneration = 0;
-let webLoginPatched = false;
-
-function patchStdoutForLoginSignals() {
-  if (webLoginPatched) {
-    return;
-  }
-
-  webLoginPatched = true;
-  const originalWrite = process.stdout.write.bind(process.stdout);
-
-  process.stdout.write = (chunk, encoding, callback) => {
-    const text = typeof chunk === 'string' ? chunk : chunk?.toString?.() ?? '';
-
-    if (text.includes('输入手机微信显示的数字') || text.includes('请重新输入')) {
-      if (webLoginState.status === 'pending' || webLoginState.status === 'scanned') {
-        webLoginState = { ...webLoginState, message: '请输入手机微信上显示的数字。', status: 'need-code' };
-      }
-    } else if (text.includes('正在验证')) {
-      if (webLoginState.status === 'pending' || webLoginState.status === 'need-code') {
-        webLoginState = { ...webLoginState, message: '已扫码，等待微信确认…', status: 'scanned' };
-      }
-    }
-
-    return originalWrite(chunk, encoding, callback);
-  };
-}
-
-async function startWebLogin(plugin, options = {}) {
-  patchStdoutForLoginSignals();
-  const generation = (webLoginGeneration += 1);
-  const started = await plugin.login.startWeixinLoginWithQr({ force: options.force === true });
-
-  if (started.qrcodeUrl === undefined || started.qrcodeUrl.length === 0) {
-    webLoginState = { message: started.message ?? '获取二维码失败。', status: 'failed' };
-
-    return webLoginState;
-  }
-
-  let qrcodeDataUrl;
-
-  try {
-    const qrcodeModule = await import('qrcode');
-    qrcodeDataUrl = await qrcodeModule.default.toDataURL(started.qrcodeUrl, {
-      margin: 1,
-      width: 260,
-    });
-  } catch (error) {
-    log(`生成二维码图片失败（可使用链接继续）：${error instanceof Error ? error.message : String(error)}`);
-  }
-
-  webLoginState = {
-    message: '请使用手机微信扫码，并在微信中确认。',
-    qrcodeDataUrl,
-    qrcodeUrl: started.qrcodeUrl,
-    sessionKey: started.sessionKey,
-    status: 'pending',
-  };
-
-  void plugin.login
-    .waitForWeixinLogin({ sessionKey: started.sessionKey, timeoutMs: 480_000 })
-    .then((result) => {
-      if (generation !== webLoginGeneration) {
-        return;
-      }
-
-      if (result.connected === true) {
-        plugin.accounts.registerWeixinAccountId(result.accountId);
-        plugin.accounts.saveWeixinAccount(result.accountId, {
-          baseUrl: result.baseUrl,
-          token: result.botToken,
-          userId: result.userId,
-        });
-        webLoginState = {
-          accountId: result.accountId,
-          message: '登录成功。请给微信里的 ClawBot 发一条消息以登记会话。',
-          status: 'connected',
-          ...(result.userId === undefined ? {} : { userId: result.userId }),
-        };
-        log(`Web 登录成功：accountId=${result.accountId}`);
-        return;
-      }
-
-      webLoginState = {
-        message: result.message ?? '登录未完成。',
-        status: result.alreadyConnected === true ? 'connected' : 'failed',
-        ...(result.accountId === undefined ? {} : { accountId: result.accountId }),
-      };
-    })
-    .catch((error) => {
-      if (generation === webLoginGeneration) {
-        webLoginState = {
-          message: error instanceof Error ? error.message : String(error),
-          status: 'failed',
-        };
-      }
-    });
-
-  return webLoginState;
+function readLoginSessionId(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 128 ? value : 'admin';
 }
 
 function readJsonBody(request, maxBytes = 64 * 1024) {
@@ -544,6 +441,7 @@ async function commandServe(plugin, args) {
   let watchAbort = false;
 
   const watchedAccounts = new Map();
+  const loginSessions = new LoginSessions(plugin.accounts);
 
   async function watchAccount(accountId) {
     while (!watchAbort) {
@@ -625,7 +523,7 @@ async function commandServe(plugin, args) {
       if (request.method === 'POST' && requestUrl.pathname === '/login/start') {
         try {
           const body = await readJsonBody(request);
-          const state = await startWebLogin(plugin, { force: body.force === true });
+          const state = await loginSessions.start(readLoginSessionId(body.sessionId));
 
           sendJson(response, 200, {
             message: state.message,
@@ -645,20 +543,25 @@ async function commandServe(plugin, args) {
       }
 
       if (request.method === 'GET' && requestUrl.pathname === '/login/status') {
-        const ids = plugin.accounts.listIndexedWeixinAccountIds();
+        const state = loginSessions.get(readLoginSessionId(requestUrl.searchParams.get('sessionId')));
+        sendJson(response, 200, { ...state, loggedIn: state.status === 'connected', ok: true });
+        return;
+      }
 
-        sendJson(response, 200, {
-          accountId: webLoginState.accountId ?? (webLoginState.status === 'idle' ? ids.at(-1) : undefined),
-          loggedIn: ids.length > 0,
-          message: webLoginState.message,
-          ok: true,
-          qrcodeDataUrl: webLoginState.status === 'pending' || webLoginState.status === 'need-code'
-            ? webLoginState.qrcodeDataUrl
-            : undefined,
-          status: webLoginState.status,
-          userId: webLoginState.userId,
-        });
-
+      if (request.method === 'POST' && ['/login/code', '/login/cancel'].includes(requestUrl.pathname)) {
+        try {
+          const body = await readJsonBody(request);
+          const sessionId = readLoginSessionId(body.sessionId);
+          if (requestUrl.pathname === '/login/code') {
+            loginSessions.submitCode(sessionId, body.code);
+            sendJson(response, 200, { ok: true });
+          } else {
+            const cancelled = loginSessions.get(sessionId).status === 'connected' ? false : loginSessions.cancel(sessionId);
+            sendJson(response, 200, { cancelled, ok: true });
+          }
+        } catch (error) {
+          sendJson(response, 400, { error: error instanceof Error ? error.message : String(error), ok: false });
+        }
         return;
       }
 
@@ -764,6 +667,7 @@ async function commandServe(plugin, args) {
   await new Promise((resolve) => {
     const shutdown = () => {
       watchAbort = true;
+      loginSessions.close();
       server.close(() => resolve());
     };
 

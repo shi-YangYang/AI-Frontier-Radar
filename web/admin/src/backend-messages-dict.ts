@@ -1,4 +1,8 @@
 export const BACKEND_MESSAGE_EN: Record<string, string> = {
+  "该微信已绑定其他用户，请使用自己的微信重新扫码。": "This WeChat account belongs to another user. Please scan with your own WeChat account.",
+  "扫码已超时，请重新生成二维码。": "The scan timed out. Please generate a new QR code.",
+  "扫码进程已退出，请重新扫码。": "The scan session ended. Please scan again.",
+  "当前扫码流程无需验证码，请刷新状态后重试。": "This session is not waiting for a verification code. Refresh its status and try again.",
   "轮询账号失败。": "Polling account failed.",
   "轮询在完成前失败。": "Polling run failed before completion.",
   "轮询完成。": "Polling run finished.",

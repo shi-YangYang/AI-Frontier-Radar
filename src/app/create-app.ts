@@ -31,12 +31,6 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   const storage = options.storage ?? createStorageFromConfig(options.config);
   const ownsStorage = options.storage === undefined;
 
-  app.addHook('onClose', async () => {
-    if (ownsStorage) {
-      await storage.close();
-    }
-  });
-
   const auth =
     options.auth ??
     createAuthService({
@@ -46,13 +40,31 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
       storage,
     });
 
+  const wechatBindCoordinator = options.wechatBindCoordinator ?? new WechatBindCoordinator();
+  let bindSync: Promise<void> | null = null;
+  // Finalize ownership even if the user closes the page after confirming on their phone.
+  const bindSyncTimer = setInterval(() => {
+    if (bindSync === null && options.wechatBridge?.isRunning() && wechatBindCoordinator.hasPendingBindings()) {
+      bindSync = wechatBindCoordinator.sync(options.wechatBridge, storage)
+        .then(() => undefined)
+        .catch((error) => { options.logger.warn({ err: error }, '同步微信扫码绑定失败'); })
+        .finally(() => { bindSync = null; });
+    }
+  }, 3_000);
+  bindSyncTimer.unref();
+  app.addHook('onClose', async () => {
+    clearInterval(bindSyncTimer);
+    await bindSync;
+    if (ownsStorage) await storage.close();
+  });
+
   registerApiRoutes(app, {
     adminActions: options.adminActions,
     auth,
     config: options.config,
     runtimeSettings: options.runtimeSettings,
     storage,
-    wechatBindCoordinator: options.wechatBindCoordinator ?? new WechatBindCoordinator(),
+    wechatBindCoordinator,
     ...(options.wechatBridge === undefined ? {} : { wechatBridge: options.wechatBridge }),
   });
 

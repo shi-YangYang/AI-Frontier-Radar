@@ -55,7 +55,7 @@ import {
   type RetentionSettings,
 } from '../../maintenance';
 import { sharedLogBuffer, type LogBufferEntry } from '../../../lib/logger';
-import { syncWechatDeliveryTargets, type WechatAccount, type WechatBindCoordinator, type WechatBridgeService } from '../../wechat';
+import { type WechatAccount, type WechatBindCoordinator, type WechatBridgeService, type WechatLoginState } from '../../wechat';
 import { SOURCE_GROUPS, findSourceGroup } from '../../../config/source-groups';
 import {
   applySourceGroup,
@@ -837,7 +837,7 @@ export function listAdminLogs(query: unknown): {
   };
 }
 
-export async function getAdminWechatStatus(options: AdminControllerOptions): Promise<{
+export async function getAdminWechatStatus(options: AdminControllerOptions, userId: string): Promise<{
   ok: true;
   data: {
     accountId?: string;
@@ -872,24 +872,18 @@ export async function getAdminWechatStatus(options: AdminControllerOptions): Pro
   }
 
   const status = service.getStatus();
-  const loginState = await service.getLoginState();
-  const targets = status.running ? await service.getTargets().catch(() => []) : [];
-  const accounts = status.running ? await service.getAccounts().catch(() => []) : [];
-
-  if (status.running && accounts.length >= 0) {
-    const pendingOwner = options.wechatBindCoordinator?.getPendingUserId() ?? undefined;
-    const syncResult = await syncWechatDeliveryTargets({
-      accounts,
-      bridgeBaseUrl: `http://127.0.0.1:${status.port}/send`,
-      deliveryTargets: options.storage.deliveryTargets,
-      ...(pendingOwner === undefined ? {} : { ownerUserIdForNewAccounts: pendingOwner }),
-    }).catch(() => undefined);
-
-    if (syncResult !== undefined) {
-      options.wechatBindCoordinator?.clearIfCreated(syncResult.created);
+  let loginState: WechatLoginState = { loggedIn: false, status: 'unavailable' };
+  let accounts: WechatAccount[] = [];
+  if (status.running) {
+    try {
+      const synced = await requireWechatBindCoordinator(options).sync(service, options.storage);
+      accounts = synced.accounts;
+      loginState = synced.states.get(userId) ?? { loggedIn: accounts.length > 0, status: 'idle' };
+    } catch (error) {
+      loginState.message = error instanceof Error ? error.message : String(error);
     }
   }
-
+  const targets = status.running ? await service.getTargets().catch(() => []) : [];
   const wechatTargets = (await options.storage.deliveryTargets.listAll()).filter(
     (target) => target.channelType === 'wechat_clawbot',
   );
@@ -995,33 +989,35 @@ export async function deleteAdminWechatAccount(
 export async function startAdminWechatLogin(
   body: unknown,
   options: AdminControllerOptions,
+  userId: string,
 ): Promise<{ ok: true; data: { qrcodeDataUrl?: string; qrcodeUrl?: string; status: string } }> {
   const service = requireWechatBridge(options);
   const force = isRecord(body) && body.force === true;
-
-  try {
-    const state = await service.startLogin(force);
-
-    return {
-      ok: true,
-      data: {
-        ...(state.qrcodeDataUrl === undefined ? {} : { qrcodeDataUrl: state.qrcodeDataUrl }),
-        ...(state.qrcodeUrl === undefined ? {} : { qrcodeUrl: state.qrcodeUrl }),
-        status: state.status,
-      },
-    };
-  } catch (error) {
-    throw new AdminApiError(
-      502,
-      'WECHAT_BRIDGE_FAILED',
-      error instanceof Error ? error.message : '微信桥登录失败。',
-    );
-  }
+  const coordinator = requireWechatBindCoordinator(options);
+  return coordinator.runForUser(userId, async () => {
+    await coordinator.sync(service, options.storage);
+    let sessionId = coordinator.getSessionId(userId);
+    if (sessionId !== undefined) {
+      const current = await service.getLoginState(sessionId);
+      if (['pending', 'scanned', 'need-code'].includes(current.status)) return { ok: true, data: current };
+      await service.cancelLogin(sessionId);
+    }
+    sessionId = coordinator.begin(userId);
+    try {
+      const state = await service.startLogin(force, sessionId);
+      return { ok: true, data: state };
+    } catch (error) {
+      await service.cancelLogin(sessionId).catch(() => undefined);
+      coordinator.clear(userId, sessionId);
+      throw new AdminApiError(502, 'WECHAT_BRIDGE_FAILED', error instanceof Error ? error.message : '微信桥登录失败。');
+    }
+  });
 }
 
 export async function submitAdminWechatLoginCode(
   body: unknown,
   options: AdminControllerOptions,
+  userId: string,
 ): Promise<{ ok: true; data: { submitted: true } }> {
   const service = requireWechatBridge(options);
 
@@ -1029,8 +1025,11 @@ export async function submitAdminWechatLoginCode(
     throw new AdminApiError(400, 'INVALID_REQUEST', 'code 不能为空。');
   }
 
+  const sessionId = requireWechatBindCoordinator(options).getSessionId(userId);
+  if (sessionId === undefined) throw new AdminApiError(409, 'NO_ACTIVE_BIND', '当前没有你的扫码流程。');
+
   try {
-    await service.submitLoginCode(body.code);
+    await service.submitLoginCode(body.code, sessionId);
   } catch (error) {
     throw new AdminApiError(
       502,
@@ -3082,4 +3081,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isRecordBody(value: unknown): value is Record<string, unknown> {
   return isRecord(value);
+}
+
+function requireWechatBindCoordinator(options: AdminControllerOptions): WechatBindCoordinator {
+  if (options.wechatBindCoordinator === undefined) throw new AdminApiError(503, 'WECHAT_UNAVAILABLE', '微信绑定服务未初始化。');
+  return options.wechatBindCoordinator;
 }

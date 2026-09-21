@@ -4,7 +4,7 @@ import { createApp } from '../app/create-app';
 import type { AppLogger } from '../lib/logger';
 import { createAuthService } from '../modules/auth';
 import { createRetentionService } from '../modules/maintenance';
-import { createWechatBridgeService, syncWechatDeliveryTargets, WechatBindCoordinator } from '../modules/wechat';
+import { createWechatBridgeService, WechatBindCoordinator } from '../modules/wechat';
 import { createRuntimeScheduler, createRuntimeSourceProviders } from '../modules/scheduler';
 import { createRuntimeSettingsService, createStorageFromConfig } from '../modules/storage';
 
@@ -32,19 +32,11 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     storage,
   });
   const wechatBridge = createWechatBridgeService({ logger: options.logger });
+  const wechatBindCoordinator = new WechatBindCoordinator();
   wechatBridge.start();
 
   if (wechatBridge.isInstalled()) {
-    const bridgeStatus = wechatBridge.getStatus();
-    void wechatBridge
-      .getAccounts()
-      .then((accounts) =>
-        syncWechatDeliveryTargets({
-          accounts,
-          bridgeBaseUrl: `http://127.0.0.1:${bridgeStatus.port}/send`,
-          deliveryTargets: storage.deliveryTargets,
-        }),
-      )
+    void wechatBindCoordinator.sync(wechatBridge, storage)
       .catch((error) =>
         options.logger.warn(
           { err: error },
@@ -61,7 +53,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   });
   const app = createApp({
     auth,
-    wechatBindCoordinator: new WechatBindCoordinator(),
+    wechatBindCoordinator,
     wechatBridge,
     adminActions: {
       runDeliveryWorkerNow: (runOptions) => scheduler.runDeliveryWorkerNow(runOptions),
