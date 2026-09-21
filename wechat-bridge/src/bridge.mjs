@@ -614,7 +614,9 @@ async function commandServe(plugin, args) {
 
       idleRounds = accountIds.length === 0 ? idleRounds + 1 : 0;
 
-      if (idleRounds === 1 || idleRounds % 6 === 0) {
+      // idleRounds=0（已登录）时 0 % 6 === 0 恒为真，会导致已登录状态每轮刷屏，
+      // 必须先确认当前没有任何已绑定账号才输出等待扫码提示。
+      if (accountIds.length === 0 && (idleRounds === 1 || idleRounds % 6 === 0)) {
         log('尚未绑定微信账号，等待扫码（请在「设置 → 微信」中添加）');
       }
 
