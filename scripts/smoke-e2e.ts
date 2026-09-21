@@ -2347,6 +2347,78 @@ async function main(): Promise<void> {
     const userCookie = readSessionCookie(userLoginResponse.headers['set-cookie']);
     checks.push({ name: '普通用户可以登录' });
 
+    const providersDefault = await rawInject({ method: 'GET', url: '/auth/providers' });
+    const providersDefaultPayload = providersDefault.json() as {
+      ok: boolean;
+      data: { dingtalk: { enabled: boolean } };
+    };
+    assert(
+      providersDefault.statusCode === 200 &&
+        providersDefaultPayload.ok === true &&
+        providersDefaultPayload.data.dingtalk.enabled === false,
+      'providers should be public and report dingtalk disabled by default',
+    );
+    checks.push({ name: '公开 providers 接口默认显示钉钉登录未启用' });
+
+    const dingtalkStartDisabled = await rawInject({ method: 'GET', url: '/auth/dingtalk/start' });
+    assert(
+      dingtalkStartDisabled.statusCode === 302 &&
+        String(dingtalkStartDisabled.headers.location ?? '').includes('/login?error=dingtalk_disabled'),
+      'dingtalk start should redirect to login error when disabled',
+    );
+    checks.push({ name: '未启用时钉钉登录入口拒绝并提示' });
+
+    const dingtalkPutResponse = await app.inject({
+      method: 'PUT',
+      payload: {
+        appKey: 'ding-smoke-key',
+        appSecret: 'ding-smoke-secret-987654321',
+        corpId: 'ding-smoke-corp',
+        enabled: true,
+      },
+      url: '/admin/api/settings/dingtalk',
+    });
+    assert(dingtalkPutResponse.statusCode === 200, 'dingtalk settings PUT should succeed');
+    const dingtalkSaved = (
+      dingtalkPutResponse.json() as {
+        data: {
+          appSecretConfigured: boolean;
+          appSecretPreview: string | null;
+          corpId: string;
+          enabled: boolean;
+        };
+      }
+    ).data;
+    assert(
+      dingtalkSaved.appSecretConfigured === true &&
+        dingtalkSaved.appSecretPreview !== null &&
+        dingtalkSaved.appSecretPreview.startsWith('***') &&
+        !dingtalkSaved.appSecretPreview.includes('987654321') &&
+        dingtalkSaved.corpId === 'ding-smoke-corp',
+      'dingtalk secret must be masked and corpId must round-trip',
+    );
+    const dingtalkProviders = await rawInject({ method: 'GET', url: '/auth/providers' });
+    assert(
+      (dingtalkProviders.json() as { data: { dingtalk: { enabled: boolean } } }).data.dingtalk.enabled,
+      'providers should report dingtalk enabled after saving',
+    );
+    checks.push({ name: '钉钉登录配置保存且 AppSecret 脱敏、providers 同步启用' });
+
+    const dingtalkStartAuthorized = await rawInject({ method: 'GET', url: '/auth/dingtalk/start' });
+    const dingtalkAuthorizeLocation = String(dingtalkStartAuthorized.headers.location ?? '');
+    assert(
+      dingtalkStartAuthorized.statusCode === 302 &&
+        dingtalkAuthorizeLocation.startsWith('https://login.dingtalk.com/oauth2/auth') &&
+        dingtalkAuthorizeLocation.includes('exclusiveLogin=true') &&
+        dingtalkAuthorizeLocation.includes('exclusiveCorpId=ding-smoke-corp'),
+      'dingtalk start should carry exclusive login params when corpId configured',
+    );
+    checks.push({ name: '配置 CorpId 后授权链接携带专属登录参数' });
+
+    const dingtalkGetResponse = await app.inject({ method: 'GET', url: '/admin/api/settings/dingtalk' });
+    assert(dingtalkGetResponse.statusCode === 200, 'dingtalk settings GET should succeed');
+    checks.push({ name: '管理员可读取钉钉登录配置' });
+
     const forbiddenAdminResponse = await rawInject({
       headers: { cookie: userCookie },
       method: 'GET',

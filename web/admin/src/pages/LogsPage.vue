@@ -1,8 +1,15 @@
 <template>
-  <section>
-    <PageHeader :subtitle="t('logs.subtitle')">
-      <div class="toolbar">
+  <section class="page-fit logs-page">
+    <PageHeader :subtitle="t('logs.subtitle')" :title="t('nav.logs')" />
+
+    <ToastNotice :message="notice" :danger="noticeDanger" />
+
+    <div class="panel">
+      <div class="panel-toolbar logs-toolbar">
+        <span class="muted">{{ t('logs.bufferUsage', { capacity, size }) }}</span>
+        <span class="spacer"></span>
         <SelectControl
+          :aria-label="t('logs.level')"
           :model-value="levelFilter"
           :options="levelOptions"
           @update:model-value="levelFilter = $event"
@@ -10,24 +17,16 @@
         <button type="button" :disabled="busy" @click="loadLogs">{{ t('actions.refresh') }}</button>
         <button
           type="button"
-          :class="{ primary: autoRefreshEnabled }"
+          :class="{ 'toggle-active': autoRefreshEnabled }"
           :aria-pressed="autoRefreshEnabled"
           @click="toggleAutoRefresh"
         >
           {{ autoRefreshEnabled ? t('logs.autoRefreshOn') : t('logs.autoRefreshOff') }}
         </button>
       </div>
-    </PageHeader>
-
-    <ToastNotice :message="notice" :danger="noticeDanger" />
-
-    <div class="panel">
-      <div class="bulk-actions">
-        <span class="muted">{{ t('logs.bufferUsage', { capacity, size }) }}</span>
-      </div>
       <EmptyState v-if="entries.length === 0" :title="t('logs.emptyTitle')" :description="t('logs.empty')" />
-      <div v-else class="table-wrap">
-        <table>
+      <div v-else class="table-wrap logs-table-wrap">
+        <table class="logs-table">
           <thead>
             <tr>
               <th>{{ t('logs.time') }}</th>
@@ -36,7 +35,7 @@
               <th>{{ t('logs.message') }}</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody class="logs-scroll" tabindex="0">
             <tr v-for="(entry, index) in entries" :key="`${entry.time}-${index}`">
               <td :title="entry.time">{{ formatRelativeTime(entry.time) }}</td>
               <td><StatusBadge :status="entry.level" /></td>

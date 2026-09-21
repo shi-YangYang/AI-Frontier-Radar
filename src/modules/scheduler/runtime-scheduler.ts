@@ -285,24 +285,33 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
   }
 
   private async runPollingTick(trigger: string): Promise<RuntimeSchedulerRunNowResult> {
-    this.logger.info(
-      {
-        job: 'polling',
-        trigger,
-      },
-      '调度任务开始',
-    );
+    // interval 空转轮不打日志（轮询历史页有完整记录）；手动/启动触发保留
+    // 开始/完成对，便于界面操作有即时反馈。
+    const reportTick = trigger !== 'interval';
 
-    const enabledAccounts = await this.options.storage.watchAccounts.listEnabled();
-
-    if (enabledAccounts.length === 0) {
+    if (reportTick) {
       this.logger.info(
         {
           job: 'polling',
           trigger,
         },
-        '没有启用的监听源，本次轮询跳过',
+        '调度任务开始',
       );
+    }
+
+    const enabledAccounts = await this.options.storage.watchAccounts.listEnabled();
+
+    if (enabledAccounts.length === 0) {
+      if (reportTick) {
+        this.logger.info(
+          {
+            job: 'polling',
+            trigger,
+          },
+          '没有启用的监听源，本次轮询跳过',
+        );
+      }
+
       return {
         job: 'polling',
         message: 'No enabled sources are configured.',
@@ -325,7 +334,26 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
         storage: this.options.storage,
       });
 
-      this.logPollingCompleted(result, trigger);
+      if (reportTick) {
+        this.logPollingCompleted(result, trigger);
+      } else if (result.accountsFailed > 0) {
+        // interval 轮只保留一条汇总，且仅在有失败时输出（轮询历史页有全量记录）
+        this.logger.info(
+          {
+            accountsFailed: result.accountsFailed,
+            accountsSucceeded: result.accountsSucceeded,
+            accountsTotal: result.accountsTotal,
+            errorSummary: result.errorSummary,
+            eventsCreated: result.eventsCreated,
+            job: 'polling',
+            newPostsDetected: result.newPostsDetected,
+            pollRunId: result.pollRunId,
+            status: result.status,
+            trigger,
+          },
+          `抓取汇总 | 账号 ${result.accountsTotal} 个 | 成功 ${result.accountsSucceeded} 个 | 失败 ${result.accountsFailed} 个 | 新帖 ${result.newPostsDetected} 条 | 待发送 ${result.eventsCreated} 条`,
+        );
+      }
       await this.runRetentionIfDue();
       return {
         job: 'polling',
@@ -355,14 +383,20 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
     recoverStartupState: boolean;
     trigger: string;
   }): Promise<RuntimeSchedulerRunNowResult> {
-    this.logger.info(
-      {
-        job: 'delivery-worker',
-        recoverStartupState: input.recoverStartupState,
-        trigger: input.trigger,
-      },
-      '调度任务开始',
-    );
+    // delivery-worker 每 30 秒空转一次是常态；空转轮不打日志，避免 500 条日志
+    // 缓冲被无信息的开始/完成对刷满。有实际处理或非 interval 触发时才输出。
+    const reportTick = input.trigger !== 'interval' || input.recoverStartupState;
+
+    if (reportTick) {
+      this.logger.info(
+        {
+          job: 'delivery-worker',
+          recoverStartupState: input.recoverStartupState,
+          trigger: input.trigger,
+        },
+        '调度任务开始',
+      );
+    }
 
     try {
       const result = await runDeliveryWorkerJob({
@@ -371,7 +405,9 @@ class IntervalRuntimeScheduler implements RuntimeScheduler {
         storage: this.options.storage,
       });
 
-      this.logDeliveryWorkerCompleted(result, input);
+      if (reportTick || result.processed.length > 0) {
+        this.logDeliveryWorkerCompleted(result, input);
+      }
       return {
         job: 'delivery-worker',
         status: 'completed',

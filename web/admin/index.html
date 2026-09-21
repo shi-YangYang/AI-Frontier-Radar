@@ -5,9 +5,36 @@
     <link rel="icon" type="image/png" href="/admin-assets/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI 前沿雷达</title>
+    <style>
+      /* 启动占位：等待首次路由守卫（/auth/me）与登录方式预加载期间显示，挂载后被应用替换 */
+      #app .boot-splash {
+        align-items: center;
+        background: #fafafa;
+        display: flex;
+        height: 100vh;
+        justify-content: center;
+      }
+      #app .boot-splash .boot-spinner {
+        animation: boot-spin 0.9s linear infinite;
+        border: 3px solid #e4e4e7;
+        border-radius: 50%;
+        border-top-color: #4f46e5;
+        height: 30px;
+        width: 30px;
+      }
+      @keyframes boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div class="boot-splash" aria-hidden="true">
+        <div class="boot-spinner"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

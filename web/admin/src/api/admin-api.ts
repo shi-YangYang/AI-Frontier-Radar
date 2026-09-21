@@ -425,6 +425,32 @@ export async function updateRssSettings(input: {
   });
 }
 
+export interface DingtalkAdminSettings {
+  appKey: string;
+  appSecretConfigured: boolean;
+  appSecretPreview: string | null;
+  corpId: string;
+  callbackPath: string;
+  enabled: boolean;
+}
+
+export async function getDingtalkSettings(): Promise<DingtalkAdminSettings> {
+  return requestJson<DingtalkAdminSettings>('/admin/api/settings/dingtalk');
+}
+
+export async function updateDingtalkSettings(input: {
+  appKey: string;
+  /** 空字符串 = 保持不变 */
+  appSecret?: string;
+  corpId?: string;
+  enabled: boolean;
+}): Promise<DingtalkAdminSettings> {
+  return requestJson<DingtalkAdminSettings>('/admin/api/settings/dingtalk', {
+    body: JSON.stringify(input),
+    method: 'PUT',
+  });
+}
+
 export interface ResolvedYoutubeChannel {
   feedUrl: string;
   label?: string;
@@ -1031,14 +1057,32 @@ function toIsoDateTime(value: string): string | null {
 export interface AuthUser {
   createdAt: string;
   id: string;
+  nickname: string | null;
   role: 'admin' | 'user';
   updatedAt: string;
   username: string;
 }
 
+export interface AuthProviders {
+  dingtalk: {
+    enabled: boolean;
+  };
+}
+
+export async function fetchAuthProviders(): Promise<AuthProviders> {
+  const response = await fetch('/auth/providers', { headers: { Accept: 'application/json' } });
+
+  if (!response.ok) {
+    throw new Error('providers request failed');
+  }
+
+  return ((await response.json()) as { data: AuthProviders }).data;
+}
+
 export interface UserRecord {
   createdAt: string;
   id: string;
+  nickname: string | null;
   role: 'admin' | 'user';
   updatedAt: string;
   username: string;

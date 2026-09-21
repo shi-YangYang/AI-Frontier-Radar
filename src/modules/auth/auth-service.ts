@@ -77,6 +77,13 @@ export class AuthService {
       return null;
     }
 
+    return this.issueSessionForUser(user);
+  }
+
+  /** 为已存在（或刚创建）的用户签发新会话；用户对象来自存储层。 */
+  public async issueSessionForUser(user: {
+    id: string;
+  }): Promise<LoginResult> {
     const token = randomBytes(32).toString('base64url');
     const expiresAt = new Date(Date.now() + this.sessionTtlMs).toISOString();
 
@@ -86,15 +93,15 @@ export class AuthService {
       userId: user.id,
     });
 
+    const persisted = await this.storage.users.findById(user.id);
+
+    if (persisted === null) {
+      throw new AuthValidationError('用户不存在。');
+    }
+
     return {
       token,
-      user: {
-        createdAt: user.createdAt,
-        id: user.id,
-        role: user.role,
-        updatedAt: user.updatedAt,
-        username: user.username,
-      },
+      user: persisted,
     };
   }
 

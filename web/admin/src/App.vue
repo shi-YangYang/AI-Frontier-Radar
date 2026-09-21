@@ -14,6 +14,7 @@
       </RouterLink>
       <nav class="nav-list" :aria-label="t('nav.overview')">
         <template v-for="item in navItems" :key="item.to">
+          <p v-if="item.to === '/' || item.to === '/logs'" class="nav-group-label">{{ t(item.to === '/' ? 'nav.workspace' : 'nav.administration') }}</p>
           <RouterLink
             class="nav-item"
             :to="item.to"
@@ -44,9 +45,10 @@
       </nav>
       <div class="sidebar-user" v-if="currentUser !== null">
         <div class="sidebar-user-head">
+          <span class="user-avatar" aria-hidden="true">{{ (currentUser.nickname ?? currentUser.username).slice(0, 1).toUpperCase() }}</span>
           <div class="sidebar-user-info">
-            <strong>{{ currentUser.username }}</strong>
-            <small>{{ currentUser.role === 'admin' ? t('auth.roleAdmin') : t('auth.roleUser') }}</small>
+            <strong>{{ currentUser.nickname ?? currentUser.username }}</strong>
+            <small>{{ currentUser.role === 'admin' ? t('auth.roleAdmin') : t('auth.roleUser') }}<template v-if="currentUser.nickname"> · {{ currentUser.username }}</template></small>
           </div>
         </div>
         <button class="logout-button" type="button" @click="handleLogout">
@@ -77,6 +79,7 @@
       class="mobile-drawer"
       :class="{ open: isDrawerOpen }"
       :aria-hidden="!isDrawerOpen"
+      :inert="!isDrawerOpen"
       aria-modal="true"
       role="dialog"
       :aria-labelledby="'mobile-navigation-title'"
@@ -92,6 +95,7 @@
       </header>
       <nav class="drawer-nav-list" :aria-label="t('nav.drawerTitle')">
         <template v-for="item in navItems" :key="item.to">
+          <p v-if="item.to === '/' || item.to === '/logs'" class="nav-group-label">{{ t(item.to === '/' ? 'nav.workspace' : 'nav.administration') }}</p>
           <RouterLink
             class="drawer-nav-item"
             :to="item.to"
@@ -121,7 +125,7 @@
         </template>
       </nav>
       <div class="drawer-user" v-if="currentUser !== null">
-        <strong>{{ currentUser.username }}</strong>
+        <strong>{{ currentUser.nickname ?? currentUser.username }}</strong>
         <button class="language-button" type="button" @click="handleLogout">
           {{ t('auth.logout') }}
         </button>
@@ -132,7 +136,9 @@
         <nav class="breadcrumb" :aria-label="t('nav.breadcrumb')">
           <RouterLink to="/">{{ t('nav.home') }}</RouterLink>
           <span class="breadcrumb-sep" aria-hidden="true">/</span>
-          <span class="breadcrumb-current">{{ t(breadcrumbLabel) }}</span>
+          <RouterLink v-if="isSettingsRoute" to="/settings">{{ t('nav.settings') }}</RouterLink>
+          <span v-if="isSettingsRoute" class="breadcrumb-sep" aria-hidden="true">/</span>
+          <span class="breadcrumb-current" aria-current="page">{{ t(isSettingsRoute ? activeSettingsLabel : breadcrumbLabel) }}</span>
         </nav>
         <button class="language-button" type="button" @click="toggleLanguage">
           {{ t('language.switchTo') }}
@@ -211,6 +217,11 @@ const settingsNavTabs: Array<{ descriptionKey: MessageKey; key: string; labelKey
     labelKey: 'settings.tabs.data.label',
   },
   {
+    descriptionKey: 'settings.tabs.dingtalk.description',
+    key: 'dingtalk',
+    labelKey: 'settings.tabs.dingtalk.label',
+  },
+  {
     descriptionKey: 'settings.tabs.users.description',
     key: 'users',
     labelKey: 'settings.tabs.users.label',
@@ -231,7 +242,13 @@ const activeSettingsTabKey = computed(() => {
   return settingsTabKeys.includes(queryTab) ? queryTab : 'feishu';
 });
 
+const activeSettingsLabel = computed<MessageKey>(() =>
+  settingsNavTabs.find((tab) => tab.key === activeSettingsTabKey.value)?.labelKey ?? 'settings.tabs.feishu.label',
+);
+
 watchEffect(() => {
+  document.body.classList.toggle('admin-theme', !isBareRoute.value);
+  document.body.classList.toggle('public-theme', isBareRoute.value);
   document.documentElement.lang = htmlLanguage.value;
   document.title = t('brand.documentTitle');
 });
@@ -253,6 +270,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  document.body.classList.remove('admin-theme', 'public-theme');
   window.removeEventListener('keydown', handleKeydown);
   window.removeEventListener('auth:expired', handleAuthExpired);
 });

@@ -7,10 +7,11 @@
             <BrandLogo :alt="t('brand.name')" />
           </span>
           <div class="me-hero-text">
-            <strong>{{ t('portal.greeting', { username: currentUser?.username ?? '' }) }}</strong>
-            <small>{{ t('portal.tagline') }}</small>
+            <strong>{{ t('brand.name') }}</strong>
+            <small>{{ t('brand.subtitle') }}</small>
           </div>
           <div class="me-hero-actions">
+            <span class="me-user-name">{{ t('portal.greeting', { username: currentUser?.nickname ?? currentUser?.username ?? '' }) }}</span>
             <button class="me-ghost-button" type="button" @click="toggleLanguage">
               {{ t('language.switchTo') }}
             </button>
@@ -40,10 +41,14 @@
     </nav>
 
     <main class="me-content" :class="{ 'me-content-wide': activeTab === 'messages' }">
+      <header class="me-page-heading">
+        <h1>{{ t(activeTab === 'wechat' ? 'me.nav.wechat' : 'me.nav.messages') }}</h1>
+        <p>{{ t(activeTab === 'wechat' ? 'portal.tagline' : 'me.posts.description') }}</p>
+      </header>
       <ToastNotice :message="notice" :danger="noticeDanger" />
 
-      <template v-if="activeTab === 'wechat'">
-        <section class="me-card">
+      <div v-if="activeTab === 'wechat'" class="me-wechat-layout" :class="{ 'is-bound': hasBinding }">
+        <section class="me-card me-connection-card">
           <header class="me-card-head">
             <div class="me-card-title">
               <span class="me-card-icon me-card-icon-wechat" aria-hidden="true">
@@ -62,9 +67,13 @@
             </span>
           </header>
 
-          <div v-if="binding === null" class="me-empty">{{ t('portal.loading') }}</div>
+          <div v-if="binding === null" class="me-empty" role="status">
+            <p>{{ t(bindingLoading ? 'portal.loading' : 'portal.loadFailed') }}</p>
+            <button v-if="!bindingLoading" type="button" @click="loadBinding">{{ t('actions.refresh') }}</button>
+          </div>
 
           <div v-else-if="!hasBinding" class="me-bind">
+            <p class="me-bind-intro">{{ t('portal.emptyHint') }}</p>
             <ol class="me-bind-steps">
               <li>{{ t('me.bind.step1') }}</li>
               <li>{{ t('me.bind.step2') }}</li>
@@ -110,128 +119,124 @@
             <a v-if="qrUrl !== null" :href="qrUrl" rel="noreferrer" target="_blank">{{ t('portal.openQrLink') }}</a>
             <p class="me-bind-hint">{{ t('me.bind.hintAfterScan') }}</p>
             <form v-if="loginStatus === 'need-code'" class="me-code-form" @submit.prevent="submitCode">
-              <input v-model="codeInput" autocomplete="off" :placeholder="t('portal.codePlaceholder')" />
+              <label>
+                <span>{{ t('portal.codeLabel') }}</span>
+                <input v-model="codeInput" autocomplete="off" :placeholder="t('portal.codePlaceholder')" />
+              </label>
               <button class="me-primary" type="submit" :disabled="busy">{{ t('portal.submitCode') }}</button>
             </form>
             <button class="me-ghost-button" type="button" @click="cancelBind">{{ t('portal.cancelBind') }}</button>
           </div>
         </section>
 
-        <section v-if="hasBinding" class="me-card">
-          <div class="me-row">
-            <span class="me-card-icon me-card-icon-quiet" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a7 7 0 0 0 11 11z" />
-              </svg>
-            </span>
-            <div class="me-row-text">
-              <strong>{{ t('portal.quietTitle') }}</strong>
-              <small>{{ t('portal.quietDescription') }}</small>
-            </div>
-            <button
-              class="me-switch"
-              :class="{ on: quietEnabled }"
-              type="button"
-              role="switch"
-              :aria-checked="quietEnabled"
-              :aria-label="t('portal.quietTitle')"
-              :disabled="busy"
-              @click="toggleQuietHours"
-            >
-              <span class="me-switch-knob"></span>
-            </button>
-          </div>
-
-          <div v-if="quietEnabled" class="me-quiet-range">
-            <label>
-              <span>{{ t('portal.quietStart') }}</span>
-              <select v-model.number="quietStartHour" :disabled="busy" @change="saveQuietHours()">
-                <option v-for="hour in hourOptions" :key="`start-${hour}`" :value="hour">
-                  {{ formatHour(hour) }}
-                </option>
-              </select>
-            </label>
-            <span class="me-quiet-sep">→</span>
-            <label>
-              <span>{{ t('portal.quietEnd') }}</span>
-              <select v-model.number="quietEndHour" :disabled="busy" @change="saveQuietHours()">
-                <option v-for="hour in hourOptions" :key="`end-${hour}`" :value="hour">
-                  {{ formatHour(hour) }}
-                </option>
-              </select>
-            </label>
-            <span class="me-save-state">{{ saveStateLabel }}</span>
-          </div>
-        </section>
-
-        <section v-if="hasBinding" class="me-card">
-          <div class="me-row">
-            <span class="me-card-icon me-card-icon-source" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M4 6h16" />
-                <path d="M4 12h16" />
-                <path d="M4 18h10" />
-              </svg>
-            </span>
-            <div class="me-row-text">
-              <strong>{{ t('portal.sourcesLabel') }}</strong>
-              <small>{{ t('portal.sourcesHint') }}</small>
-            </div>
-            <button
-              class="me-switch"
-              :class="{ on: !sourcesAll }"
-              type="button"
-              role="switch"
-              :aria-checked="!sourcesAll"
-              :aria-label="t('portal.sourcesModeCustom')"
-              :disabled="busy"
-              @click="toggleSourcesMode"
-            >
-              <span class="me-switch-knob"></span>
-            </button>
-          </div>
-
-          <p class="me-inline-state">
-            {{ sourcesAll ? t('portal.sourcesModeAll') : t('portal.sourcesSelected', { count: selectedSourceIds.length }) }}
-            <template v-if="saveStateLabel.length > 0"> · {{ saveStateLabel }}</template>
-          </p>
-
-          <div v-if="!sourcesAll" class="me-source-groups">
-            <section v-for="group in groupedSources" :key="group.key" class="me-source-group">
-              <p class="me-source-group-title">{{ t(group.labelKey) }}</p>
-              <div class="me-source-chips">
-                <button
-                  v-for="source in group.sources"
-                  :key="source.id"
-                  class="me-source-chip"
-                  :class="{ on: selectedSourceIds.includes(source.id) }"
-                  type="button"
-                  :disabled="busy"
-                  @click="toggleSource(source.id)"
-                >
-                  {{ sourceLabel(source) }}
-                </button>
-              </div>
-            </section>
-          </div>
-        </section>
-      </template>
-
-      <template v-else>
-        <section class="me-card">
-          <header class="me-card-head">
-            <div class="me-card-title">
-              <span class="me-card-icon me-card-icon-message" aria-hidden="true">
+        <div v-if="hasBinding" class="me-preferences">
+          <section class="me-card">
+            <div class="me-row">
+              <span class="me-card-icon me-card-icon-quiet" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="3" y="5" width="18" height="14" rx="2.5" />
-                  <path d="m3.5 7 8.5 6 8.5-6" />
+                  <path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a7 7 0 0 0 11 11z" />
                 </svg>
               </span>
-              <div>
-                <h2>{{ t('me.nav.messages') }}</h2>
-                <p>{{ t('me.posts.total', { total: postsPagination.total }) }}</p>
+              <div class="me-row-text">
+                <strong>{{ t('portal.quietTitle') }}</strong>
+                <small>{{ t('portal.quietDescription') }}</small>
               </div>
+              <button
+                class="me-switch"
+                :class="{ on: quietEnabled }"
+                type="button"
+                role="switch"
+                :aria-checked="quietEnabled"
+                :aria-label="t('portal.quietTitle')"
+                :disabled="busy"
+                @click="toggleQuietHours"
+              >
+                <span class="me-switch-knob"></span>
+              </button>
             </div>
+
+            <div v-if="quietEnabled" class="me-quiet-range">
+              <label>
+                <span>{{ t('portal.quietStart') }}</span>
+                <select v-model.number="quietStartHour" :disabled="busy" @change="saveQuietHours()">
+                  <option v-for="hour in hourOptions" :key="`start-${hour}`" :value="hour">
+                    {{ formatHour(hour) }}
+                  </option>
+                </select>
+              </label>
+              <span class="me-quiet-sep">→</span>
+              <label>
+                <span>{{ t('portal.quietEnd') }}</span>
+                <select v-model.number="quietEndHour" :disabled="busy" @change="saveQuietHours()">
+                  <option v-for="hour in hourOptions" :key="`end-${hour}`" :value="hour">
+                    {{ formatHour(hour) }}
+                  </option>
+                </select>
+              </label>
+              <span class="me-save-state">{{ saveStateLabel }}</span>
+            </div>
+          </section>
+
+          <section class="me-card">
+            <div class="me-row">
+              <span class="me-card-icon me-card-icon-source" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 6h16" />
+                  <path d="M4 12h16" />
+                  <path d="M4 18h10" />
+                </svg>
+              </span>
+              <div class="me-row-text">
+                <strong>{{ t('portal.sourcesLabel') }}</strong>
+                <small>{{ t('portal.sourcesHint') }}</small>
+              </div>
+              <button
+                class="me-switch"
+                :class="{ on: !sourcesAll }"
+                type="button"
+                role="switch"
+                :aria-checked="!sourcesAll"
+                :aria-label="t('portal.sourcesModeCustom')"
+                :disabled="busy"
+                @click="toggleSourcesMode"
+              >
+                <span class="me-switch-knob"></span>
+              </button>
+            </div>
+
+            <p class="me-inline-state">
+              {{ sourcesAll ? t('portal.sourcesModeAll') : t('portal.sourcesSelected', { count: selectedSourceIds.length }) }}
+              <template v-if="saveStateLabel.length > 0"> · {{ saveStateLabel }}</template>
+            </p>
+
+            <div v-if="!sourcesAll" class="me-source-groups">
+              <p v-if="groupedSources.length === 0" class="me-inline-state">{{ t('portal.sourcesEmpty') }}</p>
+              <section v-for="group in groupedSources" :key="group.key" class="me-source-group">
+                <p class="me-source-group-title">{{ t(group.labelKey) }}</p>
+                <div class="me-source-chips">
+                  <button
+                    v-for="source in group.sources"
+                    :key="source.id"
+                    class="me-source-chip"
+                    :class="{ on: selectedSourceIds.includes(source.id) }"
+                    :aria-pressed="selectedSourceIds.includes(source.id)"
+                    type="button"
+                    :disabled="busy"
+                    @click="toggleSource(source.id)"
+                  >
+                    {{ sourceLabel(source) }}
+                  </button>
+                </div>
+              </section>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <template v-else>
+        <section class="me-card me-messages-card">
+          <header class="me-card-head">
+            <h2 class="me-message-count">{{ t('me.posts.total', { total: postsPagination.total }) }}</h2>
             <button class="me-ghost-button" type="button" :disabled="postsLoading" @click="loadPosts(1, true)">
               {{ t('actions.refresh') }}
             </button>
@@ -248,6 +253,7 @@
               v-model="searchInput"
               autocomplete="off"
               :placeholder="t('me.posts.searchPlaceholder')"
+              :aria-label="t('me.posts.searchPlaceholder')"
             />
             <button v-if="activeQuery.length > 0" class="me-search-clear" type="button" @click="clearSearch">
               {{ t('me.posts.searchClear') }}
@@ -257,14 +263,18 @@
             </button>
           </form>
 
-          <div v-if="posts.length === 0" class="me-empty">
-            {{ postsLoading ? t('me.posts.loading') : t('me.posts.empty') }}
+          <div v-if="posts.length === 0" class="me-empty me-messages-empty" role="status">
+            <svg class="me-empty-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <rect x="7" y="10" width="34" height="28" rx="5" />
+              <path d="m8 14 16 12 16-12" />
+            </svg>
+            <p>{{ t(postsLoading ? 'me.posts.loading' : postsFailed ? 'me.posts.loadFailed' : activeQuery.length > 0 ? 'me.posts.noResults' : 'me.posts.empty') }}</p>
           </div>
 
           <div v-else class="me-post-list">
             <article v-for="post in posts" :key="post.id" class="me-post">
               <header class="me-post-head">
-                <span class="me-source-chip">{{ post.sourceDisplayName ?? post.authorUsername }}</span>
+                <span class="me-post-source">{{ post.sourceDisplayName ?? post.authorUsername }}</span>
                 <time class="me-post-time" :datetime="post.postedAt" :title="formatDateTime(post.postedAt)">
                   {{ formatPostTime(post.postedAt) }}
                 </time>
@@ -282,6 +292,7 @@
                   v-if="isLongPost(post)"
                   class="me-post-expand"
                   type="button"
+                  :aria-expanded="expandedPostIds.has(post.id)"
                   @click="togglePostExpanded(post.id)"
                 >
                   {{ expandedPostIds.has(post.id) ? t('me.posts.collapse') : t('me.posts.expand') }}
@@ -349,6 +360,7 @@ const router = useRouter();
 const accountToUnbind = ref<MyWechatAccount | null>(null);
 const activeTab = ref<PortalTabKey>('wechat');
 const binding = ref<MyWechatBinding | null>(null);
+const bindingLoading = ref(true);
 const busy = ref(false);
 const codeInput = ref('');
 const loginStatus = ref('idle');
@@ -356,6 +368,7 @@ const notice = ref('');
 const noticeDanger = ref(false);
 const posts = ref<UserPostItem[]>([]);
 const postsLoading = ref(false);
+const postsFailed = ref(false);
 const postsPagination = ref({ page: 1, pageSize: 20, total: 0, totalPages: 0 });
 const qrDataUrl = ref<string | null>(null);
 const qrUrl = ref<string | null>(null);
@@ -439,11 +452,15 @@ function switchTab(tab: PortalTabKey): void {
 }
 
 async function loadBinding(): Promise<void> {
+  bindingLoading.value = true;
+
   try {
     binding.value = await getMyWechatBinding();
     syncBindingState();
   } catch (error) {
     showError(error);
+  } finally {
+    bindingLoading.value = false;
   }
 }
 
@@ -459,6 +476,7 @@ function syncBindingState(): void {
 
 async function loadPosts(page: number, replace = false): Promise<void> {
   postsLoading.value = true;
+  postsFailed.value = false;
 
   try {
     const result = await listMyPosts(page, postsPagination.value.pageSize, activeQuery.value);
@@ -466,6 +484,7 @@ async function loadPosts(page: number, replace = false): Promise<void> {
     posts.value = replace ? result.posts : [...posts.value, ...result.posts];
     postsPagination.value = result.pagination;
   } catch (error) {
+    postsFailed.value = true;
     showError(error);
   } finally {
     postsLoading.value = false;

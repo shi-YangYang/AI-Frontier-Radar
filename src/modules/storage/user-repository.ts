@@ -21,6 +21,10 @@ export class UserRepository {
     const user = await this.prisma.user.create({
       data: {
         createdAt: now,
+        ...(input.dingtalkUnionId === undefined
+          ? {}
+          : { dingtalkUnionId: input.dingtalkUnionId }),
+        ...(input.nickname === undefined ? {} : { nickname: input.nickname }),
         id: input.id ?? createDatabaseId(),
         passwordHash: input.passwordHash,
         role: input.role,
@@ -56,6 +60,14 @@ export class UserRepository {
     return user === null ? null : mapUserWithPassword(user);
   }
 
+  public async findByDingtalkUnionId(unionId: string): Promise<UserWithPassword | null> {
+    const user = await this.prisma.user.findUnique({
+      where: { dingtalkUnionId: unionId },
+    });
+
+    return user === null ? null : mapUserWithPassword(user);
+  }
+
   public async listAll(): Promise<User[]> {
     const users = await this.prisma.user.findMany({
       orderBy: [{ createdAt: 'asc' }],
@@ -75,12 +87,25 @@ export class UserRepository {
 
     return result.count > 0;
   }
+
+  public async updateNickname(id: string, nickname: string | null): Promise<boolean> {
+    const result = await this.prisma.user.updateMany({
+      data: {
+        nickname,
+        updatedAt: createTimestamp(),
+      },
+      where: { id },
+    });
+
+    return result.count > 0;
+  }
 }
 
 function mapUser(user: Prisma.UserGetPayload<Record<string, never>>): User {
   return {
     createdAt: user.createdAt,
     id: user.id,
+    nickname: user.nickname,
     role: user.role as UserRole,
     updatedAt: user.updatedAt,
     username: user.username,

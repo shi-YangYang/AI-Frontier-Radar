@@ -1,6 +1,6 @@
 <template>
-  <section>
-    <PageHeader :subtitle="t('overview.subtitle')">
+  <section class="overview-page">
+    <PageHeader :subtitle="t('overview.subtitle')" :title="t('nav.overview')">
       <div class="toolbar">
         <button type="button" :disabled="busy" @click="() => loadSummary()">{{ t('actions.refresh') }}</button>
         <button class="primary" type="button" :disabled="busy" @click="runPoll">{{ t('actions.pollNow') }}</button>
@@ -40,7 +40,7 @@
     </div>
 
     <div class="panel-grid overview-grid">
-      <article class="panel">
+      <article class="panel overview-feed">
         <header class="panel-header">
           <div>
             <h2>{{ t('overview.latestPosts') }}</h2>
@@ -53,7 +53,7 @@
           v-if="latestPosts.length === 0"
           :title="t('overview.noPostsTitle')"
           :description="t('overview.noPosts')"
-        />
+        ><template #action><RouterLink class="button-link" to="/accounts">{{ t('nav.accounts') }}</RouterLink></template></EmptyState>
         <ul v-else class="latest-post-list">
           <li v-for="post in latestPosts" :key="post.id" class="latest-post-item">
             <div class="latest-post-main">
@@ -73,51 +73,54 @@
       </article>
 
       <div class="overview-side">
-        <article class="panel">
+        <article class="panel overview-status-panel">
           <header class="panel-header">
-            <h2>{{ t('overview.latestPollRun') }}</h2>
+            <div>
+              <h2>{{ t('overview.statusTitle') }}</h2>
+              <p>{{ t('overview.statusHint') }}</p>
+            </div>
             <StatusBadge :status="summary?.latestPollRun?.status" />
           </header>
-          <dl class="detail-list">
-            <div>
-              <dt>{{ t('table.startedAt') }}</dt>
-              <dd :title="formatDateTime(summary?.latestPollRun?.startedAt)">
-                {{ formatRelativeTime(summary?.latestPollRun?.startedAt) }}
-              </dd>
-            </div>
-            <div>
-              <dt>{{ t('table.pollProgress') }}</dt>
-              <dd>{{ pollProgressText }}</dd>
-            </div>
-            <div>
-              <dt>{{ t('table.newPosts') }}</dt>
-              <dd>{{ summary?.latestPollRun?.newPostsDetected ?? '-' }}</dd>
-            </div>
-          </dl>
-        </article>
-
-        <article class="panel">
-          <header class="panel-header">
-            <h2>{{ t('overview.service') }}</h2>
-          </header>
-          <dl class="detail-list">
-            <div>
-              <dt>{{ t('overview.sourceMode') }}</dt>
-              <dd><code>{{ summary?.sourceMode ?? '-' }}</code></dd>
-            </div>
-            <div>
-              <dt>{{ t('overview.watchSource') }}</dt>
-              <dd><code>{{ summary?.watchAccountsSource ?? '-' }}</code></dd>
-            </div>
-            <div>
-              <dt>{{ t('overview.deliveryReady') }}</dt>
-              <dd><StatusBadge :status="summary?.feishuWebhookConfigured ? 'success' : 'failed'" /></dd>
-            </div>
-            <div>
-              <dt>{{ t('overview.service') }}</dt>
-              <dd><code>{{ summary?.service.name ?? '-' }}:{{ summary?.service.port ?? '-' }}</code></dd>
-            </div>
-          </dl>
+          <section class="overview-status-section">
+            <h3>{{ t('overview.latestPollRun') }}</h3>
+            <dl class="detail-list">
+              <div>
+                <dt>{{ t('table.startedAt') }}</dt>
+                <dd :title="formatDateTime(summary?.latestPollRun?.startedAt)">
+                  {{ formatRelativeTime(summary?.latestPollRun?.startedAt) }}
+                </dd>
+              </div>
+              <div>
+                <dt>{{ t('table.pollProgress') }}</dt>
+                <dd>{{ pollProgressText }}</dd>
+              </div>
+              <div>
+                <dt>{{ t('table.newPosts') }}</dt>
+                <dd>{{ summary?.latestPollRun?.newPostsDetected ?? '-' }}</dd>
+              </div>
+            </dl>
+          </section>
+          <section class="overview-status-section">
+            <h3>{{ t('overview.service') }}</h3>
+            <dl class="detail-list">
+              <div>
+                <dt>{{ t('overview.sourceMode') }}</dt>
+                <dd><code>{{ summary?.sourceMode ?? '-' }}</code></dd>
+              </div>
+              <div>
+                <dt>{{ t('overview.watchSource') }}</dt>
+                <dd><code>{{ summary?.watchAccountsSource ?? '-' }}</code></dd>
+              </div>
+              <div>
+                <dt>{{ t('overview.deliveryReady') }}</dt>
+                <dd><span class="status-badge" :class="summary?.feishuWebhookConfigured ? 'good' : 'neutral'">{{ summary === null ? '-' : t(summary.feishuWebhookConfigured ? 'settings.runtime.configured' : 'settings.runtime.notConfigured') }}</span></dd>
+              </div>
+              <div>
+                <dt>{{ t('overview.service') }}</dt>
+                <dd><code>{{ summary?.service.name ?? '-' }}:{{ summary?.service.port ?? '-' }}</code></dd>
+              </div>
+            </dl>
+          </section>
         </article>
       </div>
     </div>
@@ -158,6 +161,8 @@ const summary = ref<AdminSummary | null>(null);
 
 const pendingDeliveryCount = computed(() => {
   const counts = summary.value?.deliveryEventStatusCounts;
+
+  if (counts === undefined) return '-';
 
   return (counts?.pending ?? 0) + (counts?.retry_wait ?? 0);
 });

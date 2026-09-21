@@ -1,8 +1,10 @@
 <template>
-  <section>
-    <PageHeader :subtitle="t('settings.subtitle')">
+  <section class="settings-page">
+    <PageHeader :subtitle="t(activeTabMeta.descriptionKey)" :title="t(activeTabMeta.labelKey)">
       <div class="toolbar">
         <button type="button" :disabled="busy" @click="() => loadSettings()">{{ t('actions.refresh') }}</button>
+        <button v-if="activeSettingsTab === 'feishu'" class="primary" type="button" :aria-expanded="targetCreateOpen" aria-controls="target-create-panel" @click="targetCreateOpen = !targetCreateOpen">{{ t(targetCreateOpen ? 'actions.cancel' : 'settings.feishu.addTitle') }}</button>
+        <button v-if="activeSettingsTab === 'users'" class="primary" type="button" :aria-expanded="userCreateOpen" aria-controls="user-create-panel" @click="userCreateOpen = !userCreateOpen">{{ t(userCreateOpen ? 'actions.cancel' : 'settings.users.addTitle') }}</button>
       </div>
     </PageHeader>
 
@@ -14,63 +16,7 @@
 
     <div v-else class="settings-tab-panel">
         <section v-if="activeSettingsTab === 'feishu'" class="settings-layout single-column">
-          <article class="panel">
-            <header class="panel-header">
-              <div>
-                <h2>{{ t('settings.feishu.addTitle') }}</h2>
-                <p>{{ t('settings.feishu.addDescription') }}</p>
-              </div>
-            </header>
-
-            <form class="settings-form delivery-target-form" @submit.prevent="createTarget">
-              <div class="settings-field">
-                <span>{{ t('settings.feishu.channelTypeLabel') }}</span>
-                <SelectControl
-                  v-model="newTargetForm.channelType"
-                  :aria-label="t('settings.feishu.channelTypeLabel')"
-                  :disabled="busy"
-                  :options="channelTypeOptions"
-                />
-              </div>
-              <label>
-                <span>{{ t('settings.feishu.displayNameLabel') }}</span>
-                <input
-                  v-model="newTargetForm.displayName"
-                  autocomplete="off"
-                  maxlength="100"
-                  :placeholder="t('settings.feishu.displayNamePlaceholder')"
-                />
-              </label>
-              <label>
-                <span>{{ t('settings.feishu.urlLabel') }}</span>
-                <input
-                  v-model="newTargetForm.webhookUrl"
-                  autocomplete="off"
-                  :placeholder="newTargetUrlPlaceholder"
-                  type="url"
-                />
-              </label>
-
-              <label v-if="newTargetForm.channelType === 'dingtalk_webhook'">
-                <span>{{ t('settings.feishu.secretLabel') }}</span>
-                <input
-                  v-model="newTargetForm.secret"
-                  autocomplete="off"
-                  :placeholder="t('settings.feishu.secretPlaceholder')"
-                />
-                <small>{{ t('settings.feishu.secretHelp') }}</small>
-              </label>
-              <label class="checkbox-row compact-checkbox">
-                <input v-model="newTargetForm.enabled" type="checkbox" />
-                <span>{{ t('settings.feishu.enableOnCreate') }}</span>
-              </label>
-              <div class="form-actions">
-                <button class="primary" type="submit" :disabled="busy">{{ t('settings.feishu.submitAdd') }}</button>
-              </div>
-            </form>
-          </article>
-
-          <article class="panel">
+          <article class="panel settings-list-panel">
             <header class="panel-header">
               <div>
                 <h2>{{ t('settings.feishu.listTitle') }}</h2>
@@ -134,16 +80,75 @@
               @invalid-page="setNotice(t('notice.invalidPage'), true)"
             />
           </article>
+
+          <article v-if="targetCreateOpen" id="target-create-panel" class="panel settings-section">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.feishu.addTitle') }}</h2>
+                <p>{{ t('settings.feishu.addDescription') }}</p>
+              </div>
+            </header>
+            <div class="settings-section-body">
+
+            <form class="settings-form delivery-target-form" @submit.prevent="createTarget">
+              <div class="settings-field">
+                <span>{{ t('settings.feishu.channelTypeLabel') }}</span>
+                <SelectControl
+                  v-model="newTargetForm.channelType"
+                  :aria-label="t('settings.feishu.channelTypeLabel')"
+                  :disabled="busy"
+                  :options="channelTypeOptions"
+                />
+              </div>
+              <label>
+                <span>{{ t('settings.feishu.displayNameLabel') }}</span>
+                <input
+                  v-model="newTargetForm.displayName"
+                  autocomplete="off"
+                  maxlength="100"
+                  :placeholder="t('settings.feishu.displayNamePlaceholder')"
+                />
+              </label>
+              <label>
+                <span>{{ t('settings.feishu.urlLabel') }}</span>
+                <input
+                  v-model="newTargetForm.webhookUrl"
+                  autocomplete="off"
+                  :placeholder="newTargetUrlPlaceholder"
+                  type="url"
+                />
+              </label>
+
+              <label v-if="newTargetForm.channelType === 'dingtalk_webhook'">
+                <span>{{ t('settings.feishu.secretLabel') }}</span>
+                <input
+                  v-model="newTargetForm.secret"
+                  autocomplete="off"
+                  :placeholder="t('settings.feishu.secretPlaceholder')"
+                />
+                <small>{{ t('settings.feishu.secretHelp') }}</small>
+              </label>
+              <label class="checkbox-row compact-checkbox">
+                <input v-model="newTargetForm.enabled" type="checkbox" />
+                <span>{{ t('settings.feishu.enableOnCreate') }}</span>
+              </label>
+              <div class="form-actions">
+                <button class="primary" type="submit" :disabled="busy">{{ t('settings.feishu.submitAdd') }}</button>
+              </div>
+            </form>
+            </div>
+          </article>
         </section>
 
         <section v-else-if="activeSettingsTab === 'polling'" class="settings-layout single-column">
-          <article class="panel settings-form-panel">
+          <article class="panel settings-section settings-form-panel">
             <header class="panel-header">
               <div>
-                <h2>{{ t('settings.polling.title') }}</h2>
+                <h2>{{ t('settings.polling.sectionTitle') }}</h2>
                 <p>{{ t('settings.polling.description') }}</p>
               </div>
             </header>
+            <div class="settings-section-body">
             <form class="settings-form polling-form" @submit.prevent="savePolling">
               <label>
                 <span>{{ t('settings.polling.intervalSeconds') }}</span>
@@ -187,24 +192,22 @@
                 <button class="primary" type="submit" :disabled="busy">{{ t('settings.polling.save') }}</button>
               </div>
             </form>
+            </div>
           </article>
         </section>
 
-        <section v-else-if="activeSettingsTab === 'xSource'" class="settings-layout x-source-layout">
-          <article class="panel settings-wide">
+        <section v-else-if="activeSettingsTab === 'xSource'" class="settings-layout single-column x-source-layout">
+          <article class="panel settings-section settings-wide">
             <header class="panel-header">
               <div>
                 <h2>{{ t('settings.xSource.summaryTitle') }}</h2>
                 <p>{{ t('settings.xSource.summaryDescription') }}</p>
               </div>
-              <span
-                v-if="xSourceSettings !== null"
-                class="status-badge"
-                :class="xSourceSettings.mode === 'browser' ? 'good' : 'neutral'"
-              >
+              <span v-if="xSourceSettings !== null" class="status-badge neutral">
                 {{ xSourceSettings.mode }}
               </span>
             </header>
+            <div class="settings-section-body">
 
             <div v-if="xSourceSettings === null" class="empty-panel">{{ t('settings.loading') }}</div>
             <dl v-else class="detail-list x-source-detail-list">
@@ -235,15 +238,17 @@
                 </dd>
               </div>
             </dl>
+            </div>
           </article>
 
-          <article class="panel settings-form-panel">
+          <article class="panel settings-section settings-form-panel">
             <header class="panel-header">
               <div>
                 <h2>{{ t('settings.xSource.proxyTitle') }}</h2>
                 <p>{{ t('settings.xSource.proxyDescription') }}</p>
               </div>
             </header>
+            <div class="settings-section-body">
 
             <form class="settings-form x-source-form" @submit.prevent="saveXProxy">
               <label>
@@ -277,15 +282,17 @@
                 </button>
               </div>
             </form>
+            </div>
           </article>
 
-          <article class="panel settings-form-panel settings-wide">
+          <article class="panel settings-section settings-form-panel settings-wide">
             <header class="panel-header">
               <div>
                 <h2>{{ t('settings.xSource.anonymousTitle') }}</h2>
                 <p>{{ t('settings.xSource.anonymousDescription') }}</p>
               </div>
             </header>
+            <div class="settings-section-body">
 
             <form class="settings-form x-source-form" @submit.prevent="runAnonymousTest">
               <label>
@@ -322,18 +329,20 @@
                 sourceCode=<code>{{ anonymousCheckResult.sourceCode }}</code>
               </small>
             </section>
+            </div>
           </article>
 
         </section>
 
         <section v-else-if="activeSettingsTab === 'rss'" class="settings-layout single-column">
-          <article class="panel settings-wide">
+          <article class="panel settings-section settings-wide">
             <header class="panel-header">
               <div>
                 <h2>{{ t('settings.rss.summaryTitle') }}</h2>
                 <p>{{ t('settings.rss.summaryDescription') }}</p>
               </div>
             </header>
+            <div class="settings-section-body">
             <dl class="detail-list">
               <div>
                 <dt>{{ t('settings.rss.proxyPreview') }}</dt>
@@ -347,15 +356,17 @@
                 </dd>
               </div>
             </dl>
+            </div>
           </article>
 
-          <article class="panel settings-form-panel">
+          <article class="panel settings-section settings-form-panel">
             <header class="panel-header">
               <div>
                 <h2>{{ t('settings.rss.proxyTitle') }}</h2>
                 <p>{{ t('settings.rss.proxyDescription') }}</p>
               </div>
             </header>
+            <div class="settings-section-body">
 
             <form class="settings-form" @submit.prevent="saveRssProxy">
               <label>
@@ -380,6 +391,7 @@
                 </button>
               </div>
             </form>
+            </div>
           </article>
         </section>
 
@@ -418,6 +430,8 @@
                 </button>
               </div>
 
+              <details class="rule-create-disclosure">
+                <summary class="inline-disclosure">{{ t('settings.rules.add') }}</summary>
               <form class="rule-add-form" @submit.prevent="addSubscriptionRule">
                 <label>
                   <span>{{ t('settings.rules.nameLabel') }}</span>
@@ -474,6 +488,7 @@
                   </button>
                 </div>
               </form>
+              </details>
 
               <div class="inline-alert">{{ t('settings.rules.hint') }}</div>
             </div>
@@ -481,16 +496,17 @@
         </section>
 
         <section v-else-if="activeSettingsTab === 'wechat'" class="settings-layout single-column">
-          <article class="panel settings-form-panel">
+          <article class="panel settings-section settings-form-panel">
             <header class="panel-header">
               <div>
-                <h2>{{ t('settings.wechat.title') }}</h2>
+                <h2>{{ t('settings.wechat.sectionTitle') }}</h2>
                 <p>{{ t('settings.wechat.description') }}</p>
               </div>
               <button type="button" :disabled="busy" @click="loadWechatStatus">
                 {{ t('actions.refresh') }}
               </button>
             </header>
+            <div class="settings-section-body">
 
             <div class="settings-form wechat-form">
               <div v-if="wechatStatus === null" class="empty-panel">{{ t('settings.loading') }}</div>
@@ -567,7 +583,7 @@
                 <div v-if="wechatStatus.accounts.length === 0" class="empty-panel">
                   {{ t('settings.wechat.accountsEmpty') }}
                 </div>
-                <table v-else class="data-table">
+                <div v-else class="table-wrap"><table class="data-table">
                   <thead>
                     <tr>
                       <th>{{ t('settings.wechat.accountId') }}</th>
@@ -603,22 +619,24 @@
                       </td>
                     </tr>
                   </tbody>
-                </table>
+                </table></div>
               </div>
 
               </template>
+            </div>
             </div>
           </article>
         </section>
 
         <section v-else-if="activeSettingsTab === 'data'" class="settings-layout single-column">
-          <article class="panel settings-form-panel">
+          <article class="panel settings-section settings-form-panel">
             <header class="panel-header">
               <div>
                 <h2>{{ t('settings.data.retentionTitle') }}</h2>
                 <p>{{ t('settings.data.retentionDescription') }}</p>
               </div>
             </header>
+            <div class="settings-section-body">
 
             <div v-if="dataSettings === null" class="empty-panel">{{ t('settings.loading') }}</div>
             <form v-else class="settings-form" @submit.prevent="saveDataSettings">
@@ -663,15 +681,17 @@
                 </button>
               </div>
             </form>
+            </div>
           </article>
 
-          <article class="panel settings-form-panel">
+          <article class="panel settings-section settings-form-panel">
             <header class="panel-header">
               <div>
                 <h2>{{ t('settings.data.backupTitle') }}</h2>
                 <p>{{ t('settings.data.backupDescription') }}</p>
               </div>
             </header>
+            <div class="settings-section-body">
 
             <div class="settings-actions">
               <button class="primary" type="button" :disabled="busy" @click="createBackupNow">
@@ -682,7 +702,7 @@
             <div v-if="backups.length === 0" class="empty-panel">
               {{ t('settings.data.backupEmpty') }}
             </div>
-            <table v-else class="data-table">
+            <div v-else class="table-wrap"><table class="data-table">
               <thead>
                 <tr>
                   <th>{{ t('settings.data.backupName') }}</th>
@@ -709,20 +729,134 @@
                   </td>
                 </tr>
               </tbody>
-            </table>
+            </table></div>
 
             <div class="inline-alert">{{ t('settings.data.restoreHint') }}</div>
+            </div>
+          </article>
+        </section>
+
+        <section v-else-if="activeSettingsTab === 'dingtalk'" class="settings-layout single-column">
+          <article class="panel settings-section">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.dingtalk.sectionTitle') }}</h2>
+                <p>{{ t('settings.dingtalk.description') }}</p>
+              </div>
+            </header>
+            <div class="settings-section-body">
+              <form class="settings-form dingtalk-form" @submit.prevent="submitDingtalkSettings">
+                <label>
+                  <span>{{ t('settings.dingtalk.appKeyLabel') }}</span>
+                  <input
+                    v-model="dingtalkForm.appKey"
+                    autocomplete="off"
+                    :placeholder="t('settings.dingtalk.appKeyPlaceholder')"
+                  />
+                </label>
+                <label>
+                  <span>{{ t('settings.dingtalk.appSecretLabel') }}</span>
+                  <input
+                    v-model="dingtalkForm.appSecret"
+                    autocomplete="new-password"
+                    :placeholder="
+                      dingtalkSettings !== null && dingtalkSettings.appSecretConfigured
+                        ? t('settings.dingtalk.appSecretConfigured', {
+                            preview: dingtalkSettings.appSecretPreview ?? '',
+                          })
+                        : t('settings.dingtalk.appSecretPlaceholder')
+                    "
+                    type="password"
+                  />
+                  <small>{{ t('settings.dingtalk.appSecretHelp') }}</small>
+                </label>
+                <label>
+                  <span>{{ t('settings.dingtalk.corpIdLabel') }}</span>
+                  <input
+                    v-model="dingtalkForm.corpId"
+                    autocomplete="off"
+                    :placeholder="t('settings.dingtalk.corpIdPlaceholder')"
+                  />
+                  <small>{{ t('settings.dingtalk.corpIdHelp') }}</small>
+                </label>
+                <label class="checkbox-row">
+                  <input v-model="dingtalkForm.enabled" type="checkbox" />
+                  <span>{{ t('settings.dingtalk.enabledLabel') }}</span>
+                </label>
+                <div class="inline-alert">
+                  {{ t('settings.dingtalk.callbackHint', { callback: dingtalkCallbackUrl }) }}
+                </div>
+                <div class="form-actions">
+                  <button class="primary" type="submit" :disabled="busy">
+                    {{ t('settings.dingtalk.save') }}
+                  </button>
+                </div>
+              </form>
+            </div>
           </article>
         </section>
 
         <section v-else-if="activeSettingsTab === 'users'" class="settings-layout single-column">
-          <article class="panel settings-form-panel">
+          <article class="panel settings-list-panel">
+            <header class="panel-header">
+              <div>
+                <h2>{{ t('settings.users.listTitle') }}</h2>
+                <p>{{ t('settings.users.listDescription') }}</p>
+              </div>
+            </header>
+            <div v-if="users.length === 0" class="empty-panel">{{ t('settings.users.empty') }}</div>
+            <div v-else class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{{ t('settings.users.table.username') }}</th>
+                    <th>{{ t('settings.users.table.role') }}</th>
+                    <th>{{ t('settings.users.table.createdAt') }}</th>
+                    <th>{{ t('settings.users.table.actions') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="user in users" :key="user.id">
+                    <td>
+                      <strong>{{ user.username }}</strong>
+                      <span v-if="user.id === currentUserId" class="muted"> · {{ t('settings.users.self') }}</span>
+                      <small v-if="user.nickname" class="muted user-nickname">{{ user.nickname }}</small>
+                    </td>
+                    <td>
+                      <span class="status-badge" :class="user.role === 'admin' ? 'good' : 'neutral'">
+                        {{ user.role === 'admin' ? t('auth.roleAdmin') : t('auth.roleUser') }}
+                      </span>
+                    </td>
+                    <td class="muted">{{ formatDateTime(user.createdAt) }}</td>
+                    <td>
+                      <div class="row-actions">
+                        <button type="button" :disabled="busy" @click="openResetPassword(user)">
+                          {{ t('settings.users.resetPassword') }}
+                        </button>
+                        <button
+                          class="danger"
+                          type="button"
+                          :disabled="busy || user.id === currentUserId"
+                          @click="userToDelete = user"
+                        >
+                          {{ t('actions.delete') }}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article v-if="userCreateOpen" id="user-create-panel" class="panel settings-section settings-form-panel">
             <header class="panel-header">
               <div>
                 <h2>{{ t('settings.users.addTitle') }}</h2>
                 <p>{{ t('settings.users.addDescription') }}</p>
               </div>
             </header>
+            <div class="settings-section-body">
             <form class="settings-form users-create-form" @submit.prevent="submitCreateUser">
               <label>
                 <span>{{ t('settings.users.usernameLabel') }}</span>
@@ -753,68 +887,19 @@
               </label>
               <button class="primary" type="submit" :disabled="busy">{{ t('settings.users.createAction') }}</button>
             </form>
-          </article>
-
-          <article class="panel">
-            <header class="panel-header">
-              <div>
-                <h2>{{ t('settings.users.listTitle') }}</h2>
-                <p>{{ t('settings.users.listDescription') }}</p>
-              </div>
-            </header>
-            <div v-if="users.length === 0" class="empty-panel">{{ t('settings.users.empty') }}</div>
-            <div v-else class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>{{ t('settings.users.table.username') }}</th>
-                    <th>{{ t('settings.users.table.role') }}</th>
-                    <th>{{ t('settings.users.table.createdAt') }}</th>
-                    <th>{{ t('settings.users.table.actions') }}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="user in users" :key="user.id">
-                    <td>
-                      <strong>{{ user.username }}</strong>
-                      <span v-if="user.id === currentUserId" class="muted"> · {{ t('settings.users.self') }}</span>
-                    </td>
-                    <td>
-                      <span class="status-badge" :class="user.role === 'admin' ? 'good' : 'neutral'">
-                        {{ user.role === 'admin' ? t('auth.roleAdmin') : t('auth.roleUser') }}
-                      </span>
-                    </td>
-                    <td class="muted">{{ formatDateTime(user.createdAt) }}</td>
-                    <td>
-                      <div class="row-actions">
-                        <button type="button" :disabled="busy" @click="openResetPassword(user)">
-                          {{ t('settings.users.resetPassword') }}
-                        </button>
-                        <button
-                          class="danger"
-                          type="button"
-                          :disabled="busy || user.id === currentUserId"
-                          @click="userToDelete = user"
-                        >
-                          {{ t('actions.delete') }}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
             </div>
           </article>
         </section>
 
         <section v-else class="settings-layout single-column">
-          <article class="panel settings-form-panel">
+          <article class="panel settings-section settings-form-panel">
             <header class="panel-header">
               <div>
-                <h2>{{ t('settings.runtime.title') }}</h2>
+                <h2>{{ t('settings.runtime.sectionTitle') }}</h2>
                 <p>{{ t('settings.runtime.description') }}</p>
               </div>
             </header>
+            <div class="settings-section-body">
             <dl class="detail-list">
               <div>
                 <dt>{{ t('settings.runtime.sourceMode') }}</dt>
@@ -857,6 +942,7 @@
                 </dd>
               </div>
             </dl>
+            </div>
           </article>
         </section>
     </div>
@@ -1037,6 +1123,7 @@ import {
   runRetentionCleanup,
   updateDataSettings,
   deleteDeliveryTarget,
+  getDingtalkSettings,
   getRssSettings,
   getSettings,
   getSubscriptionRules,
@@ -1046,6 +1133,7 @@ import {
   testXSourceAnonymous,
   updateDeliveryTarget,
   updateDeliveryTargetEnabled,
+  updateDingtalkSettings,
   updateRssSettings,
   updateSubscriptionRules,
   updateXBrowserSettings,
@@ -1053,6 +1141,7 @@ import {
   type AdminPagination,
   type DeliveryChannelType,
   type DeliveryTarget,
+  type DingtalkAdminSettings,
   type DeliveryTargetSummary,
   type RuntimeRssSettings,
   type SubscriptionRule,
@@ -1078,6 +1167,8 @@ import { signOut, useAuth } from '../auth';
 import { t, type MessageKey } from '../i18n';
 import { DEFAULT_PAGE_SIZE, formatDateTime } from '../utils';
 
+const targetCreateOpen = ref(false);
+const userCreateOpen = ref(false);
 const busy = ref(false);
 const deleteTarget = ref<DeliveryTarget | null>(null);
 const deliveryTargetPagination = ref<AdminPagination>({
@@ -1340,10 +1431,52 @@ const newPasswordInput = ref('');
 const passwordTarget = ref<UserRecord | null>(null);
 const userToDelete = ref<UserRecord | null>(null);
 const users = ref<UserRecord[]>([]);
+const dingtalkSettings = ref<DingtalkAdminSettings | null>(null);
+const dingtalkForm = reactive({ appKey: '', appSecret: '', corpId: '', enabled: false });
 const userRoleOptions = computed(() => [
   { label: t('auth.roleUser'), value: 'user' },
   { label: t('auth.roleAdmin'), value: 'admin' },
 ]);
+
+const dingtalkCallbackUrl = computed(
+  () => `${window.location.origin}${dingtalkSettings.value?.callbackPath ?? '/auth/dingtalk/callback'}`,
+);
+
+async function loadDingtalkSettings(): Promise<void> {
+  try {
+    const settings = await getDingtalkSettings();
+    dingtalkSettings.value = settings;
+    dingtalkForm.appKey = settings.appKey;
+    dingtalkForm.appSecret = '';
+    dingtalkForm.corpId = settings.corpId ?? '';
+    dingtalkForm.enabled = settings.enabled;
+  } catch (error) {
+    showSettingsError(error);
+  }
+}
+
+async function submitDingtalkSettings(): Promise<void> {
+  busy.value = true;
+
+  try {
+    dingtalkSettings.value = await updateDingtalkSettings({
+      appKey: dingtalkForm.appKey.trim(),
+      appSecret: dingtalkForm.appSecret,
+      corpId: dingtalkForm.corpId.trim(),
+      enabled: dingtalkForm.enabled,
+    });
+    dingtalkForm.appKey = dingtalkSettings.value.appKey;
+    dingtalkForm.appSecret = '';
+    dingtalkForm.corpId = dingtalkSettings.value.corpId ?? '';
+    dingtalkForm.enabled = dingtalkSettings.value.enabled;
+    notice.value = t('settings.users.saved');
+    noticeDanger.value = false;
+  } catch (error) {
+    showSettingsError(error);
+  } finally {
+    busy.value = false;
+  }
+}
 
 async function loadUsers(): Promise<void> {
   try {
@@ -1440,10 +1573,21 @@ async function confirmDeleteUser(): Promise<void> {
   }
 }
 
-type SettingsTabKey = 'data' | 'feishu' | 'polling' | 'rss' | 'rules' | 'users' | 'wechat' | 'xSource' | 'runtime';
+type SettingsTabKey =
+  | 'data'
+  | 'dingtalk'
+  | 'feishu'
+  | 'polling'
+  | 'rss'
+  | 'rules'
+  | 'users'
+  | 'wechat'
+  | 'xSource'
+  | 'runtime';
 
 const SETTINGS_TAB_KEYS: SettingsTabKey[] = [
   'data',
+  'dingtalk',
   'feishu',
   'polling',
   'rss',
@@ -1463,6 +1607,24 @@ function resolveSettingsTab(): SettingsTabKey {
 }
 
 const activeSettingsTab = ref<SettingsTabKey>(resolveSettingsTab());
+
+const SETTINGS_TAB_META: Record<SettingsTabKey, { descriptionKey: MessageKey; labelKey: MessageKey }> = {
+  data: { descriptionKey: 'settings.tabs.data.description', labelKey: 'settings.tabs.data.label' },
+  dingtalk: {
+    descriptionKey: 'settings.tabs.dingtalk.description',
+    labelKey: 'settings.tabs.dingtalk.label',
+  },
+  feishu: { descriptionKey: 'settings.tabs.feishu.description', labelKey: 'settings.tabs.feishu.label' },
+  polling: { descriptionKey: 'settings.tabs.polling.description', labelKey: 'settings.tabs.polling.label' },
+  rss: { descriptionKey: 'settings.tabs.rss.description', labelKey: 'settings.tabs.rss.label' },
+  rules: { descriptionKey: 'settings.tabs.rules.description', labelKey: 'settings.tabs.rules.label' },
+  users: { descriptionKey: 'settings.tabs.users.description', labelKey: 'settings.tabs.users.label' },
+  wechat: { descriptionKey: 'settings.tabs.wechat.description', labelKey: 'settings.tabs.wechat.label' },
+  xSource: { descriptionKey: 'settings.tabs.xSource.description', labelKey: 'settings.tabs.xSource.label' },
+  runtime: { descriptionKey: 'settings.tabs.runtime.description', labelKey: 'settings.tabs.runtime.label' },
+};
+
+const activeTabMeta = computed(() => SETTINGS_TAB_META[activeSettingsTab.value]);
 
 watch(
   () => route.query.tab,
@@ -1584,15 +1746,25 @@ onMounted(() => {
   if (activeSettingsTab.value === 'users') {
     void loadUsers();
   }
+
+  if (activeSettingsTab.value === 'dingtalk') {
+    void loadDingtalkSettings();
+  }
 });
 
 watch(activeSettingsTab, (tab) => {
+  targetCreateOpen.value = false;
+  userCreateOpen.value = false;
   if (tab === 'wechat') {
     void loadWechatStatus();
   }
 
   if (tab === 'users') {
     void loadUsers();
+  }
+
+  if (tab === 'dingtalk') {
+    void loadDingtalkSettings();
   }
 });
 

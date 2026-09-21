@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 
 import type { AppConfig } from '../../../shared/config/types';
 import { createAuthService, type AuthService } from '../../auth';
+import { createDingtalkLoginService, type DingtalkLoginService } from '../../auth/dingtalk';
 import type { RuntimeSettingsService, StorageContext } from '../../storage';
 import type { AdminActions } from '../controllers/admin-controller';
 import { WechatBindCoordinator, type WechatBridgeService } from '../../wechat';
@@ -31,6 +32,17 @@ export function registerApiRoutes(app: FastifyInstance, options: RegisterApiRout
       storage: options.storage,
     });
   const wechatBindCoordinator = options.wechatBindCoordinator ?? new WechatBindCoordinator();
+  const authInstance =
+    options.auth ??
+    createAuthService({
+      adminPassword: process.env.ADMIN_PASSWORD,
+      adminUsername: process.env.ADMIN_USERNAME,
+      storage: options.storage,
+    });
+  const dingtalkLogin = createDingtalkLoginService({
+    auth: authInstance,
+    storage: options.storage,
+  });
   const userControllerOptions = {
     auth,
     storage: options.storage,
@@ -39,6 +51,7 @@ export function registerApiRoutes(app: FastifyInstance, options: RegisterApiRout
 
   registerAuthRoutes(app, {
     auth,
+    dingtalkLogin,
     sessionTtlSeconds: 30 * 24 * 60 * 60,
   });
   registerUserRoutes(app, {
@@ -51,6 +64,7 @@ export function registerApiRoutes(app: FastifyInstance, options: RegisterApiRout
   registerAdminRoutes(app, {
     actions: options.adminActions,
     auth,
+    dingtalkLogin,
     ...(options.wechatBridge === undefined ? {} : { wechatBridge: options.wechatBridge }),
     config: options.config,
     runtimeSettings: options.runtimeSettings,

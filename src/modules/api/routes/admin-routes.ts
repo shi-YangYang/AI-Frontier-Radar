@@ -7,6 +7,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import type { AppConfig } from '../../../shared/config/types';
 import type { AuthService } from '../../auth';
+import type { DingtalkLoginService } from '../../auth';
 import type { AdminActions } from '../controllers/admin-controller';
 import {
   batchDeleteAdminDeliveryEvents,
@@ -28,6 +29,7 @@ import {
   downloadAdminBackup,
   exportAdminPosts,
   getAdminDataSettings,
+  getAdminDingtalkSettings,
   getAdminRssSettings,
   getAdminWechatStatus,
   getAdminSettings,
@@ -57,6 +59,7 @@ import {
   updateAdminDataSettings,
   updateAdminDeliveryTarget,
   updateAdminDeliveryTargetEnabled,
+  updateAdminDingtalkSettings,
   updateAdminFeishuSettings,
   updateAdminRssSettings,
   updateAdminSubscriptionRules,
@@ -78,6 +81,7 @@ interface RegisterAdminRoutesOptions {
   actions?: AdminActions;
   auth: AuthService;
   config: AppConfig;
+  dingtalkLogin: DingtalkLoginService;
   runtimeSettings?: RuntimeSettingsService;
   storage: StorageContext;
   wechatBindCoordinator?: WechatBindCoordinator;
@@ -205,6 +209,27 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
     },
     async (request, reply) =>
       sendAdminResponse(reply, () => updateAdminRssSettings(request.body, options)),
+  );
+
+  app.get(
+    '/admin/api/settings/dingtalk',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (_, reply) => sendAdminResponse(reply, () => getAdminDingtalkSettings(options)),
+  );
+
+  app.put(
+    '/admin/api/settings/dingtalk',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) =>
+      sendAdminResponse(reply, () => updateAdminDingtalkSettings(request.body, options)),
   );
 
   app.post(

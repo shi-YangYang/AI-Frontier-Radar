@@ -6,4 +6,16 @@ export {
   serializeClearedSessionCookie,
   serializeSessionCookie,
 } from './cookie';
+export {
+  createDingtalkLoginService,
+  DingtalkLoginError,
+  DingtalkLoginService,
+  DINGTALK_STATE_COOKIE_NAME,
+} from './dingtalk';
+export type {
+  DingtalkAdminSettingsView,
+  DingtalkSettings,
+  DingtalkUserProfile,
+  SaveDingtalkSettingsInput,
+} from './dingtalk';
 export { generatePassword, hashPassword, verifyPassword } from './password';

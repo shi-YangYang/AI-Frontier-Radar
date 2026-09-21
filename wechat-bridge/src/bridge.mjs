@@ -70,6 +70,37 @@ function resolveSendCounterPath(accountId) {
 const SEND_QUOTA_WINDOW_MS = 24 * 60 * 60 * 1_000;
 const SEND_QUOTA_LIMIT = 10;
 
+function hardenLineBreaksForWeixin(text) {
+  // 微信桌面端把 ClawBot 文本按 Markdown 渲染：单个 \n 是软换行，会被折叠成
+  // 空格；只有空行（\n\n）才产生段落换行。手机端按纯文本渲染。这里把相邻
+  // 非空行之间的单个换行升级为空行，并归并连续空行，保证两端换行语义一致。
+  const result = [];
+  let previousEmpty = true;
+
+  for (const line of text.split('\n')) {
+    const isEmpty = line.trim().length === 0;
+
+    if (isEmpty) {
+      if (!previousEmpty) {
+        result.push('');
+      }
+
+      previousEmpty = true;
+
+      continue;
+    }
+
+    if (!previousEmpty) {
+      result.push('');
+    }
+
+    result.push(line);
+    previousEmpty = false;
+  }
+
+  return result.join('\n');
+}
+
 function readSendCounter(accountId, userId) {
   try {
     const parsed = JSON.parse(fs.readFileSync(resolveSendCounterPath(accountId), 'utf-8'));
@@ -315,11 +346,6 @@ async function sendText(plugin, options) {
   }
 
   const contextToken = resolveContextToken(resolved.accountId, target);
-  log(
-    contextToken === undefined
-      ? `发送未携带 context_token（${target}）：请让该微信号给 ClawBot 发一条消息以激活会话`
-      : `发送携带 context_token（${target}）`,
-  );
 
   const counter = readSendCounter(resolved.accountId, target);
   const counterStartedMs = counter === undefined ? 0 : Date.parse(counter.windowStartedAt);
@@ -334,8 +360,7 @@ async function sendText(plugin, options) {
     tipLines.push('【当前消息容量已满，请发送一条消息重置】');
   }
 
-  const text = `${options.text}\n\n---\n${tipLines.join('\n')}`;
-  log(`发送 tip：${tipLines.join(' / ')}`);
+  const text = hardenLineBreaksForWeixin(`${options.text}\n\n---\n${tipLines.join('\n')}`);
   const result = await plugin.send.sendMessageWeixin({
     opts: {
       accountId: resolved.accountId,
@@ -583,7 +608,9 @@ async function commandServe(plugin, args) {
 
       idleRounds = accountIds.length === 0 ? idleRounds + 1 : 0;
 
-      if (idleRounds === 1 || idleRounds % 6 === 0) {
+      // idleRounds=0（已登录）时 0 % 6 === 0 恒为真，会导致已登录状态每轮刷屏，
+      // 必须先确认当前没有任何已绑定账号才输出等待扫码提示。
+      if (accountIds.length === 0 && (idleRounds === 1 || idleRounds % 6 === 0)) {
         log('尚未绑定微信账号，等待扫码（请在「设置 → 微信」中添加）');
       }
 

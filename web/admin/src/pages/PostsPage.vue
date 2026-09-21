@@ -1,59 +1,20 @@
 <template>
-  <section>
-    <PageHeader :subtitle="t('posts.subtitle')">
+  <section class="page-fit">
+    <PageHeader :subtitle="t('posts.subtitle')" :title="t('nav.posts')">
       <div class="toolbar">
         <button type="button" :disabled="busy" @click="manualRefresh">{{ t('actions.refresh') }}</button>
         <button
           type="button"
-          :class="{ primary: autoRefreshEnabled }"
+          :class="{ 'toggle-active': autoRefreshEnabled }"
           :aria-pressed="autoRefreshEnabled"
           @click="toggleAutoRefresh"
         >
           {{ autoRefreshEnabled ? t('posts.autoRefreshOn') : t('posts.autoRefreshOff') }}
         </button>
-        <button
-          class="danger"
-          type="button"
-          :disabled="busy || summary.totalPosts === 0"
-          @click="clearPostsOpen = true"
-        >
-          {{ t('posts.clearAll') }}
-        </button>
-        <button
-          type="button"
-          :disabled="busy || summary.totalPosts === 0"
-          @click="exportPosts('csv')"
-        >
-          {{ t('posts.exportCsv') }}
-        </button>
-        <button
-          type="button"
-          :disabled="busy || summary.totalPosts === 0"
-          @click="exportPosts('json')"
-        >
-          {{ t('posts.exportJson') }}
-        </button>
       </div>
     </PageHeader>
 
     <ToastNotice :message="notice" :danger="noticeDanger" />
-
-    <div class="metric-grid">
-      <article class="metric-card">
-        <span>{{ t('posts.summary.total') }}</span>
-        <strong>{{ summary.totalPosts }}</strong>
-      </article>
-      <article class="metric-card">
-        <span>{{ t('posts.summary.today') }}</span>
-        <strong>{{ summary.todayPosts }}</strong>
-      </article>
-      <article class="metric-card">
-        <span>{{ t('posts.summary.latestDetectedAt') }}</span>
-        <strong class="metric-date" :title="formatBeijingTime(summary.latestDetectedAt)">
-          {{ formatRelativeTime(summary.latestDetectedAt) }}
-        </strong>
-      </article>
-    </div>
 
     <div class="panel posts-filter-panel">
       <form class="posts-filter-form" @submit.prevent="applyFilters">
@@ -83,7 +44,7 @@
           </div>
           <div class="posts-filter-actions">
             <button class="primary" type="submit" :disabled="busy">{{ t('actions.query') }}</button>
-            <button type="button" :disabled="busy" @click="filtersExpanded = !filtersExpanded">
+            <button type="button" :disabled="busy" :aria-expanded="filtersExpanded" aria-controls="posts-advanced-filters" @click="filtersExpanded = !filtersExpanded">
               {{ filtersExpanded ? t('posts.filters.hide') : t('posts.filters.show') }}
             </button>
             <button type="button" :disabled="busy" @click="clearFilters">
@@ -92,7 +53,7 @@
           </div>
         </div>
 
-        <div v-if="filtersExpanded" class="posts-filter-advanced">
+        <div v-if="filtersExpanded" id="posts-advanced-filters" class="posts-filter-advanced">
           <label>
             <span>{{ t('posts.filters.author') }}</span>
             <input
@@ -138,65 +99,110 @@
       </form>
     </div>
 
-    <button
-      v-if="pendingNewCount > 0"
-      class="new-content-banner"
-      type="button"
-      @click="showNewContent"
-    >
-      {{ t('posts.newContent', { count: pendingNewCount }) }}
-    </button>
-
-    <div class="posts-timeline" aria-live="polite">
-      <EmptyState
-        v-if="posts.length === 0"
-        class="posts-empty"
-        :title="t('posts.emptyTitle')"
-        :description="t('posts.emptyHint')"
-      />
-
-      <article
-        v-for="post in posts"
-        :key="post.id"
-        class="post-card"
-        tabindex="0"
-        @click="openDetail(post)"
-        @keydown.enter.prevent="openDetail(post)"
-      >
-        <div class="post-card-marker" aria-hidden="true"></div>
-        <div class="post-card-body">
-          <header class="post-card-header">
-            <div class="post-author">
-              <strong>{{ toPostAuthorLabel(post) }}</strong>
-              <span class="muted" :title="formatBeijingTime(post.postedAt)">
-                {{ formatRelativeTime(post.postedAt) }}
-              </span>
-            </div>
-            <div class="post-tags">
-              <span v-if="post.isReply" class="status-badge neutral">{{ t('posts.tag.reply') }}</span>
-              <span v-if="post.isRepost" class="status-badge neutral">{{ t('posts.tag.repost') }}</span>
-              <span v-if="hasDeliveryIssue(post)" class="status-badge bad">
-                {{ t('posts.deliveryIssue') }}
-              </span>
-            </div>
-          </header>
-          <p class="post-excerpt">{{ post.textContent }}</p>
-          <footer class="post-card-footer">
-            <a
-              class="button-link"
-              :href="post.permalinkUrl"
-              target="_blank"
-              rel="noreferrer"
-              @click.stop
-            >
-              {{ t('posts.openOriginal') }}
-            </a>
-          </footer>
+    <div class="panel posts-panel">
+      <div class="panel-toolbar posts-panel-toolbar">
+        <div class="stat-inline">
+          <span>{{ t('posts.summary.total') }}</span>
+          <strong>{{ summary.totalPosts }}</strong>
         </div>
-      </article>
-    </div>
+        <div class="stat-inline">
+          <span>{{ t('posts.summary.today') }}</span>
+          <strong>{{ summary.todayPosts }}</strong>
+        </div>
+        <div class="stat-inline">
+          <span>{{ t('posts.summary.latestDetectedAt') }}</span>
+          <strong :title="formatBeijingTime(summary.latestDetectedAt)">
+            {{ formatRelativeTime(summary.latestDetectedAt) }}
+          </strong>
+        </div>
+        <span class="spacer"></span>
+        <button
+          class="text-button"
+          type="button"
+          :disabled="busy || summary.totalPosts === 0"
+          @click="exportPosts('csv')"
+        >
+          {{ t('posts.exportCsv') }}
+        </button>
+        <button
+          class="text-button"
+          type="button"
+          :disabled="busy || summary.totalPosts === 0"
+          @click="exportPosts('json')"
+        >
+          {{ t('posts.exportJson') }}
+        </button>
+        <button
+          class="text-button danger-text"
+          type="button"
+          :disabled="busy || summary.totalPosts === 0"
+          @click="clearPostsOpen = true"
+        >
+          {{ t('posts.clearAll') }}
+        </button>
+      </div>
 
-    <div class="panel">
+      <button
+        v-if="pendingNewCount > 0"
+        class="new-content-banner"
+        type="button"
+        @click="showNewContent"
+      >
+        {{ t('posts.newContent', { count: pendingNewCount }) }}
+      </button>
+
+      <div class="posts-area" aria-live="polite">
+        <EmptyState
+          v-if="posts.length === 0"
+          class="posts-empty"
+          :title="t('posts.emptyTitle')"
+          :description="t('posts.emptyHint')"
+        />
+
+        <div v-else class="posts-timeline">
+          <article
+            v-for="post in posts"
+            :key="post.id"
+            class="post-card"
+            tabindex="0"
+            @click="openDetail(post)"
+            @keydown.enter.prevent="openDetail(post)"
+          >
+            <div class="post-card-marker" aria-hidden="true"></div>
+            <div class="post-card-body">
+              <header class="post-card-header">
+                <div class="post-author">
+                  <strong>{{ toPostAuthorLabel(post) }}</strong>
+                  <span class="muted" :title="formatBeijingTime(post.postedAt)">
+                    {{ formatRelativeTime(post.postedAt) }}
+                  </span>
+                </div>
+                <div class="post-tags">
+                  <span v-if="post.isReply" class="status-badge neutral">{{ t('posts.tag.reply') }}</span>
+                  <span v-if="post.isRepost" class="status-badge neutral">{{ t('posts.tag.repost') }}</span>
+                  <span v-if="hasDeliveryIssue(post)" class="status-badge bad">
+                    {{ t('posts.deliveryIssue') }}
+                  </span>
+                </div>
+              </header>
+              <h2 class="post-headline">{{ postHeadline(post.textContent) }}</h2>
+              <p v-if="postExcerpt(post.textContent)" class="post-excerpt">{{ postExcerpt(post.textContent) }}</p>
+              <footer class="post-card-footer">
+                <a
+                  class="button-link"
+                  :href="post.permalinkUrl"
+                  target="_blank"
+                  rel="noreferrer"
+                  @click.stop
+                >
+                  {{ t('posts.openOriginal') }}
+                </a>
+              </footer>
+            </div>
+          </article>
+        </div>
+      </div>
+
       <PaginationBar
         :busy="busy"
         :pagination="pagination"
@@ -364,6 +370,14 @@ type PostedPresetKey = (typeof postedPresets)[number]['key'];
 
 const autoRefreshEnabled = ref(true);
 const clearPostsOpen = ref(false);
+function postHeadline(text: string): string {
+  return text.trim().split('\n').find((line) => line.trim())?.slice(0, 110) ?? '';
+}
+
+function postExcerpt(text: string): string {
+  return text.trim().slice(postHeadline(text).length).trim();
+}
+
 const busy = ref(false);
 const activePostedPreset = ref<PostedPresetKey | null>(null);
 const filters = reactive({

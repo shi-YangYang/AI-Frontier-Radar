@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./web/admin/public/brand/logo-mark.png" width="96" alt="AI Frontier Radar logo" />
   <h1>AI 前沿雷达</h1>
-  <p><strong>本地优先的 AI 公开消息监测工具：聚合 X 账号、官方博客与 RSS 订阅源，沉淀到 SQLite，并通过飞书 / 企业微信 / 钉钉 / Bark / 通用 Webhook 多渠道推送。</strong></p>
+  <p><strong>自托管的 AI 公开消息监测平台：聚合 X 账号、官方博客与 RSS 订阅源，沉淀到 SQLite，并通过飞书 / 企业微信 / 钉钉 / Bark / 通用 Webhook / 微信多渠道推送。</strong></p>
   <p>
     <a href="#快速开始">快速开始</a>
     · <a href="#功能">功能</a>
@@ -32,25 +32,25 @@
 
 ## English Summary
 
-AI Frontier Radar is a local-first monitor for public AI news sources. It polls X accounts, official blogs (Anthropic, AI2, Moonshot, Meta AI, xAI, ...) and RSS/Atom feeds, stores everything in SQLite, and pushes new posts to Feishu / WeCom / DingTalk / Bark / generic webhooks with per-channel subscription rules. A local Web dashboard manages sources, messages, delivery, data retention, backups and runtime logs.
+AI Frontier Radar is a self-hosted monitor for public AI news sources. It polls X accounts, official blogs (Anthropic, AI2, Moonshot, Meta AI, xAI, ...) and RSS/Atom feeds, stores everything in SQLite, and pushes new posts to Feishu / WeCom / DingTalk / Bark / generic webhooks / WeChat with per-channel subscription rules. A built-in Web dashboard manages sources, messages, delivery, data retention, backups and runtime logs.
 
 ## 这是什么
 
-AI 领域的重要消息经常先出现在 X 上。这个项目的目标不是做一个公开 SaaS，而是提供一个可本地运行、可持续迭代的个人/小团队消息雷达：
+AI 领域的重要消息经常先出现在 X 上。这个项目的目标不是做一个公开 SaaS，而是提供一个可自托管部署、可持续迭代的个人/小团队消息雷达：
 
 | 能力 | 说明 |
 | --- | --- |
 | 监听公开 X 账号 | 维护一个账号列表，定时检测新帖 |
 | 监听 RSS/Atom 订阅源 | 添加官方博客、媒体、Newsletter 等 feed URL，与 X 账号统一管理 |
 | 防止历史消息轰炸 | 新来源首轮只锚定最新 1 条（不入库、不推送），之后只收录新内容（榜单型源首轮全量入库但不推送） |
-| 多渠道通知 | 飞书 / 企业微信 / 钉钉 / Bark / 通用 Webhook，可配分渠道订阅规则 |
-| 本地 Web 控制台 | 管理订阅源、查看消息、查看轮询/发送历史、调整配置 |
-| SQLite 持久化 | 本地保存订阅源、帖子、投递事件、运行配置 |
+| 多渠道通知 | 飞书 / 企业微信 / 钉钉 / Bark / 通用 Webhook / 微信（ClawBot），可配分渠道订阅规则 |
+| Web 控制台 | 管理订阅源、查看消息、查看轮询/发送历史、调整配置 |
+| SQLite 持久化 | 保存订阅源、帖子、投递事件、运行配置 |
 | 浏览器数据源 | 支持代理、匿名抓取测试、登录态检查 |
 
 ## 项目边界
 
-本项目仅用于个人本地 AI 前沿公开信息监测和飞书通知。
+本项目仅用于个人/小团队自托管的 AI 前沿公开信息监测与多渠道通知。
 
 - 不做黑客攻击。
 - 不绕过登录。
@@ -88,7 +88,7 @@ flowchart LR
   Web --> SQLite
 ```
 
-默认运行方式是单机本地运行。SQLite 是状态中心，Web 控制台只允许本机访问。
+支持单机或服务器部署（服务器部署见 [部署文档](./docs/deployment.md) 与 `deploy/` 目录）。SQLite 是状态中心，Web 控制台需登录访问。
 
 ## 技术原理
 
@@ -97,8 +97,8 @@ flowchart LR
 | 源适配器（SourceProvider） | 每个来源实现统一接口（抓取 → 解析 → 标准化 → 去重键），X / RSS / GitHub / HF / Anthropic / AI2 / Moonshot / Meta / xAI 共用同一轮询、投递与规则链路；新增来源只需实现一个 provider |
 | 基线 + 游标（watermark） | 新来源首轮只锚定最新 1 条（不入库、不推送），之后只收录比游标更新的条目——用"水位线"机制避免接入即被历史消息轰炸；榜单型来源（GitHub Trending / HF Daily Papers）例外：首轮全量入库但不推送 |
 | 稳定 ID + 去重键 | 每个条目生成稳定 ID（发布时间毫秒 + 内容指纹）与去重键，重复轮询幂等跳过，不产生重复消息与重复推送 |
-| 通道注册表 | 投递侧按 `channelType` 分发到飞书 / 企业微信 / 钉钉（HMAC 加签）/ Bark / 通用 Webhook；失败区分可重试性（网络与 5xx 重试，业务码错误不重试） |
-| 本地优先 | SQLite 是唯一事实来源，全程无云依赖；本地 Feed（RSS / JSON Feed）、导出、备份都从本地数据生成 |
+| 通道注册表 | 投递侧按 `channelType` 分发到飞书 / 企业微信 / 钉钉（HMAC 加签）/ Bark / 通用 Webhook / 微信（ClawBot）；失败区分可重试性（网络与 5xx 重试，业务码错误不重试） |
+| 数据自有 | SQLite 是唯一事实来源，全程无云依赖；Feed（RSS / JSON Feed）、导出、备份都从库内数据生成 |
 
 ## 环境要求
 
@@ -107,9 +107,9 @@ flowchart LR
 | Node.js | `>= 20` |
 | npm | 随 Node.js 安装 |
 | 浏览器运行环境 | Playwright Chromium，由初始化命令安装 |
-| 数据库 | SQLite，本地文件，无需单独安装 |
-| Docker | 不需要 |
-| Redis | 本地核心功能不强依赖；`/ready` 会检查 Redis，就绪失败不影响 Web 控制台和本地使用 |
+| 数据库 | SQLite 单文件数据库，无需单独安装 |
+| Docker | 不需要（`deploy/` 提供可选的 Docker Compose 部署方式） |
+| Redis | 核心功能不强依赖；`/ready` 会检查 Redis，就绪失败不影响 Web 控制台正常使用 |
 
 ## 快速开始
 
@@ -131,13 +131,13 @@ http://127.0.0.1:3000/
 - 在 `.env` 配置 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 时按其创建；
 - 未配置时生成随机密码并打印在启动日志中（`未配置 ADMIN_PASSWORD，已生成初始管理员密码：...`）。
 
-所有页面（包括本机）都需要登录：
+所有页面都需要登录：
 
 | 入口 | 说明 |
 | --- | --- |
-| `/login` | 登录页；管理员登录后进入管理台，普通用户登录后进入 `/portal` |
+| `/login` | 登录页；管理员登录后进入管理台，普通用户登录后进入 `/portal`；启用钉钉登录后，登录按钮下方有分割线与「钉钉登录」入口 |
 | `/portal` | 普通用户页：只能绑定/解绑自己的微信，查看推送状态 |
-| `/settings` -> 用户 | 管理员创建/删除用户、重置密码（首个管理员由 `.env` 种子创建） |
+| `/settings` -> 用户 | 管理员创建/删除用户、重置密码（首个管理员由 `.env` 种子创建）；钉钉扫码登录在「登录配置」页签配置 |
 
 首次进入 Web 控制台后建议按这个顺序配置：
 
@@ -229,7 +229,7 @@ npm run dev
 | `SQLITE_PATH` | `.data/ai-news-monitor.sqlite` | SQLite 文件路径 |
 | `HOST` | `0.0.0.0` | 服务监听地址 |
 | `PORT` | `3000` | 服务端口 |
-| `REDIS_URL` | `redis://127.0.0.1:1` | 就绪检查使用；本地核心功能不强依赖 |
+| `REDIS_URL` | `redis://127.0.0.1:1` | 就绪检查使用；核心功能不强依赖 |
 | `FEISHU_WEBHOOK_URL` | 空 | 可选启动种子，推荐在 Web 控制台配置 |
 | `ADMIN_USERNAME` | `admin` | 首个管理员用户名；仅在用户表为空时生效 |
 | `ADMIN_PASSWORD` | 随机生成 | 首个管理员密码；未配置时随机密码打印在启动日志 |
@@ -255,6 +255,23 @@ npm run dev
 
 真实的飞书 Webhook、代理认证信息、Token、Cookie、浏览器 profile 都不应该提交到 Git。
 
+## 钉钉扫码登录
+
+在 `/settings -> 登录配置` 配置钉钉应用凭据并启用后，登录页会在【登录】按钮下方出现分割线与「钉钉登录」按钮（钉钉蓝 + 官方 logo）。
+
+| 项 | 说明 |
+| --- | --- |
+| 应用类型 | 钉钉开放平台「企业内部应用」即可 |
+| 需要填写 | AppKey（client_id）、AppSecret（clientSecret，服务端使用，保存后脱敏显示） |
+| 应用权限 | 需在「权限管理 → 通讯录管理」开通**通讯录个人信息读权限**（用于登录后获取 unionId/昵称）；手机号/邮箱权限无需开通 |
+| CorpId（可选） | 填写企业 CorpId 后，扫码走「专属账号登录」，仅本企业成员可扫码；留空则任何钉钉账号均可扫码。注意：专属登录要求组织已在钉钉开启「专属账号功能」，未开启时建议留空 |
+| 重定向 URL | 在钉钉后台「安全设置 → 重定向 URL」登记：`<站点地址>/auth/dingtalk/callback`（地址可在设置页提示中直接复制） |
+| 账号映射 | 首次钉钉登录自动创建**普通用户**（以钉钉 unionId 唯一对应），管理员可在用户管理中提升角色/删除；同一钉钉账号再次登录映射同一用户。用户管理列表与管理台侧栏优先显示钉钉昵称；用户名在昵称含中文时为 `ding_<unionId 哈希>` |
+| 开关 | 未启用或未配置凭据时，登录页不显示钉钉按钮，`/auth/dingtalk/*` 一律拒绝 |
+| 安全 | AppSecret 只存 SQLite、不写日志、接口仅回显脱敏预览；回调使用一次性 state 校验 |
+
+真实 AppSecret 不应提交到 Git；脱敏预览仅显示末 4 位。
+
 ## 飞书 Webhook
 
 推荐在 Web 控制台管理（`/settings -> 投递通道`，支持飞书 / 企业微信 / 钉钉 / Bark / 通用 Webhook，详见 [投递通道](#投递通道)）：
@@ -273,7 +290,7 @@ npm run dev
 X_SOURCE_MODE=browser
 ```
 
-如果本机或服务器不能直接访问 X，在 `/settings -> X 数据源` 配置 `X_BROWSER_PROXY_URL`，或在 `.env` 中设置：
+如果服务器不能直接访问 X，在 `/settings -> X 数据源` 配置 `X_BROWSER_PROXY_URL`，或在 `.env` 中设置：
 
 ```dotenv
 X_BROWSER_PROXY_URL=http://127.0.0.1:7890
@@ -303,7 +320,7 @@ Web 控制台只展示脱敏后的当前生效代理 URL。
 | --- | --- |
 | 匿名抓取测试 | 验证当前网络和代理能否读取公开 X 页面 |
 | 登录态检查 | 检查当前 browser profile 是否可用，不读取或展示 Cookie |
-| 打开 X 登录窗口 | 仅适用于有图形环境的本机或服务器 |
+| 打开 X 登录窗口 | 仅适用于有图形环境的服务器 |
 
 Linux 纯终端服务器无法直接弹出可见 Chrome 登录窗口。可选方案是使用可访问 X 的代理、VNC/远程桌面登录，或迁移已登录的浏览器 profile；但 profile 不保证跨系统一定可用。
 
@@ -380,7 +397,7 @@ YouTube 解析与 GitHub 页面抓取遵循“RSS 源”页签里的代理配置
 
 ## 本地 Feed 输出
 
-外部阅读工具可直接订阅本机数据（无需鉴权）：
+外部阅读工具可直接订阅站点数据（无需鉴权）：
 
 | 地址 | 格式 | 说明 |
 | --- | --- | --- |
@@ -455,6 +472,7 @@ npm run local            # 正常启动雷达（主服务会自动托管微信�
 
 - 桥由主服务自动启动/停止，无需单独运行；`npm run wechat:login` / `wechat:serve` / `wechat:status` / `wechat:targets` 保留用于调试。
 - 桥只发送文本（标题 + 正文 + 原文链接），不接收/回复微信消息（仅登记会话目标）。
+- 发送前会把相邻行之间的单个换行升级为空行：微信桌面端按 Markdown 渲染（单换行会被折叠），升级后手机与电脑端的换行表现一致。
 
 ## 订阅规则（推送过滤）
 
@@ -565,9 +583,9 @@ npm run playwright:install
 </details>
 
 <details>
-<summary><strong>/ready 返回 Redis 不可用是否影响本地使用？</strong></summary>
+<summary><strong>/ready 返回 Redis 不可用是否影响使用？</strong></summary>
 
-本地使用不要求 Redis 可用。`/health` 和 Web 控制台可正常使用。`/ready` 是依赖就绪检查，默认 Redis 不存在时会返回 `503 DEPENDENCY_UNREADY`。
+日常使用不要求 Redis 可用。`/health` 和 Web 控制台可正常使用。`/ready` 是依赖就绪检查，默认 Redis 不存在时会返回 `503 DEPENDENCY_UNREADY`。
 
 </details>
 
@@ -584,7 +602,7 @@ npm run playwright:install
 按错误提示区分处理：
 
 - 源不存在（feed 返回 404/410）：确认 URL 是否可公开访问。
-- 网络请求失败：检查本机网络、服务器出口或目标站点可达性。
+- 网络请求失败：检查服务器出口网络与目标站点可达性。
 - 内容无法解析：确认地址返回的是 RSS/Atom XML，而不是网页或 JSON。
 - URL 无效：必须是完整的 `http://` 或 `https://` 地址。
 
@@ -613,12 +631,12 @@ prisma/                 SQLite schema 和 migrations
 scripts/                初始化、Prisma 包装、冒烟脚本
 src/app                 Fastify app 组装
 src/config              运行时配置加载
-src/modules/api         HTTP API 和本地管理 API
+src/modules/api         HTTP API 和管理 API
 src/modules/delivery    飞书发送、worker、retry
 src/modules/polling     X / RSS 数据源、轮询编排
-src/modules/scheduler   本地运行时调度器
+src/modules/scheduler   运行时调度器
 src/modules/storage     Prisma storage 和 repository
-web/admin               Vue 本地管理前端
+web/admin               Vue 管理前端
 ```
 
 ## 开发
