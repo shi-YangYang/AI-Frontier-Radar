@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { LoginSessions } from './login-sessions.mjs';
+import { pruneStaleWechatBindings, saveWechatBinding } from './account-bindings.mjs';
 
 const bridgeDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const stateDir = process.env.OPENCLAW_STATE_DIR?.trim() || path.join(bridgeDir, '.state');
@@ -186,6 +187,15 @@ function readTargets() {
   }
 }
 
+function clearBridgeAccountState(accountId) {
+  fs.rmSync(resolveSendCounterPath(accountId), { force: true });
+  const targets = readTargets();
+  const remaining = targets.filter((target) => target.accountId !== accountId);
+  if (remaining.length !== targets.length) {
+    fs.writeFileSync(resolveTargetsPath(), JSON.stringify(remaining), 'utf-8');
+  }
+}
+
 function recordTarget(accountId, targetId, message) {
   const targets = readTargets();
   const existing = targets.find((entry) => entry.id === targetId && entry.accountId === accountId);
@@ -253,7 +263,8 @@ function maskToken(token) {
 function resolveAccount(accountsModule, accountId) {
   const indexed = accountsModule.listIndexedWeixinAccountIds();
   const resolvedId = accountId?.trim() || indexed.at(-1);
-  const account = resolvedId === undefined ? null : accountsModule.loadWeixinAccount(resolvedId);
+  const account = resolvedId === undefined || !indexed.includes(resolvedId)
+    ? null : accountsModule.loadWeixinAccount(resolvedId);
 
   if (resolvedId === undefined || account === null || (account.token?.trim()?.length ?? 0) === 0) {
     fail('尚未登录微信：请在「设置 → 微信」中扫码登录，或运行 npm run wechat:login。');
@@ -288,12 +299,7 @@ async function commandLogin(plugin) {
     fail(result.message ?? '登录未完成。');
   }
 
-  plugin.accounts.registerWeixinAccountId(result.accountId);
-  plugin.accounts.saveWeixinAccount(result.accountId, {
-    baseUrl: result.baseUrl,
-    token: result.botToken,
-    userId: result.userId,
-  });
+  saveWechatBinding(plugin.accounts, result, clearBridgeAccountState);
 
   log(`登录成功：accountId=${result.accountId}${result.userId ? ` userId=${result.userId}` : ''}`);
   log('下一步：给微信里的 ClawBot 随便发一条消息以登记会话，然后即可发送通知。');
@@ -441,13 +447,15 @@ async function commandServe(plugin, args) {
   let watchAbort = false;
 
   const watchedAccounts = new Map();
-  const loginSessions = new LoginSessions(plugin.accounts);
+  pruneStaleWechatBindings(plugin.accounts, clearBridgeAccountState);
+  const loginSessions = new LoginSessions(plugin.accounts, { onRemoveAccount: clearBridgeAccountState });
 
   async function watchAccount(accountId) {
     while (!watchAbort) {
       const account = plugin.accounts.loadWeixinAccount(accountId);
 
-      if (account === null || (account.token?.trim()?.length ?? 0) === 0) {
+      if (!plugin.accounts.listIndexedWeixinAccountIds().includes(accountId) ||
+          account === null || (account.token?.trim()?.length ?? 0) === 0) {
         return;
       }
 
@@ -462,6 +470,10 @@ async function commandServe(plugin, args) {
           token: account.token.trim(),
           timeoutMs: SYNC_BUF_TIMEOUT_MS,
         });
+
+        // A long poll started before rebinding must not recreate the removed session's files.
+        if (!plugin.accounts.listIndexedWeixinAccountIds().includes(accountId) ||
+            plugin.accounts.loadWeixinAccount(accountId)?.token !== account.token) return;
 
         if (typeof response.get_updates_buf === 'string' && response.get_updates_buf.length > 0) {
           plugin.syncBuf.saveGetUpdatesBuf(syncBufPath, response.get_updates_buf);
@@ -581,6 +593,7 @@ async function commandServe(plugin, args) {
         }
 
         try {
+          clearBridgeAccountState(accountId);
           plugin.accounts.unregisterWeixinAccountId(accountId);
           plugin.accounts.clearWeixinAccount(accountId);
           sendJson(response, 200, { deleted: true, ok: true });

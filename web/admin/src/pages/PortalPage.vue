@@ -129,18 +129,36 @@
           </div>
         </section>
 
-        <div v-if="hasBinding" class="me-preferences">
-          <section class="me-card">
-            <div class="me-row">
+        <section v-if="hasBinding" class="me-card me-settings-card">
+          <header class="me-card-head">
+            <div class="me-card-title">
+              <span class="me-card-icon me-card-icon-settings" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+              </span>
+              <div>
+                <h2>{{ t('portal.settingsTitle') }}</h2>
+                <p>{{ t('portal.settingsDescription') }}</p>
+              </div>
+            </div>
+          </header>
+
+          <div class="me-settings-group">
+            <p class="me-settings-group-head">
               <span class="me-card-icon me-card-icon-quiet" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a7 7 0 0 0 11 11z" />
                 </svg>
               </span>
-              <div class="me-row-text">
+              <span class="me-settings-group-text">
                 <strong>{{ t('portal.quietTitle') }}</strong>
                 <small>{{ t('portal.quietDescription') }}</small>
-              </div>
+              </span>
+            </p>
+            <div class="me-row">
+              <span class="me-settings-row-label">{{ t('portal.quietTitle') }}</span>
               <button
                 class="me-switch"
                 :class="{ on: quietEnabled }"
@@ -175,10 +193,10 @@
               </label>
               <span class="me-save-state">{{ saveStateLabel }}</span>
             </div>
-          </section>
+          </div>
 
-          <section class="me-card">
-            <div class="me-row">
+          <div class="me-settings-group">
+            <p class="me-settings-group-head">
               <span class="me-card-icon me-card-icon-source" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M4 6h16" />
@@ -186,22 +204,40 @@
                   <path d="M4 18h10" />
                 </svg>
               </span>
-              <div class="me-row-text">
+              <span class="me-settings-group-text">
                 <strong>{{ t('portal.sourcesLabel') }}</strong>
                 <small>{{ t('portal.sourcesHint') }}</small>
-              </div>
-              <button
-                class="me-switch"
-                :class="{ on: !sourcesAll }"
-                type="button"
-                role="switch"
-                :aria-checked="!sourcesAll"
-                :aria-label="t('portal.sourcesModeCustom')"
-                :disabled="busy"
-                @click="toggleSourcesMode"
+              </span>
+            </p>
+            <div class="me-row">
+              <div
+                class="me-segmented"
+                role="radiogroup"
+                :aria-label="t('portal.sourcesLabel')"
               >
-                <span class="me-switch-knob"></span>
-              </button>
+                <button
+                  class="me-segment"
+                  :class="{ on: sourcesAll }"
+                  type="button"
+                  role="radio"
+                  :aria-checked="sourcesAll"
+                  :disabled="busy"
+                  @click="selectSourcesMode(true)"
+                >
+                  {{ t('portal.sourcesModeReceiveAll') }}
+                </button>
+                <button
+                  class="me-segment"
+                  :class="{ on: !sourcesAll }"
+                  type="button"
+                  role="radio"
+                  :aria-checked="!sourcesAll"
+                  :disabled="busy"
+                  @click="selectSourcesMode(false)"
+                >
+                  {{ t('portal.sourcesModeReceiveCustom') }}
+                </button>
+              </div>
             </div>
 
             <p class="me-inline-state">
@@ -229,15 +265,15 @@
                 </div>
               </section>
             </div>
-          </section>
-        </div>
+          </div>
+        </section>
       </div>
 
       <template v-else>
         <section class="me-card me-messages-card">
           <header class="me-card-head">
             <h2 class="me-message-count">{{ t('me.posts.total', { total: postsPagination.total }) }}</h2>
-            <button class="me-ghost-button" type="button" :disabled="postsLoading" @click="loadPosts(1, true)">
+            <button class="me-ghost-button" type="button" :disabled="postsLoading" @click="loadPosts(1)">
               {{ t('actions.refresh') }}
             </button>
           </header>
@@ -301,11 +337,41 @@
             </article>
           </div>
 
-          <div v-if="posts.length > 0 && postsPagination.page < postsPagination.totalPages" class="me-posts-more">
-            <button class="me-ghost-button" type="button" :disabled="postsLoading" @click="loadPosts(postsPagination.page + 1)">
-              {{ postsLoading ? t('me.posts.loading') : t('me.posts.loadMore') }}
+          <nav v-if="posts.length > 0 && postsPagination.totalPages > 1" class="me-pagination" :aria-label="t('me.posts.paginationLabel')">
+            <button
+              class="me-pagination-nav"
+              type="button"
+              :disabled="postsLoading || postsPagination.page <= 1"
+              :aria-label="t('actions.previousPage')"
+              @click="goToPage(postsPagination.page - 1)"
+            >
+              ‹
             </button>
-          </div>
+            <template v-for="item in paginationItems" :key="item.type === 'ellipsis' ? `ellipsis-${item.key}` : `page-${item.key}`">
+              <span v-if="item.type === 'ellipsis'" class="me-pagination-ellipsis" aria-hidden="true">…</span>
+              <button
+                v-else
+                class="me-pagination-page"
+                :class="{ current: item.page === postsPagination.page }"
+                type="button"
+                :disabled="postsLoading"
+                :aria-current="item.page === postsPagination.page ? 'page' : undefined"
+                :aria-label="t('me.posts.pageLabel', { page: item.page })"
+                @click="goToPage(item.page)"
+              >
+                {{ item.page }}
+              </button>
+            </template>
+            <button
+              class="me-pagination-nav"
+              type="button"
+              :disabled="postsLoading || postsPagination.page >= postsPagination.totalPages"
+              :aria-label="t('actions.nextPage')"
+              @click="goToPage(postsPagination.page + 1)"
+            >
+              ›
+            </button>
+          </nav>
         </section>
       </template>
     </main>
@@ -369,7 +435,7 @@ const noticeDanger = ref(false);
 const posts = ref<UserPostItem[]>([]);
 const postsLoading = ref(false);
 const postsFailed = ref(false);
-const postsPagination = ref({ page: 1, pageSize: 20, total: 0, totalPages: 0 });
+const postsPagination = ref({ page: 1, pageSize: 18, total: 0, totalPages: 0 });
 const qrDataUrl = ref<string | null>(null);
 const qrUrl = ref<string | null>(null);
 const qrVisible = ref(false);
@@ -436,10 +502,34 @@ const groupedSources = computed(() => {
       ),
     }));
 });
+type PaginationItem = { type: 'page'; page: number; key: number } | { type: 'ellipsis'; key: number };
+const paginationItems = computed<PaginationItem[]>(() => {
+  const totalPages = postsPagination.value.totalPages;
+  const current = postsPagination.value.page;
+
+  if (totalPages <= 1) {
+    return [];
+  }
+
+  const pages = new Set<number>([1, totalPages, current - 1, current, current + 1]);
+  const items: PaginationItem[] = [];
+  let previous = 0;
+
+  for (const page of [...pages].filter((value) => value >= 1 && value <= totalPages).sort((left, right) => left - right)) {
+    if (previous > 0 && page - previous > 1) {
+      items.push({ type: 'ellipsis', key: previous });
+    }
+
+    items.push({ type: 'page', page, key: page });
+    previous = page;
+  }
+
+  return items;
+});
 
 onMounted(() => {
   void loadBinding();
-  void loadPosts(1, true);
+  void loadPosts(1);
 });
 
 onBeforeUnmount(() => {
@@ -474,14 +564,14 @@ function syncBindingState(): void {
   quietEndHour.value = account?.quietHours?.endHour ?? 8;
 }
 
-async function loadPosts(page: number, replace = false): Promise<void> {
+async function loadPosts(page: number): Promise<void> {
   postsLoading.value = true;
   postsFailed.value = false;
 
   try {
     const result = await listMyPosts(page, postsPagination.value.pageSize, activeQuery.value);
 
-    posts.value = replace ? result.posts : [...posts.value, ...result.posts];
+    posts.value = result.posts;
     postsPagination.value = result.pagination;
   } catch (error) {
     postsFailed.value = true;
@@ -494,14 +584,23 @@ async function loadPosts(page: number, replace = false): Promise<void> {
 function applySearch(): void {
   activeQuery.value = searchInput.value.trim();
   expandedPostIds.value = new Set();
-  void loadPosts(1, true);
+  void loadPosts(1);
+}
+
+async function goToPage(page: number): Promise<void> {
+  if (page < 1 || page > postsPagination.value.totalPages || page === postsPagination.value.page) {
+    return;
+  }
+
+  expandedPostIds.value = new Set();
+  await loadPosts(page);
 }
 
 function clearSearch(): void {
   searchInput.value = '';
   activeQuery.value = '';
   expandedPostIds.value = new Set();
-  void loadPosts(1, true);
+  void loadPosts(1);
 }
 
 async function startBind(): Promise<void> {
@@ -638,6 +737,14 @@ async function toggleSourcesMode(): Promise<void> {
   sourcesAll.value = true;
   selectedSourceIds.value = [];
   await saveSources();
+}
+
+async function selectSourcesMode(nextAll: boolean): Promise<void> {
+  if (nextAll === sourcesAll.value) {
+    return;
+  }
+
+  await toggleSourcesMode();
 }
 
 async function toggleSource(sourceId: string): Promise<void> {

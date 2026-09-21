@@ -1184,7 +1184,7 @@ export interface UserPostsPage {
 
 export async function listMyPosts(
   page = 1,
-  pageSize = 20,
+  pageSize = 18,
   query = '',
 ): Promise<UserPostsPage> {
   const params = new URLSearchParams({

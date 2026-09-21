@@ -124,10 +124,27 @@
 .public-theme .me-row { align-items: flex-start; gap: 12px; }
 .public-theme .me-row-text strong { font-size: 16px; font-weight: 600; line-height: 24px; }
 .public-theme .me-row-text small { line-height: 20px; }
-.public-theme .me-switch { min-height: 28px; margin-top: 5px; border-radius: 999px; background: #667e8b; }
-.public-theme .me-switch:hover:not(:disabled) { background: #526975; }
+.public-theme .me-switch { min-height: 28px; margin-top: 0; border-radius: 999px; background: #cbd5e1; }
+.public-theme .me-switch:hover:not(:disabled) { background: #b6c2d2; }
 .public-theme .me-switch.on { background: var(--accent); }
 .public-theme .me-switch.on:hover:not(:disabled) { background: var(--accent-strong); }
+.public-theme .me-settings-card { display: flex; flex-direction: column; gap: 24px; }
+.public-theme .me-settings-card > .me-card-head { margin-bottom: -8px; }
+.public-theme .me-settings-card .me-card-title h2 { margin: 0 0 4px; }
+.public-theme .me-settings-group { display: flex; flex-direction: column; gap: 16px; padding-top: 20px; border-top: 1px solid var(--border); }
+.public-theme .me-settings-group:first-of-type { padding-top: 0; border-top: 0; }
+.public-theme .me-settings-group-head { align-items: center; display: flex; gap: 12px; margin: 0; }
+.public-theme .me-settings-group-head .me-card-icon { width: 36px; height: 36px; }
+.public-theme .me-settings-group-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.public-theme .me-settings-group-text strong { font-size: 16px; font-weight: 600; line-height: 24px; }
+.public-theme .me-settings-group-text small { color: var(--muted); font-size: 13px; line-height: 20px; }
+.public-theme .me-settings-row-label { color: var(--text-secondary); font-size: 14px; font-weight: 500; }
+.public-theme .me-row .me-switch { margin-left: auto; margin-top: 0; }
+.public-theme .me-segmented { display: inline-flex; gap: 4px; background: #f0f4f5; border: 1px solid var(--border); border-radius: 999px; padding: 3px; }
+.public-theme .me-segment { min-height: 32px; width: auto; border: 0; box-shadow: none; border-radius: 999px; background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 500; padding: 0 16px; }
+.public-theme .me-segment:hover:not(:disabled) { background: #e4ebee; color: var(--text); }
+.public-theme .me-segment.on { background: var(--accent); color: #fff; font-weight: 600; }
+.public-theme .me-segment.on:hover:not(:disabled) { background: var(--accent-strong); color: #fff; }
 .public-theme .me-quiet-range { margin-top: 20px; padding: 16px; background: #f8fafb; align-items: flex-end; gap: 12px; }
 .public-theme .me-quiet-range label { flex: 1; align-items: stretch; flex-direction: column; gap: 6px; }
 .public-theme .me-quiet-range label > span { color: var(--text-secondary); font-size: 13px; }
@@ -163,19 +180,22 @@
 .public-theme .me-search-clear { font-size: 13px; padding: 0 8px; flex-shrink: 0; }
 .public-theme .me-messages-empty { min-height: 260px; border-top: 1px solid var(--border); display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 16px; padding: 40px 24px; text-align: center; }
 .public-theme .me-empty-icon { width: 48px; height: 48px; color: #78979b; }
-.public-theme .me-post-list { display: flex; flex-direction: column; gap: 0; margin-top: 0; }
-.public-theme .me-post { border: 0; border-top: 1px solid var(--border); border-radius: 0; padding: 24px; box-shadow: none; min-width: 0; }
-.public-theme .me-post:hover { border-color: var(--border); box-shadow: none; }
+.public-theme .me-post-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: stretch; margin-top: 0; }
+.public-theme .me-post { border: 1px solid var(--border); border-radius: 10px; padding: 20px; box-shadow: none; min-width: 0; }
+.public-theme .me-post:hover { border-color: var(--border-strong); box-shadow: 0 1px 4px #142b3608; }
 .public-theme .me-post-head { align-items: flex-start; gap: 16px; }
 .public-theme .me-post-source { background: var(--accent-soft); color: var(--accent-strong); border-radius: 5px; font-size: 12px; font-weight: 600; line-height: 20px; padding: 2px 8px; overflow-wrap: anywhere; min-width: 0; }
 .public-theme .me-post-time { font-size: 12px; line-height: 24px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
-.public-theme .me-post-title { max-width: 78ch; font-size: 17px; line-height: 26px; margin-top: 14px; overflow-wrap: anywhere; }
-.public-theme .me-post-body { max-width: 85ch; font-size: 14px; line-height: 24px; margin-top: 10px; }
-.public-theme .me-post-foot { margin-top: 16px; gap: 16px; }
+.public-theme .me-post-title { max-width: none; font-size: 16px; line-height: 25px; margin-top: 12px; overflow-wrap: anywhere; }
+.public-theme .me-post-body { max-width: none; font-size: 14px; line-height: 24px; margin-top: 8px; }
+.public-theme .me-post-foot { margin-top: auto; padding-top: 14px; gap: 16px; }
 .public-theme .me-post-link { font-size: 13px; }
 .public-theme .me-post-expand { min-height: 28px; font-size: 13px; }
-.public-theme .me-posts-more { border-top: 1px solid var(--border); margin-top: 0; padding: 20px 24px; }
-.public-theme .me-posts-more .me-ghost-button { min-height: 36px; }
+.public-theme .me-pagination { align-items: center; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 0; padding: 20px 24px; }
+.public-theme .me-pagination-page, .public-theme .me-pagination-nav { min-width: 36px; width: auto; padding: 0 8px; font-variant-numeric: tabular-nums; }
+.public-theme .me-pagination-page.current { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.public-theme .me-pagination-page.current:hover:not(:disabled) { background: var(--accent-strong); border-color: var(--accent-strong); color: #fff; }
+.public-theme .me-pagination-ellipsis { color: var(--muted); font-size: 13px; padding: 0 2px; }
 
 @media (max-width: 920px) {
   .public-theme .auth-shell { display: flex; flex-direction: column; }
@@ -197,6 +217,12 @@
   .public-theme .auth-form-card input { font-size: 16px; }
   .public-theme .me-wechat-layout.is-bound { grid-template-columns: minmax(0, 1fr); }
   .public-theme .me-hero-text small { display: none; }
+}
+@media (max-width: 979px) {
+  .public-theme .me-post-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .public-theme .me-post-list { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 680px) {
   .public-theme .auth-brand { padding: 16px 16px 20px; }
@@ -238,6 +264,10 @@
   .public-theme .me-preferences { gap: 20px; }
   .public-theme .me-row { gap: 10px; }
   .public-theme .me-row .me-card-icon { display: none; }
+  .public-theme .me-settings-card { gap: 20px; }
+  .public-theme .me-settings-group { gap: 14px; }
+  .public-theme .me-settings-group-head .me-card-icon { width: 34px; height: 34px; }
+  .public-theme .me-segment { padding: 0 12px; }
   .public-theme .me-quiet-range { padding: 12px; gap: 8px; }
   .public-theme .me-quota { padding: 14px; }
   .public-theme .me-quota-head { flex-wrap: wrap; gap: 6px 12px; }
@@ -247,9 +277,10 @@
   .public-theme .me-search input { font-size: 13px; }
   .public-theme .me-search-submit { padding: 0 12px; }
   .public-theme .me-search-clear { padding: 0 4px; }
-  .public-theme .me-post { padding: 20px 16px; }
-  .public-theme .me-post:last-child { border-bottom: 0; padding-bottom: 20px; }
+  .public-theme .me-post { padding: 18px 16px; }
+  .public-theme .me-post:last-child { border-bottom: 1px solid var(--border); padding-bottom: 18px; }
   .public-theme .me-post-head { gap: 12px; }
   .public-theme .me-post-title { font-size: 16px; line-height: 25px; }
   .public-theme .me-post-body { font-size: 14px; line-height: 24px; }
+  .public-theme .me-pagination { padding: 16px; }
 }
