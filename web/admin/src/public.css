@@ -154,9 +154,10 @@
 .public-theme .me-messages-card > .me-card-head { padding: 20px 24px 0; }
 .public-theme .me-message-count { margin: 0; color: var(--text-secondary); font-size: 14px; font-weight: 500; }
 .public-theme .me-search { margin: 16px 24px 24px; background: #fff; border-color: var(--border-strong); gap: 8px; padding: 5px 5px 5px 12px; }
-.public-theme .me-search:focus-within { border-color: var(--accent); box-shadow: none; }
+/* 组合搜索框：聚焦样式给外层容器（边框+相连光晕），内层 input 不再自描边 */
+.public-theme .me-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .public-theme .me-search input { min-height: 36px; font-size: 14px; }
-.public-theme .me-search input:focus-visible { outline-offset: 0; }
+.public-theme .me-search input:is(:focus, :focus-visible) { outline: none; border-color: transparent; box-shadow: none; }
 .public-theme .me-search-submit { min-height: 36px; border-radius: 6px; background: var(--accent); color: #fff; }
 .public-theme .me-search-submit:hover:not(:disabled) { background: var(--accent-strong); color: #fff; }
 .public-theme .me-search-clear { font-size: 13px; padding: 0 8px; flex-shrink: 0; }
