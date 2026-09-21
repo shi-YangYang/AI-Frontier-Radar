@@ -10,12 +10,14 @@
             <small>{{ t('brand.subtitle') }}</small>
           </div>
         </div>
-        <h1>{{ t('auth.brandHeadline') }}</h1>
-        <ul class="auth-brand-points">
-          <li>{{ t('auth.pointSources') }}</li>
-          <li>{{ t('auth.pointLocal') }}</li>
-          <li>{{ t('auth.pointWechat') }}</li>
-        </ul>
+        <div class="auth-brand-story">
+          <h1>{{ t('auth.brandHeadline') }}</h1>
+          <ul class="auth-brand-points">
+            <li>{{ t('auth.pointSources') }}</li>
+            <li>{{ t('auth.pointLocal') }}</li>
+            <li>{{ t('auth.pointWechat') }}</li>
+          </ul>
+        </div>
       </div>
     </aside>
 
@@ -32,7 +34,7 @@
           <p>{{ t('auth.loginSubtitle') }}</p>
         </header>
 
-        <p v-if="resetNotice" class="auth-notice">{{ t('auth.passwordResetNotice') }}</p>
+        <p v-if="resetNotice" class="auth-notice" role="status">{{ t('auth.passwordResetNotice') }}</p>
         <label>
           <span>{{ t('auth.username') }}</span>
           <input
@@ -52,7 +54,7 @@
             :placeholder="t('auth.passwordPlaceholder')"
           />
         </label>
-        <p v-if="errorMessage !== null" class="auth-error">{{ errorMessage }}</p>
+        <p v-if="errorMessage !== null" class="auth-error" role="alert">{{ errorMessage }}</p>
         <button class="primary" type="submit" :disabled="busy">
           {{ busy ? t('auth.loggingIn') : t('auth.loginAction') }}
         </button>

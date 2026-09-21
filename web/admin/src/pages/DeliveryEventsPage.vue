@@ -1,7 +1,11 @@
 <template>
-  <section>
-    <PageHeader :subtitle="t('delivery.subtitle')">
-      <form class="filter-form" @submit.prevent="applyFilters">
+  <section class="page-fit">
+    <PageHeader :subtitle="t('delivery.subtitle')" :title="t('nav.deliveryEvents')" />
+
+    <ToastNotice :message="notice" :danger="noticeDanger" />
+
+    <div class="panel">
+      <form class="filter-form panel-toolbar" @submit.prevent="applyFilters">
         <label>
           <span>{{ t('form.fromTime') }}</span>
           <input v-model="filters.from" type="datetime-local" />
@@ -10,22 +14,16 @@
           <span>{{ t('form.toTime') }}</span>
           <input v-model="filters.to" type="datetime-local" />
         </label>
-        <button class="primary" type="submit" :disabled="busy">{{ t('actions.query') }}</button>
+        <button type="submit" :disabled="busy">{{ t('actions.query') }}</button>
         <button type="button" :disabled="busy" @click="clearFilters">{{ t('actions.clearQuery') }}</button>
+        <span class="spacer"></span>
+        <button v-if="pagination.total > 0" class="text-button danger-text" type="button" :disabled="busy" @click="askClearHistory">{{ t('actions.clearHistory') }}</button>
       </form>
-    </PageHeader>
-
-    <ToastNotice :message="notice" :danger="noticeDanger" />
-
-    <div class="panel">
-      <div v-if="deliveryEvents.length > 0" class="bulk-actions">
+      <div v-if="selectedCount > 0" class="bulk-actions selection-toolbar">
         <span>{{ t('bulk.selectedCount', { count: selectedCount }) }}</span>
         <div class="action-row">
           <button class="danger" type="button" :disabled="busy || selectedCount === 0" @click="askBatchDelete">
             {{ t('actions.batchDelete') }}
-          </button>
-          <button class="danger" type="button" :disabled="busy" @click="askClearHistory">
-            {{ t('actions.clearHistory') }}
           </button>
         </div>
       </div>

@@ -1,7 +1,14 @@
 <template>
-  <section>
-    <PageHeader :subtitle="t('accounts.subtitle')">
-      <form class="source-add-form" @submit.prevent="addAccount">
+  <section class="page-fit">
+    <PageHeader :subtitle="t('accounts.subtitle')" :title="t('nav.accounts')">
+      <button class="primary" type="button" :aria-expanded="newSourceOpen" aria-controls="source-create-panel" @click="newSourceOpen = !newSourceOpen">{{ t(newSourceOpen ? 'actions.cancel' : 'accounts.addSource') }}</button>
+    </PageHeader>
+
+    <ToastNotice :message="notice" :danger="noticeDanger" />
+
+    <div v-if="newSourceOpen" id="source-create-panel" class="panel source-create-panel">
+      <header class="panel-header"><div><h2>{{ t('accounts.addSource') }}</h2><p>{{ t('accounts.sourceEntryHint') }}</p></div></header>
+      <form class="panel-toolbar source-add-toolbar" @submit.prevent="addAccount">
         <div class="source-add-fields">
           <SelectControl
             v-model="sourceKind"
@@ -15,6 +22,7 @@
             autocomplete="off"
             :disabled="addingAccount"
             :placeholder="t('accounts.placeholder')"
+            :aria-label="t('accounts.placeholder')"
           />
           <input
             v-else-if="sourceKind === 'rss'"
@@ -22,6 +30,7 @@
             autocomplete="off"
             :disabled="addingAccount"
             :placeholder="t('accounts.rssPlaceholder')"
+            :aria-label="t('accounts.rssPlaceholder')"
           />
           <input
             v-else-if="sourceKind === 'youtube'"
@@ -29,6 +38,7 @@
             autocomplete="off"
             :disabled="addingAccount"
             :placeholder="t('accounts.youtubePlaceholder')"
+            :aria-label="t('accounts.youtubePlaceholder')"
           />
           <template v-else-if="sourceKind === 'reddit'">
             <input
@@ -36,6 +46,7 @@
               autocomplete="off"
               :disabled="addingAccount"
               :placeholder="t('accounts.redditPlaceholder')"
+            :aria-label="t('accounts.redditPlaceholder')"
             />
             <SelectControl
               v-model="redditSort"
@@ -77,6 +88,7 @@
                 autocomplete="off"
                 :disabled="addingAccount"
                 :placeholder="t('accounts.githubLanguagePlaceholder')"
+            :aria-label="t('accounts.githubLanguagePlaceholder')"
               />
             </template>
             <input
@@ -85,6 +97,7 @@
               autocomplete="off"
               :disabled="addingAccount"
               :placeholder="t('accounts.githubRepoPlaceholder')"
+            :aria-label="t('accounts.githubRepoPlaceholder')"
             />
             <input
               v-else
@@ -92,6 +105,7 @@
               autocomplete="off"
               :disabled="addingAccount"
               :placeholder="t('accounts.githubUserPlaceholder')"
+            :aria-label="t('accounts.githubUserPlaceholder')"
             />
           </template>
           <template v-else-if="sourceKind === 'hf'">
@@ -123,64 +137,24 @@
           {{ t('accounts.addPreview', { url: pendingFeedUrl }) }}
         </small>
       </form>
-    </PageHeader>
-
-    <ToastNotice :message="notice" :danger="noticeDanger" />
-
-    <div v-if="sourceGroups.length > 0" class="panel source-groups-panel">
-      <header class="panel-header">
-        <div>
-          <h2>{{ t('accounts.groups.title') }}</h2>
-          <p>{{ t('accounts.groups.description') }}</p>
-        </div>
-      </header>
-      <div class="source-group-list">
-        <div v-for="group in sourceGroups" :key="group.id" class="source-group-row">
-          <div class="source-group-info">
-            <strong>
-              {{ group.name }}
-              <span class="status-badge neutral">
-                {{ group.installedCount }} / {{ group.sourceCount }}
-              </span>
-            </strong>
-            <p class="muted">{{ group.description }}</p>
-            <details v-if="group.details !== undefined" class="source-group-details">
-              <summary>{{ t('accounts.groups.showSources') }}</summary>
-              <p class="muted">{{ group.details }}</p>
-            </details>
-          </div>
-          <button
-            class="primary"
-            type="button"
-            :disabled="busy || group.installedCount >= group.sourceCount"
-            @click="applyGroup(group)"
-          >
-            {{
-              group.installedCount >= group.sourceCount
-                ? t('accounts.groups.added')
-                : t('accounts.groups.apply')
-            }}
-          </button>
-        </div>
-      </div>
     </div>
 
-    <div class="panel">
-      <form class="query-form" @submit.prevent="applyQuery">
-        <label>
-          <span>{{ t('accounts.queryLabel') }}</span>
-          <input
-            v-model="queryInput"
-            autocomplete="off"
-            :disabled="busy"
-            :placeholder="t('accounts.queryPlaceholder')"
-          />
-        </label>
-        <button class="primary" type="submit" :disabled="busy">{{ t('actions.query') }}</button>
+    <div class="panel accounts-list-panel">
+      <form class="panel-toolbar query-form" @submit.prevent="applyQuery">
+        <input
+          v-model="queryInput"
+          :aria-label="t('accounts.queryLabel')"
+          autocomplete="off"
+          class="query-input"
+          :disabled="busy"
+          :placeholder="t('accounts.queryPlaceholder')"
+        />
+        <button type="submit" :disabled="busy">{{ t('actions.query') }}</button>
         <button type="button" :disabled="busy" @click="clearQuery">{{ t('accounts.clearQuery') }}</button>
+        <span class="spacer"></span>
         <button
           v-if="pagination.total > 0"
-          class="danger accounts-delete-all"
+          class="text-button danger-text accounts-delete-all"
           type="button"
           :disabled="busy"
           @click="deleteAllOpen = true"
@@ -211,10 +185,10 @@
                     {{ sourceBadge(account) }}
                   </span>
                   <span class="source-cell-name">{{ sourceLabel(account) }}</span>
+                  <span v-if="sourceSubtitle(account).length > 0" class="muted source-cell-subtitle">
+                    {{ sourceSubtitle(account) }}
+                  </span>
                 </strong>
-                <div v-if="sourceSubtitle(account).length > 0" class="muted source-cell-subtitle">
-                  {{ sourceSubtitle(account) }}
-                </div>
               </td>
               <td :title="formatDateTime(account.lastPolledAt)">
                 {{ formatRelativeTime(account.lastPolledAt) }}
@@ -236,6 +210,44 @@
         @invalid-page="setNotice(t('notice.invalidPage'), true)"
       />
     </div>
+
+    <details v-if="sourceGroups.length > 0" class="panel source-groups-panel disclosure-panel">
+      <summary class="disclosure-summary">
+        <div>
+          <h2>{{ t('accounts.groups.title') }}</h2>
+          <p>{{ t('accounts.groups.description') }}</p>
+        </div>
+      </summary>
+      <div class="source-group-list">
+        <div v-for="group in sourceGroups" :key="group.id" class="source-group-row">
+          <div class="source-group-info">
+            <strong>
+              {{ group.name }}
+              <span class="status-badge neutral">
+                {{ group.installedCount }} / {{ group.sourceCount }}
+              </span>
+            </strong>
+            <p class="muted">{{ group.description }}</p>
+            <details v-if="group.details !== undefined" class="source-group-details">
+              <summary>{{ t('accounts.groups.showSources') }}</summary>
+              <p class="muted">{{ group.details }}</p>
+            </details>
+          </div>
+          <button
+            class="bundle-action"
+            type="button"
+            :disabled="busy || group.installedCount >= group.sourceCount"
+            @click="applyGroup(group)"
+          >
+            {{
+              group.installedCount >= group.sourceCount
+                ? t('accounts.groups.added')
+                : t('accounts.groups.apply')
+            }}
+          </button>
+        </div>
+      </div>
+    </details>
 
     <ConfirmModal
       :open="deleteTarget !== null"
@@ -314,6 +326,7 @@ const YOUTUBE_FEED_PREFIX = 'https://www.youtube.com/feeds/videos.xml?channel_id
 const YOUTUBE_CHANNEL_ID_PATTERN = /^UC[A-Za-z0-9_-]{20,}$/u;
 const REDDIT_NAME_PATTERN = /^[A-Za-z0-9_]{2,21}$/u;
 
+const newSourceOpen = ref(false);
 const accounts = ref<WatchAccount[]>([]);
 const sourceGroups = ref<SourceGroupStatus[]>([]);
 const activeQuery = ref('');
