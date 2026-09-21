@@ -8,6 +8,8 @@ import type { LoginResult } from './auth-service';
 export interface DingtalkSettings {
   appKey: string;
   appSecret: string;
+  /** 可选；配置后走专属账号登录（仅本企业成员可扫码） */
+  corpId: string;
   enabled: boolean;
 }
 
@@ -15,6 +17,7 @@ export interface DingtalkAdminSettingsView {
   appKey: string;
   appSecretConfigured: boolean;
   appSecretPreview: string | null;
+  corpId: string;
   callbackPath: string;
   enabled: boolean;
 }
@@ -23,6 +26,7 @@ export interface SaveDingtalkSettingsInput {
   appKey?: string;
   /** undefined = 保持不变；空字符串 = 清除；非空 = 覆盖 */
   appSecret?: string;
+  corpId?: string;
   enabled?: boolean;
 }
 
@@ -73,6 +77,7 @@ export class DingtalkLoginService {
     return {
       appKey,
       appSecret,
+      corpId: normalizeString(stored?.corpId),
       enabled: stored?.enabled === true,
     };
   }
@@ -95,6 +100,7 @@ export class DingtalkLoginService {
       appKey: settings.appKey,
       appSecretConfigured: configured,
       appSecretPreview: configured ? maskSecret(settings.appSecret) : null,
+      corpId: settings.corpId,
       callbackPath: CALLBACK_PATH,
       enabled: settings.enabled,
     };
@@ -106,6 +112,7 @@ export class DingtalkLoginService {
     const current = await this.getStoredSettings();
     const appKey = input.appKey === undefined ? current.appKey : input.appKey.trim();
     const appSecret = input.appSecret === undefined ? current.appSecret : input.appSecret.trim();
+    const corpId = input.corpId === undefined ? current.corpId : input.corpId.trim();
     const enabled = input.enabled ?? current.enabled;
 
     if (enabled && (appKey.length === 0 || appSecret.length === 0)) {
@@ -115,6 +122,7 @@ export class DingtalkLoginService {
     await this.storage.appSettings.setJson(SETTINGS_KEY, {
       appKey,
       appSecret,
+      corpId,
       enabled,
     } satisfies DingtalkSettings);
 
@@ -135,6 +143,12 @@ export class DingtalkLoginService {
       scope: 'openid',
       state,
     });
+
+    // 专属账号登录：限制仅本企业成员可扫码
+    if (settings.corpId.length > 0) {
+      params.set('exclusiveLogin', 'true');
+      params.set('exclusiveCorpId', settings.corpId);
+    }
 
     return `${AUTHORIZE_URL}?${params.toString()}`;
   }
@@ -197,16 +211,22 @@ export class DingtalkLoginService {
     const existing = await this.storage.users.findByDingtalkUnionId(profile.unionId);
 
     if (existing !== null) {
+      // 昵称变化时同步刷新，保证用户列表可读
+      if (profile.nick.length > 0 && profile.nick !== existing.nickname) {
+        await this.storage.users.updateNickname(existing.id, profile.nick);
+      }
+
       return this.auth.issueSessionForUser(existing);
     }
 
-    const username = await this.allocateUsername(profile.nick);
+    const username = await this.allocateUsername(profile.nick, profile.unionId);
     const user = await this.storage.users.create({
       // 钉钉账号不持有可用密码；置为随机哈希避免可猜测的口令
       passwordHash: hashUnusablePassword(),
       role: 'user',
       username,
       dingtalkUnionId: profile.unionId,
+      nickname: profile.nick.length > 0 ? profile.nick : null,
     });
 
     this.logger?.info?.({ username }, '钉钉登录已自动创建普通用户');
@@ -214,8 +234,9 @@ export class DingtalkLoginService {
     return this.auth.issueSessionForUser(user);
   }
 
-  private async allocateUsername(nick: string): Promise<string> {
-    const base = sanitizeUsernameBase(nick);
+  private async allocateUsername(nick: string, unionId: string): Promise<string> {
+    // 中文等非 ASCII 昵称清洗后为空，用 unionId 哈希保证可区分且稳定
+    const base = sanitizeUsernameBase(nick) || createHash('sha256').update(unionId).digest('hex').slice(0, 8);
 
     for (let attempt = 0; attempt < USERNAME_ALLOCATE_ATTEMPTS; attempt += 1) {
       const candidate = attempt === 0 ? `ding_${base}` : `ding_${base}_${attempt + 1}`;
@@ -314,14 +335,12 @@ function normalizeString(value: unknown): string {
 }
 
 function sanitizeUsernameBase(nick: string): string {
-  const cleaned = nick
+  return nick
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9_-]+/gu, '_')
     .replace(/^_+|_+$/gu, '')
     .slice(0, 20);
-
-  return cleaned.length === 0 ? 'user' : cleaned;
 }
 
 function truncateSnippet(value: string): string {

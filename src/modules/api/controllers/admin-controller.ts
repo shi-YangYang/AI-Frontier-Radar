@@ -628,6 +628,14 @@ function readDingtalkSettingsBody(body: unknown): SaveDingtalkSettingsInput {
     input.appSecret = body.appSecret;
   }
 
+  if (body.corpId !== undefined) {
+    if (typeof body.corpId !== 'string') {
+      throw new AdminApiError(400, 'INVALID_BODY', 'CorpId 必须是字符串。');
+    }
+
+    input.corpId = body.corpId;
+  }
+
   if (body.enabled !== undefined) {
     if (typeof body.enabled !== 'boolean') {
       throw new AdminApiError(400, 'INVALID_BODY', '启用状态必须是布尔值。');

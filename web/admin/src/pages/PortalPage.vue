@@ -11,7 +11,7 @@
             <small>{{ t('brand.subtitle') }}</small>
           </div>
           <div class="me-hero-actions">
-            <span class="me-user-name">{{ t('portal.greeting', { username: currentUser?.username ?? '' }) }}</span>
+            <span class="me-user-name">{{ t('portal.greeting', { username: currentUser?.nickname ?? currentUser?.username ?? '' }) }}</span>
             <button class="me-ghost-button" type="button" @click="toggleLanguage">
               {{ t('language.switchTo') }}
             </button>

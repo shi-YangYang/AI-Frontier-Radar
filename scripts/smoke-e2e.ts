@@ -2370,21 +2370,32 @@ async function main(): Promise<void> {
 
     const dingtalkPutResponse = await app.inject({
       method: 'PUT',
-      payload: { appKey: 'ding-smoke-key', appSecret: 'ding-smoke-secret-987654321', enabled: true },
+      payload: {
+        appKey: 'ding-smoke-key',
+        appSecret: 'ding-smoke-secret-987654321',
+        corpId: 'ding-smoke-corp',
+        enabled: true,
+      },
       url: '/admin/api/settings/dingtalk',
     });
     assert(dingtalkPutResponse.statusCode === 200, 'dingtalk settings PUT should succeed');
     const dingtalkSaved = (
       dingtalkPutResponse.json() as {
-        data: { appSecretConfigured: boolean; appSecretPreview: string | null; enabled: boolean };
+        data: {
+          appSecretConfigured: boolean;
+          appSecretPreview: string | null;
+          corpId: string;
+          enabled: boolean;
+        };
       }
     ).data;
     assert(
       dingtalkSaved.appSecretConfigured === true &&
         dingtalkSaved.appSecretPreview !== null &&
         dingtalkSaved.appSecretPreview.startsWith('***') &&
-        !dingtalkSaved.appSecretPreview.includes('987654321'),
-      'dingtalk secret must be masked',
+        !dingtalkSaved.appSecretPreview.includes('987654321') &&
+        dingtalkSaved.corpId === 'ding-smoke-corp',
+      'dingtalk secret must be masked and corpId must round-trip',
     );
     const dingtalkProviders = await rawInject({ method: 'GET', url: '/auth/providers' });
     assert(
@@ -2392,6 +2403,17 @@ async function main(): Promise<void> {
       'providers should report dingtalk enabled after saving',
     );
     checks.push({ name: '钉钉登录配置保存且 AppSecret 脱敏、providers 同步启用' });
+
+    const dingtalkStartAuthorized = await rawInject({ method: 'GET', url: '/auth/dingtalk/start' });
+    const dingtalkAuthorizeLocation = String(dingtalkStartAuthorized.headers.location ?? '');
+    assert(
+      dingtalkStartAuthorized.statusCode === 302 &&
+        dingtalkAuthorizeLocation.startsWith('https://login.dingtalk.com/oauth2/auth') &&
+        dingtalkAuthorizeLocation.includes('exclusiveLogin=true') &&
+        dingtalkAuthorizeLocation.includes('exclusiveCorpId=ding-smoke-corp'),
+      'dingtalk start should carry exclusive login params when corpId configured',
+    );
+    checks.push({ name: '配置 CorpId 后授权链接携带专属登录参数' });
 
     const dingtalkGetResponse = await app.inject({ method: 'GET', url: '/admin/api/settings/dingtalk' });
     assert(dingtalkGetResponse.statusCode === 200, 'dingtalk settings GET should succeed');

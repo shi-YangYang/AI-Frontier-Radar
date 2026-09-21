@@ -736,7 +736,7 @@
           </article>
         </section>
 
-        <section v-else-if="activeSettingsTab === 'users'" class="settings-layout single-column">
+        <section v-else-if="activeSettingsTab === 'dingtalk'" class="settings-layout single-column">
           <article class="panel settings-section">
             <header class="panel-header">
               <div>
@@ -770,6 +770,15 @@
                   />
                   <small>{{ t('settings.dingtalk.appSecretHelp') }}</small>
                 </label>
+                <label>
+                  <span>{{ t('settings.dingtalk.corpIdLabel') }}</span>
+                  <input
+                    v-model="dingtalkForm.corpId"
+                    autocomplete="off"
+                    :placeholder="t('settings.dingtalk.corpIdPlaceholder')"
+                  />
+                  <small>{{ t('settings.dingtalk.corpIdHelp') }}</small>
+                </label>
                 <label class="checkbox-row">
                   <input v-model="dingtalkForm.enabled" type="checkbox" />
                   <span>{{ t('settings.dingtalk.enabledLabel') }}</span>
@@ -785,7 +794,9 @@
               </form>
             </div>
           </article>
+        </section>
 
+        <section v-else-if="activeSettingsTab === 'users'" class="settings-layout single-column">
           <article class="panel settings-list-panel">
             <header class="panel-header">
               <div>
@@ -809,6 +820,7 @@
                     <td>
                       <strong>{{ user.username }}</strong>
                       <span v-if="user.id === currentUserId" class="muted"> · {{ t('settings.users.self') }}</span>
+                      <small v-if="user.nickname" class="muted user-nickname">{{ user.nickname }}</small>
                     </td>
                     <td>
                       <span class="status-badge" :class="user.role === 'admin' ? 'good' : 'neutral'">
@@ -1420,7 +1432,7 @@ const passwordTarget = ref<UserRecord | null>(null);
 const userToDelete = ref<UserRecord | null>(null);
 const users = ref<UserRecord[]>([]);
 const dingtalkSettings = ref<DingtalkAdminSettings | null>(null);
-const dingtalkForm = reactive({ appKey: '', appSecret: '', enabled: false });
+const dingtalkForm = reactive({ appKey: '', appSecret: '', corpId: '', enabled: false });
 const userRoleOptions = computed(() => [
   { label: t('auth.roleUser'), value: 'user' },
   { label: t('auth.roleAdmin'), value: 'admin' },
@@ -1436,6 +1448,7 @@ async function loadDingtalkSettings(): Promise<void> {
     dingtalkSettings.value = settings;
     dingtalkForm.appKey = settings.appKey;
     dingtalkForm.appSecret = '';
+    dingtalkForm.corpId = settings.corpId ?? '';
     dingtalkForm.enabled = settings.enabled;
   } catch (error) {
     showSettingsError(error);
@@ -1449,10 +1462,12 @@ async function submitDingtalkSettings(): Promise<void> {
     dingtalkSettings.value = await updateDingtalkSettings({
       appKey: dingtalkForm.appKey.trim(),
       appSecret: dingtalkForm.appSecret,
+      corpId: dingtalkForm.corpId.trim(),
       enabled: dingtalkForm.enabled,
     });
     dingtalkForm.appKey = dingtalkSettings.value.appKey;
     dingtalkForm.appSecret = '';
+    dingtalkForm.corpId = dingtalkSettings.value.corpId ?? '';
     dingtalkForm.enabled = dingtalkSettings.value.enabled;
     notice.value = t('settings.users.saved');
     noticeDanger.value = false;
@@ -1558,10 +1573,21 @@ async function confirmDeleteUser(): Promise<void> {
   }
 }
 
-type SettingsTabKey = 'data' | 'feishu' | 'polling' | 'rss' | 'rules' | 'users' | 'wechat' | 'xSource' | 'runtime';
+type SettingsTabKey =
+  | 'data'
+  | 'dingtalk'
+  | 'feishu'
+  | 'polling'
+  | 'rss'
+  | 'rules'
+  | 'users'
+  | 'wechat'
+  | 'xSource'
+  | 'runtime';
 
 const SETTINGS_TAB_KEYS: SettingsTabKey[] = [
   'data',
+  'dingtalk',
   'feishu',
   'polling',
   'rss',
@@ -1584,6 +1610,10 @@ const activeSettingsTab = ref<SettingsTabKey>(resolveSettingsTab());
 
 const SETTINGS_TAB_META: Record<SettingsTabKey, { descriptionKey: MessageKey; labelKey: MessageKey }> = {
   data: { descriptionKey: 'settings.tabs.data.description', labelKey: 'settings.tabs.data.label' },
+  dingtalk: {
+    descriptionKey: 'settings.tabs.dingtalk.description',
+    labelKey: 'settings.tabs.dingtalk.label',
+  },
   feishu: { descriptionKey: 'settings.tabs.feishu.description', labelKey: 'settings.tabs.feishu.label' },
   polling: { descriptionKey: 'settings.tabs.polling.description', labelKey: 'settings.tabs.polling.label' },
   rss: { descriptionKey: 'settings.tabs.rss.description', labelKey: 'settings.tabs.rss.label' },
@@ -1715,6 +1745,9 @@ onMounted(() => {
 
   if (activeSettingsTab.value === 'users') {
     void loadUsers();
+  }
+
+  if (activeSettingsTab.value === 'dingtalk') {
     void loadDingtalkSettings();
   }
 });
@@ -1728,6 +1761,9 @@ watch(activeSettingsTab, (tab) => {
 
   if (tab === 'users') {
     void loadUsers();
+  }
+
+  if (tab === 'dingtalk') {
     void loadDingtalkSettings();
   }
 });

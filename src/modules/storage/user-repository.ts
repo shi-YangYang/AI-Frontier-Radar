@@ -24,6 +24,7 @@ export class UserRepository {
         ...(input.dingtalkUnionId === undefined
           ? {}
           : { dingtalkUnionId: input.dingtalkUnionId }),
+        ...(input.nickname === undefined ? {} : { nickname: input.nickname }),
         id: input.id ?? createDatabaseId(),
         passwordHash: input.passwordHash,
         role: input.role,
@@ -86,12 +87,25 @@ export class UserRepository {
 
     return result.count > 0;
   }
+
+  public async updateNickname(id: string, nickname: string | null): Promise<boolean> {
+    const result = await this.prisma.user.updateMany({
+      data: {
+        nickname,
+        updatedAt: createTimestamp(),
+      },
+      where: { id },
+    });
+
+    return result.count > 0;
+  }
 }
 
 function mapUser(user: Prisma.UserGetPayload<Record<string, never>>): User {
   return {
     createdAt: user.createdAt,
     id: user.id,
+    nickname: user.nickname,
     role: user.role as UserRole,
     updatedAt: user.updatedAt,
     username: user.username,

@@ -119,6 +119,7 @@ model User {
   username        String        @unique
   passwordHash    String        @map("password_hash")
   role            String        @default("user")
+  nickname        String?
   dingtalkUnionId String?       @unique @map("dingtalk_union_id")
   createdAt       String        @map("created_at")
   updatedAt       String        @map("updated_at")

@@ -131,13 +131,10 @@ export function registerAuthRoutes(app: FastifyInstance, options: RegisterAuthRo
       const profile = await options.dingtalkLogin.exchangeUserProfile(authCode.trim());
       const result = await options.dingtalkLogin.loginWithProfile(profile);
 
-      reply.header(
-        'Set-Cookie',
-        [
-          serializeClearedStateCookie(),
-          serializeSessionCookie(result.token, options.sessionTtlSeconds),
-        ].join(', '),
-      );
+      reply.header('Set-Cookie', [
+        serializeClearedStateCookie(),
+        serializeSessionCookie(result.token, options.sessionTtlSeconds),
+      ]);
       reply.redirect(result.user.role === 'admin' ? '/' : '/portal', 302);
     } catch {
       return redirectToLoginError(reply, 'dingtalk_error');
@@ -197,6 +194,7 @@ function toPublicUser(user: User): User {
   return {
     createdAt: user.createdAt,
     id: user.id,
+    nickname: user.nickname,
     role: user.role,
     updatedAt: user.updatedAt,
     username: user.username,

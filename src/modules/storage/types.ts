@@ -274,6 +274,8 @@ export type UserRole = 'admin' | 'user';
 export interface User {
   createdAt: string;
   id: string;
+  /** 显示昵称（钉钉登录用户为钉钉昵称；本地创建用户为空） */
+  nickname: string | null;
   role: UserRole;
   updatedAt: string;
   username: string;
@@ -286,6 +288,7 @@ export interface UserWithPassword extends User {
 export interface CreateUserInput {
   dingtalkUnionId?: string;
   id?: string;
+  nickname?: string | null;
   passwordHash: string;
   role: UserRole;
   username: string;

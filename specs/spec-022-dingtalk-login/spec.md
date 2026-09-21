@@ -41,9 +41,11 @@
    - state 双提交 cookie（随机 32 字节 hex），回调校验一致后失效
    - authCode 一次性使用，钉钉接口错误透出明确错误码
    - unionId 唯一索引；冲突时映射到已有用户
-3. **用户创建**：username 取 `dingtalk_<nick 哈希前缀>`（唯一化），密码字段置空（该账号不能用密码登录，除非管理员重置密码）；session 与密码登录一致
+3. **用户创建**：username 取 `dingtalk_<nick 哈希前缀>`（唯一化），密码字段置空（该账号不能用密码登录，除非管理员重置密码）；session 与密码登录一致。中文昵称清洗为空时 username 兜底 `ding_<unionId sha256 前 8 位>`（可区分且稳定）；昵称存 `users.nickname`（migration 20260921010000），用户管理列表与侧栏/绑定端问候语优先显示昵称，登录时昵称变化自动刷新
 4. **登录页 UI**：分割线（1px hairline + "或"）+ 蓝色按钮（#0089FF 白字 + logo SVG 18px），宽度与登录按钮一致；中英文 i18n
 5. **脱敏**：AppSecret 回显仅显示末 4 位；保存时传空则保持原值；不写入日志
+6. **CorpId（可选，用户确认）**：设置页增加可选 CorpId 输入；配置后授权 URL 追加 `exclusiveLogin=true` 与 `exclusiveCorpId=<CorpId>`（钉钉「专属账号登录」），仅本企业成员可扫码；未配置则任何钉钉账号可扫码。设置页样式（tab 拆分等）按现有工作区实现为准
+7. **回调 Cookie（缺陷修复）**：成功回调的多个 Set-Cookie 必须以独立响应头发送（Fastify 数组形式），不得用逗号拼接单个头（浏览器会丢弃后续 cookie 导致登录静默失败回登录页）
 
 ## 边界条件
 
@@ -68,6 +70,7 @@
 ## 验收标准
 
 - [ ] 管理员可在设置页配置 AppKey/AppSecret 与启用开关，secret 脱敏回显
+- [ ] 可选 CorpId：配置后授权 URL 携带 exclusiveLogin/exclusiveCorpId（仅本企业成员可扫）；未配置时不携带
 - [ ] 启用后登录页出现分割线 + 钉钉蓝色按钮（含 logo）；停用后隐藏
 - [ ] 钉钉扫码登录成功 → 自动创建普通用户并进入 `/portal`；再次登录映射同一账号
 - [ ] 管理员可将该用户提升为 admin，钉钉登录后进入管理端

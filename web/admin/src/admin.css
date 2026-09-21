@@ -255,6 +255,7 @@ body.public-theme {
 .admin-theme .users-create-form { grid-template-columns: minmax(0, 1fr); align-items: start; }
 .admin-theme .users-create-form > button { justify-self: start; }
 .admin-theme .settings-list-panel .panel-header { padding: 20px 22px; }
+.admin-theme .user-nickname { display: block; margin-top: 2px; font-size: 12px; }
 .admin-theme .delivery-target-table { min-width: 700px; table-layout: fixed; }
 .admin-theme .delivery-target-table th:nth-child(1) { width: 15%; }
 .admin-theme .delivery-target-table th:nth-child(2) { width: 17%; }

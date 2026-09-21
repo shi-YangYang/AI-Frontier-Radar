@@ -429,6 +429,7 @@ export interface DingtalkAdminSettings {
   appKey: string;
   appSecretConfigured: boolean;
   appSecretPreview: string | null;
+  corpId: string;
   callbackPath: string;
   enabled: boolean;
 }
@@ -441,6 +442,7 @@ export async function updateDingtalkSettings(input: {
   appKey: string;
   /** 空字符串 = 保持不变 */
   appSecret?: string;
+  corpId?: string;
   enabled: boolean;
 }): Promise<DingtalkAdminSettings> {
   return requestJson<DingtalkAdminSettings>('/admin/api/settings/dingtalk', {
@@ -1055,6 +1057,7 @@ function toIsoDateTime(value: string): string | null {
 export interface AuthUser {
   createdAt: string;
   id: string;
+  nickname: string | null;
   role: 'admin' | 'user';
   updatedAt: string;
   username: string;
@@ -1063,6 +1066,7 @@ export interface AuthUser {
 export interface UserRecord {
   createdAt: string;
   id: string;
+  nickname: string | null;
   role: 'admin' | 'user';
   updatedAt: string;
   username: string;

@@ -45,10 +45,10 @@
       </nav>
       <div class="sidebar-user" v-if="currentUser !== null">
         <div class="sidebar-user-head">
-          <span class="user-avatar" aria-hidden="true">{{ currentUser.username.slice(0, 1).toUpperCase() }}</span>
+          <span class="user-avatar" aria-hidden="true">{{ (currentUser.nickname ?? currentUser.username).slice(0, 1).toUpperCase() }}</span>
           <div class="sidebar-user-info">
-            <strong>{{ currentUser.username }}</strong>
-            <small>{{ currentUser.role === 'admin' ? t('auth.roleAdmin') : t('auth.roleUser') }}</small>
+            <strong>{{ currentUser.nickname ?? currentUser.username }}</strong>
+            <small>{{ currentUser.role === 'admin' ? t('auth.roleAdmin') : t('auth.roleUser') }}<template v-if="currentUser.nickname"> · {{ currentUser.username }}</template></small>
           </div>
         </div>
         <button class="logout-button" type="button" @click="handleLogout">
@@ -125,7 +125,7 @@
         </template>
       </nav>
       <div class="drawer-user" v-if="currentUser !== null">
-        <strong>{{ currentUser.username }}</strong>
+        <strong>{{ currentUser.nickname ?? currentUser.username }}</strong>
         <button class="language-button" type="button" @click="handleLogout">
           {{ t('auth.logout') }}
         </button>
@@ -215,6 +215,11 @@ const settingsNavTabs: Array<{ descriptionKey: MessageKey; key: string; labelKey
     descriptionKey: 'settings.tabs.data.description',
     key: 'data',
     labelKey: 'settings.tabs.data.label',
+  },
+  {
+    descriptionKey: 'settings.tabs.dingtalk.description',
+    key: 'dingtalk',
+    labelKey: 'settings.tabs.dingtalk.label',
   },
   {
     descriptionKey: 'settings.tabs.users.description',
