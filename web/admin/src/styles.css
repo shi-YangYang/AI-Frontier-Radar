@@ -3151,15 +3151,13 @@ thead th {
 
 /* ---------- content ---------- */
 
-.me-card-head .me-ghost-button,
-  .me-posts-more .me-ghost-button {
+.me-card-head .me-ghost-button {
   background: var(--panel);
   border-color: var(--border-strong);
   color: var(--text-secondary);
 }
 
-.me-card-head .me-ghost-button:hover:not(:disabled),
-.me-posts-more .me-ghost-button:hover:not(:disabled) {
+.me-card-head .me-ghost-button:hover:not(:disabled) {
   background: #f5f6f8;
   border-color: var(--border-strong);
   color: var(--text);
@@ -3537,7 +3535,7 @@ thead th {
 
 /* iOS 风格开关 */
 .me-switch {
-  background: #d0d5dd;
+  background: #cbd5e1;
   border: 0;
   border-radius: 999px;
   box-shadow: none;
@@ -3553,7 +3551,7 @@ thead th {
 }
 
 .me-switch:hover:not(:disabled) {
-  background: #b8bfca;
+  background: #b6c2d2;
   border-color: transparent;
 }
 
@@ -3767,12 +3765,19 @@ thead th {
   color: #ffffff;
 }
 
-/* PC：多列卡片；移动端覆盖为单列列表 */
+/* PC：3 列卡片网格；640–980 两列；移动端单列列表 */
 .me-post-list {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
   margin-top: 14px;
+}
+
+@media (max-width: 979px) {
+  .me-post-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .me-post {
@@ -3853,7 +3858,8 @@ thead th {
   display: flex;
   gap: 12px;
   justify-content: space-between;
-  margin-top: 8px;
+  margin-top: auto;
+  padding-top: 8px;
 }
 
 .me-post-expand {
@@ -3886,16 +3892,40 @@ thead th {
   text-decoration: underline;
 }
 
-.me-posts-more {
+.me-pagination {
+  align-items: center;
   display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   justify-content: center;
   margin-top: 14px;
 }
 
-.me-posts-more .me-ghost-button {
-  min-height: 38px;
-  padding: 0 22px;
+.me-pagination-page,
+.me-pagination-nav {
+  min-width: 34px;
   width: auto;
+  padding: 0 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.me-pagination-page.current {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.me-pagination-page.current:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: #ffffff;
+}
+
+.me-pagination-ellipsis {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 0 2px;
 }
 
 /* ---------- responsive ---------- */
