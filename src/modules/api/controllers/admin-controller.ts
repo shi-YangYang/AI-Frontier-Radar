@@ -861,7 +861,9 @@ export async function getAdminWechatStatus(options: AdminControllerOptions, user
       data: {
         accounts: [],
         installed: false,
-        loggedIn: false,
+        loggedIn: (await options.storage.deliveryTargets.listAll()).some(
+          (target) => target.channelType === 'wechat_clawbot' && target.ownerUserId === userId,
+        ),
         loginStatus: 'unavailable',
         message: '微信桥服务未初始化。',
         port: 0,
@@ -878,7 +880,7 @@ export async function getAdminWechatStatus(options: AdminControllerOptions, user
     try {
       const synced = await requireWechatBindCoordinator(options).sync(service, options.storage);
       accounts = synced.accounts;
-      loginState = synced.states.get(userId) ?? { loggedIn: accounts.length > 0, status: 'idle' };
+      loginState = synced.states.get(userId) ?? { loggedIn: false, status: 'idle' };
     } catch (error) {
       loginState.message = error instanceof Error ? error.message : String(error);
     }
@@ -905,7 +907,8 @@ export async function getAdminWechatStatus(options: AdminControllerOptions, user
       ...(loginState.accountId === undefined ? {} : { accountId: loginState.accountId }),
       accounts: accountsWithPush,
       installed: status.installed,
-      loggedIn: loginState.loggedIn,
+      // Binding ownership is independent of the current QR flow and other users' accounts.
+      loggedIn: wechatTargets.some((target) => target.ownerUserId === userId),
       loginStatus: loginState.status,
       ...(loginState.message === undefined ? {} : { message: loginState.message }),
       port: status.port,

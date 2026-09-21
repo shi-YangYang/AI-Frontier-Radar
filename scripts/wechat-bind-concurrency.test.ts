@@ -69,6 +69,9 @@ test('concurrent API binding keeps QR, code, cancellation and confirmed ownershi
     const request = (who: string, method: 'GET' | 'POST' | 'DELETE', url: string, payload?: object) => app.inject({ method, url, headers: { cookie: cookies.get(who)! }, ...(payload ? { payload } : {}) });
     const userId = (who: string) => users.find(u => u.username === who)!.id;
     const session = (who: string) => coordinator.getSessionId(userId(who))!;
+    const initialAdminStatus = (await request('admin', 'GET', '/admin/api/wechat/status')).json().data;
+    assert.equal(initialAdminStatus.accounts.length, 1);
+    assert.equal(initialAdminStatus.loggedIn, false, 'other users or unowned bindings do not make the current admin bound');
     const complete = (who: string, accountId: string, wechatUserId = `${accountId}-user`) => {
       for (let i = accounts.length - 1; i >= 0; i--) {
         if (accounts[i].userId === wechatUserId && accounts[i].accountId !== accountId) accounts.splice(i, 1);
@@ -107,11 +110,14 @@ test('concurrent API binding keeps QR, code, cancellation and confirmed ownershi
     complete('bob', 'wechat-b');
     complete('admin', 'wechat-admin');
     complete('alice', 'wechat-a');
+    assert.equal((await request('alice', 'POST', '/user/api/wechat/bind/cancel')).statusCode, 200);
     const results = await Promise.all(['alice', 'bob'].map(who => request(who, 'GET', '/user/api/wechat')));
-    assert.deepEqual(results.map(r => r.json().data.accounts.map((a: {accountId: string}) => a.accountId)), [['wechat-a'], ['wechat-b']]);
+    assert.deepEqual(results.map(r => r.json().data.accounts.map((a: {accountId: string}) => a.accountId)), [['wechat-a'], ['wechat-b']], 'cancelling after QR confirmation preserves the completed binding');
     const targets = await storage.deliveryTargets.listAll();
     assert.equal(targets.find(t => t.config.accountId === 'legacy')?.ownerUserId, null, 'unrelated unowned accounts are not claimed');
     assert.equal(targets.find(t => t.config.accountId === 'wechat-admin')?.ownerUserId, userId('admin'));
+    assert.equal((await request('admin', 'GET', '/admin/api/wechat/status')).json().data.loggedIn, true);
+    assert.equal((await request('admin', 'GET', '/admin/api/wechat/status')).json().data.loggedIn, true, 'binding status remains true after the completed QR session is cleared');
     assert.equal(new Set(targets.map(t => t.targetKey)).size, 4, 'overlapping polls do not create duplicate targets');
     assert.equal((await request('alice', 'POST', '/user/api/wechat/bind')).statusCode, 409, 'one binding per regular user remains enforced');
     assert.equal((await request('bob', 'DELETE', '/user/api/wechat/accounts/wechat-a')).statusCode, 404);
@@ -143,6 +149,9 @@ test('concurrent API binding keeps QR, code, cancellation and confirmed ownershi
     }
     const bobTarget = await storage.deliveryTargets.findByTargetKey('wechat:wechat-b');
     assert.equal((await request('admin', 'POST', '/admin/api/wechat/login', { force: true })).statusCode, 200);
+    const pendingAdminStatus = (await request('admin', 'GET', '/admin/api/wechat/status')).json().data;
+    assert.equal(pendingAdminStatus.loginStatus, 'pending');
+    assert.equal(pendingAdminStatus.loggedIn, true, 'opening another QR does not disconnect an existing binding');
     complete('admin', 'wechat-b-new', 'wechat-b-user');
     await coordinator.sync(bridge as unknown as WechatBridgeService, storage);
     assert.equal((await request('bob', 'GET', '/user/api/wechat')).json().data.accounts.length, 0);
@@ -170,7 +179,17 @@ test('concurrent API binding keeps QR, code, cancellation and confirmed ownershi
     unavailable = true;
     const offline = (await request('alice', 'GET', '/user/api/wechat')).json().data;
     assert.equal(offline.accounts[0].accountId, 'wechat-a');
+    assert.equal(offline.login.loggedIn, true);
+    assert.equal(offline.login.status, 'unavailable', 'an outage is distinct from being unbound or awaiting activation');
+    const offlineAdmin = (await request('admin', 'GET', '/admin/api/wechat/status')).json().data;
+    assert.equal(offlineAdmin.loggedIn, true, 'bridge outages preserve the admin binding status');
+    assert.equal(offlineAdmin.loginStatus, 'unavailable');
     assert.equal((await storage.deliveryTargets.listAll()).length, 5, 'bridge outages cannot delete persisted channels');
+    unavailable = false;
+    await bridge.removeAccount('wechat-admin');
+    const removedAdminStatus = (await request('admin', 'GET', '/admin/api/wechat/status')).json().data;
+    assert.equal(removedAdminStatus.accounts.length, 4, 'the admin still sees other users global bindings');
+    assert.equal(removedAdminStatus.loggedIn, false, 'removed admin bindings are reflected without starting a new QR');
   } finally {
     await app.close();
     await storage.close();
