@@ -157,6 +157,16 @@ test('concurrent API binding keeps QR, code, cancellation and confirmed ownershi
     const staleSession = coordinator.begin(userId('bob'));
     states.set(staleSession, { loggedIn: true, status: 'connected', accountId: 'wechat-b' });
     assert.equal((await request('bob', 'GET', '/user/api/wechat')).json().data.login.status, 'failed');
+
+    // If the SDK returns an earlier account ID, its archived channel must not cause a unique-key error.
+    assert.equal((await request('bob', 'POST', '/user/api/wechat/bind')).statusCode, 200);
+    complete('bob', 'wechat-b', 'wechat-b-user');
+    await coordinator.sync(bridge as unknown as WechatBridgeService, storage);
+    const reboundBob = await storage.deliveryTargets.findByTargetKey('wechat:wechat-b');
+    assert.equal(reboundBob?.id, bobTarget!.id);
+    assert.equal(reboundBob?.ownerUserId, userId('bob'));
+    assert.equal(reboundBob?.enabled, true);
+    assert.deepEqual(await Promise.all(events.map(async event => (await storage.deliveryEvents.findById(event.id))?.status)), ['dead', 'dead', 'dead', 'sent'], 'restoring a channel never revives old delivery tasks');
     unavailable = true;
     const offline = (await request('alice', 'GET', '/user/api/wechat')).json().data;
     assert.equal(offline.accounts[0].accountId, 'wechat-a');

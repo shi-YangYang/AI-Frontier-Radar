@@ -36,7 +36,8 @@ export async function syncWechatDeliveryTargets(
 
   for (const account of options.accounts) {
     const targetKey = buildWechatTargetKey(account.accountId);
-    const existing = wechatTargets.find((target) => target.targetKey === targetKey);
+    const existing = wechatTargets.find((target) => target.targetKey === targetKey)
+      ?? await options.deliveryTargets.findByTargetKey(targetKey) ?? undefined;
     const displayName = `微信 ${account.userId ?? account.accountId}`;
     const config: DeliveryTargetConfig = {
       accountId: account.accountId,
@@ -56,6 +57,19 @@ export async function syncWechatDeliveryTargets(
         webhookUrl,
       });
       result.created += 1;
+      continue;
+    }
+
+    // Deleted channels can remain for delivery history; reuse their unique key on a confirmed return.
+    if (existing.webhookUrl === '') {
+      await options.deliveryTargets.update(existing.id, {
+        config,
+        displayName,
+        enabled: true,
+        ownerUserId: ownerUserId ?? null,
+        webhookUrl,
+      });
+      result.updated += 1;
       continue;
     }
 

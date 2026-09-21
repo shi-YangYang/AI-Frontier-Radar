@@ -137,14 +137,16 @@ async function main(): Promise<void> {
     },
   ];
   let fakeWechatLoginState: WechatLoginState = { loggedIn: true, status: 'idle' };
+  // Start the bridge in its own test section, so the startup timer cannot change earlier fixtures.
+  let fakeWechatRunning = false;
   const fakeWechatBridge = {
     getAccounts: async () => fakeWechatAccounts,
     getLoginState: async () => fakeWechatLoginState,
     cancelLogin: async () => true,
-    getStatus: () => ({ installed: true, port: 3_991, running: true }),
+    getStatus: () => ({ installed: true, port: 3_991, running: fakeWechatRunning }),
     getTargets: async () => [],
     isInstalled: () => true,
-    isRunning: () => true,
+    isRunning: () => fakeWechatRunning,
     removeAccount: async (accountId: string) => {
       const index = fakeWechatAccounts.findIndex((account) => account.accountId === accountId);
 
@@ -1853,6 +1855,7 @@ async function main(): Promise<void> {
     });
     checks.push({ name: '分渠道规则：未命中不投递并正确清理规则' });
 
+    fakeWechatRunning = true;
     const wechatStatusResponse = await app.inject({ method: 'GET', url: '/admin/api/wechat/status' });
     assert(wechatStatusResponse.statusCode === 200, 'wechat status should return 200');
     const wechatTargetA = await storage.deliveryTargets.findByTargetKey('wechat:wechat-a@im.bot');
@@ -1883,7 +1886,8 @@ async function main(): Promise<void> {
     );
     checks.push({ name: '单账号可关闭推送且同步不会覆盖' });
 
-    await app.inject({ method: 'DELETE', url: '/admin/api/wechat/accounts/wechat-b@im.bot' });
+    const deleteWechatResponse = await app.inject({ method: 'DELETE', url: '/admin/api/wechat/accounts/wechat-b@im.bot' });
+    assert(deleteWechatResponse.statusCode === 200, `wechat delete failed: ${deleteWechatResponse.body}`);
     const wechatTargetBAfterDelete = await storage.deliveryTargets.findByTargetKey(
       'wechat:wechat-b@im.bot',
     );
@@ -1892,9 +1896,39 @@ async function main(): Promise<void> {
     );
     assert(
       wechatTargetBAfterDelete === null && wechatTargetAAfterDelete !== null,
-      'removing a wechat account should remove its channel only',
+      'removing a wechat account without delivery history should remove its channel only',
     );
-    checks.push({ name: '删除微信号同步移除其投递通道' });
+    checks.push({ name: '无发送历史的微信号：删除时移除通道且不影响其他微信' });
+
+    // History-bearing channels must be retired, not erased; rebinding the same ID must also work.
+    fakeWechatAccounts.push({
+      accountId: 'wechat-b@im.bot',
+      baseUrl: 'https://ilinkai.weixin.qq.com',
+      hasContextToken: false,
+      tokenMasked: 'cccc***dddd',
+      userId: 'user-b@im.wechat',
+    });
+    const restoredWechatResponse = await app.inject({ method: 'GET', url: '/admin/api/wechat/status' });
+    assert(restoredWechatResponse.statusCode === 200, `wechat restore failed: ${restoredWechatResponse.body}`);
+    const archivedWechatTarget = await storage.deliveryTargets.findByTargetKey('wechat:wechat-b@im.bot');
+    assert(archivedWechatTarget !== null, 'rebound wechat target should exist');
+    const sentWechatEvent = await storage.deliveryEvents.create({
+      status: 'sent', sentAt: new Date().toISOString(), attemptCount: 1,
+      targetKey: archivedWechatTarget.targetKey, xPostId: routedPost.xPostId,
+    });
+    assert(nonMatchingRepoPost !== null, 'wechat pending fixture requires a stored post');
+    const pendingWechatEvent = await storage.deliveryEvents.create({
+      status: 'pending', targetKey: archivedWechatTarget.targetKey, xPostId: nonMatchingRepoPost.xPostId,
+    });
+    const deleteWithHistoryResponse = await app.inject({ method: 'DELETE', url: '/admin/api/wechat/accounts/wechat-b@im.bot' });
+    assert(deleteWithHistoryResponse.statusCode === 200, `wechat delete with history failed: ${deleteWithHistoryResponse.body}`);
+    const retiredWechatTarget = await storage.deliveryTargets.findById(archivedWechatTarget.id);
+    assert(retiredWechatTarget !== null && !retiredWechatTarget.enabled && retiredWechatTarget.webhookUrl === '', 'history-bearing wechat channel must be disabled and hidden');
+    assert(!(await storage.deliveryTargets.listAll()).some(target => target.id === archivedWechatTarget.id), 'retired wechat channel must disappear from active channel lists');
+    assert((await storage.deliveryEvents.findById(sentWechatEvent.id))?.status === 'sent', 'deleting a binding must preserve sent history');
+    assert((await storage.deliveryEvents.findById(pendingWechatEvent.id))?.status === 'dead', 'deleting a binding must stop its pending deliveries');
+    assert((await storage.deliveryTargets.findById(wechatTargetA.id))?.enabled === true, 'deleting one binding must leave other bindings enabled');
+    checks.push({ name: '有发送历史的微信号：停用旧通道、终止待发送任务、保留历史' });
 
     if (wechatTargetAAfterDelete !== null) {
       await storage.deliveryTargets.delete(wechatTargetAAfterDelete.id);
@@ -1905,6 +1939,12 @@ async function main(): Promise<void> {
       tokenMasked: 'cccc***dddd',
       userId: 'user-b@im.wechat',
     });
+    const rebindWithHistoryResponse = await app.inject({ method: 'GET', url: '/admin/api/wechat/status' });
+    assert(rebindWithHistoryResponse.statusCode === 200, `wechat rebind with history failed: ${rebindWithHistoryResponse.body}`);
+    const reboundWechatTarget = await storage.deliveryTargets.findByTargetKey(archivedWechatTarget.targetKey);
+    assert(reboundWechatTarget?.id === archivedWechatTarget.id && reboundWechatTarget.enabled && reboundWechatTarget.webhookUrl !== '', 'rebinding a historical channel should restore it without duplicate keys');
+    assert((await storage.deliveryEvents.findById(sentWechatEvent.id))?.status === 'sent' && (await storage.deliveryEvents.findById(pendingWechatEvent.id))?.status === 'dead', 'rebinding must not replay historical or cancelled deliveries');
+    checks.push({ name: '重新绑定已有历史的微信通道：恢复连接且不重发旧任务' });
 
     const feedXmlResponse = await app.inject({ method: 'GET', url: '/feed.xml' });
     assert(feedXmlResponse.statusCode === 200, `feed.xml returned ${feedXmlResponse.statusCode}`);
