@@ -5,7 +5,14 @@
 .public-theme input::placeholder { color: var(--muted); }
 .public-theme button:disabled { cursor: not-allowed; }
 .public-theme :is(button, input, select, a, [tabindex]):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; box-shadow: none; }
-.public-theme :is(input, select):focus { border-color: var(--accent); box-shadow: none; }
+/* 输入类控件聚焦：单圈紧贴的绿色边框 + 相连浅色光晕，禁止外浮 outline 留缝。
+   :is(:focus, :focus-visible) 抬高一级，压过含 [tabindex] 的通用规则。 */
+.public-theme :is(input, select, .select-trigger):is(:focus, :focus-visible),
+.public-theme .select-trigger[aria-expanded="true"] {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 .public-theme .notice { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
 .public-theme .modal-backdrop { align-items: center; }
 .public-theme .modal { max-height: calc(100dvh - 32px); border-radius: 12px; }

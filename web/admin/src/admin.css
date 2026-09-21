@@ -52,9 +52,16 @@ body.public-theme {
   outline-offset: 3px;
   box-shadow: none;
 }
-.admin-theme input:focus,
-.admin-theme select:focus,
-.admin-theme .select-trigger[aria-expanded="true"] { box-shadow: none; border-color: var(--accent); }
+/* 输入类控件聚焦：单圈紧贴的绿色边框 + 相连浅色光晕，禁止外浮 outline
+   （outline-offset 会在绿色轮廓与输入框自身边框之间留出空隙）。
+   用 :is(:focus, :focus-visible) 抬高一级优先级，压过含 [tabindex]
+   的通用 :focus-visible 规则。 */
+.admin-theme :is(input, select, .select-trigger):is(:focus, :focus-visible),
+.admin-theme .select-trigger[aria-expanded="true"] {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 .admin-theme .select-option.focused { background: var(--accent-soft); color: var(--accent-strong); }
 .admin-theme .select-menu { border-radius: 10px; box-shadow: var(--shadow-lg); z-index: 120; }
 .admin-theme code { font-size: 12px; background: #f0f4f5; color: var(--text-secondary); }
