@@ -10,6 +10,7 @@ import { loadAppConfig } from '../src/config';
 import { createLogger } from '../src/lib/logger';
 import { createApp } from '../src/app/create-app';
 import { createAuthService } from '../src/modules/auth';
+import type { WechatLoginState } from '../src/modules/wechat';
 import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createAi2BlogSourceProvider, createAnthropicNewsSourceProvider, createGithubTrendingSourceProvider, createHfDailyPapersSourceProvider, createMoonshotBlogSourceProvider, createRssSourceProvider, createSourceProviderRegistry, createSubscriptionRuleMatcher, createXSourceProvider, normalizeMetaBlogRawEntries, parseAi2BlogHtml, parseMoonshotBlogHtml, parseXaiNewsHtml, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
 import { createV1TextMessageFormatter, isWithinQuietHours, runDeliveryWorkerJob } from '../src/modules/delivery';
 import { createWechatBridgeSender } from '../src/modules/delivery/channel';
@@ -135,9 +136,11 @@ async function main(): Promise<void> {
       userId: 'user-b@im.wechat',
     },
   ];
+  let fakeWechatLoginState: WechatLoginState = { loggedIn: true, status: 'idle' };
   const fakeWechatBridge = {
     getAccounts: async () => fakeWechatAccounts,
-    getLoginState: async () => ({ loggedIn: true, status: 'idle' }),
+    getLoginState: async () => fakeWechatLoginState,
+    cancelLogin: async () => true,
     getStatus: () => ({ installed: true, port: 3_991, running: true }),
     getTargets: async () => [],
     isInstalled: () => true,
@@ -2436,6 +2439,7 @@ async function main(): Promise<void> {
       url: '/user/api/wechat/bind',
     });
     assert(userBindStartResponse.statusCode === 200, 'user should be able to start wechat binding');
+    fakeWechatLoginState = { loggedIn: true, status: 'connected', accountId: 'wechat-a@im.bot' };
     const userBindingResponse = await rawInject({
       headers: { cookie: userCookie },
       method: 'GET',

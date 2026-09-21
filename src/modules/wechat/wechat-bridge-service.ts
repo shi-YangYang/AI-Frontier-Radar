@@ -185,7 +185,7 @@ export class WechatBridgeService {
     });
   }
 
-  public async getLoginState(): Promise<WechatLoginState> {
+  public async getLoginState(sessionId = 'admin'): Promise<WechatLoginState> {
     if (!this.isInstalled()) {
       return { loggedIn: false, status: 'unavailable', message: '未安装微信桥依赖，请先运行 npm run wechat:install。' };
     }
@@ -200,15 +200,17 @@ export class WechatBridgeService {
         loggedIn?: boolean;
         message?: string;
         qrcodeDataUrl?: string;
+        qrcodeUrl?: string;
         status?: string;
         userId?: string;
-      }>('/login/status');
+      }>(`/login/status?sessionId=${encodeURIComponent(sessionId)}`);
 
       return {
         accountId: state.accountId,
         loggedIn: state.loggedIn === true,
         message: state.message,
         qrcodeDataUrl: state.qrcodeDataUrl,
+        qrcodeUrl: state.qrcodeUrl,
         status: (state.status ?? 'idle') as WechatLoginState['status'],
         userId: state.userId,
       };
@@ -221,7 +223,7 @@ export class WechatBridgeService {
     }
   }
 
-  public async startLogin(force = false): Promise<WechatLoginState> {
+  public async startLogin(force = false, sessionId = 'admin'): Promise<WechatLoginState> {
     const response = await this.request<{
       message?: string;
       ok?: boolean;
@@ -229,10 +231,14 @@ export class WechatBridgeService {
       qrcodeUrl?: string;
       status?: string;
     }>('/login/start', {
-      body: JSON.stringify({ force }),
+      body: JSON.stringify({ force, sessionId }),
       method: 'POST',
       timeoutMs: LOGIN_REQUEST_TIMEOUT_MS,
     });
+
+    if (response.ok === false || response.status === 'failed') {
+      throw new Error(response.message ?? '获取二维码失败。');
+    }
 
     return {
       loggedIn: false,
@@ -243,12 +249,19 @@ export class WechatBridgeService {
     };
   }
 
-  public async submitLoginCode(code: string): Promise<void> {
-    if (!this.isRunning() || this.child === null) {
-      throw new Error('微信桥进程未运行。');
-    }
+  public async submitLoginCode(code: string, sessionId = 'admin'): Promise<void> {
+    await this.request('/login/code', {
+      body: JSON.stringify({ code, sessionId }),
+      method: 'POST',
+    });
+  }
 
-    this.child.stdin.write(`${code.trim()}\n`);
+  public async cancelLogin(sessionId: string): Promise<boolean> {
+    const result = await this.request<{ cancelled: boolean }>('/login/cancel', {
+      body: JSON.stringify({ sessionId }),
+      method: 'POST',
+    });
+    return result.cancelled;
   }
 
   public async getAccounts(): Promise<WechatAccount[]> {

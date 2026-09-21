@@ -22,13 +22,13 @@
       </div>
     </aside>
 
-    <main class="auth-main">
-      <div class="auth-topbar">
-        <button class="language-button" type="button" @click="toggleLanguage">
-          {{ t('language.switchTo') }}
-        </button>
-      </div>
+    <div class="auth-topbar">
+      <button class="language-button" type="button" @click="toggleLanguage">
+        {{ t('language.switchTo') }}
+      </button>
+    </div>
 
+    <main class="auth-main">
       <form class="auth-form-card" @submit.prevent="handleSubmit">
         <header>
           <h2>{{ t('auth.loginTitle') }}</h2>

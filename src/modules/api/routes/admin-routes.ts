@@ -627,7 +627,10 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
         response: adminJsonResponseSchema,
       },
     },
-    async (_, reply) => sendAdminResponse(reply, () => getAdminWechatStatus(options)),
+    async (request, reply) => sendAdminResponse(reply, async () => {
+      const user = await resolveRequestUser(request, options.auth);
+      return getAdminWechatStatus(options, user!.id);
+    }),
   );
 
   app.delete(
@@ -652,11 +655,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
       sendAdminResponse(reply, async () => {
         const user = await resolveRequestUser(request, options.auth);
 
-        if (user !== null) {
-          options.wechatBindCoordinator?.begin(user.id);
-        }
-
-        return startAdminWechatLogin(request.body, options);
+        return startAdminWechatLogin(request.body, options, user!.id);
       }),
   );
 
@@ -668,7 +667,10 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
       },
     },
     async (request, reply) =>
-      sendAdminResponse(reply, () => submitAdminWechatLoginCode(request.body, options)),
+      sendAdminResponse(reply, async () => {
+        const user = await resolveRequestUser(request, options.auth);
+        return submitAdminWechatLoginCode(request.body, options, user!.id);
+      }),
   );
 
   app.patch(

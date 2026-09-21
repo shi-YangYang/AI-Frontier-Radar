@@ -1,7 +1,6 @@
 import { AuthValidationError, type AuthService } from '../../auth';
 import type { DeliveryTarget, StorageContext, User, UserRole } from '../../storage';
 import {
-  syncWechatDeliveryTargets,
   type WechatAccount,
   type WechatBindCoordinator,
   type WechatBridgeService,
@@ -112,6 +111,7 @@ export async function getUserWechatBinding(
     }>;
     login: {
       loggedIn: boolean;
+      message?: string;
       qrcodeDataUrl?: string;
       qrcodeUrl?: string;
       status: string;
@@ -125,9 +125,8 @@ export async function getUserWechatBinding(
     }>;
   };
 }> {
-  const state = await readSyncedWechatState(options);
+  const state = await readSyncedWechatState(options, user.id);
   const ownTargets = state.wechatTargets.filter((target) => target.ownerUserId === user.id);
-  const isOwnBindPending = options.wechatBindCoordinator?.getPendingUserId() === user.id;
   const watchAccounts = await options.storage.watchAccounts.listAll();
   const accountById = new Map(state.accounts.map((account) => [account.accountId, account]));
 
@@ -146,18 +145,13 @@ export async function getUserWechatBinding(
         sourceIds: target.config.sourceIds ?? [],
         ...(target.config.target === undefined ? {} : { userId: target.config.target }),
       })),
-      login: isOwnBindPending
-        ? {
-            loggedIn: state.loginState.loggedIn,
-            ...(state.loginState.qrcodeDataUrl === undefined
-              ? {}
-              : { qrcodeDataUrl: state.loginState.qrcodeDataUrl }),
-            ...(state.loginState.qrcodeUrl === undefined
-              ? {}
-              : { qrcodeUrl: state.loginState.qrcodeUrl }),
-            status: state.loginState.status,
-          }
-        : { loggedIn: state.loginState.loggedIn, status: 'idle' },
+      login: {
+        loggedIn: ownTargets.length > 0,
+        ...(state.loginState.message === undefined ? {} : { message: state.loginState.message }),
+        ...(state.loginState.qrcodeDataUrl === undefined ? {} : { qrcodeDataUrl: state.loginState.qrcodeDataUrl }),
+        ...(state.loginState.qrcodeUrl === undefined ? {} : { qrcodeUrl: state.loginState.qrcodeUrl }),
+        status: state.loginState.status,
+      },
       sources: watchAccounts.map((account) => ({
         displayName: account.displayName ?? account.sourceUrl ?? account.xUsername ?? account.id,
         id: account.id,
@@ -218,51 +212,36 @@ export async function startUserWechatBind(
   options: UserControllerOptions,
 ): Promise<{ ok: true; data: { qrcodeDataUrl?: string; qrcodeUrl?: string; status: string } }> {
   const service = requireWechatBridge(options);
-  const existingTargets = (await options.storage.deliveryTargets.listAll()).filter(
-    (target) => target.channelType === 'wechat_clawbot' && target.ownerUserId === user.id,
-  );
-
-  if (existingTargets.length > 0) {
-    throw new AdminApiError(
-      409,
-      'BINDING_LIMIT',
-      '每个账号只能绑定一个微信号，请先解绑当前微信。',
-    );
-  }
-
-  const loginState = await service.getLoginState().catch(() => undefined);
-  const pendingUserId = options.wechatBindCoordinator?.getPendingUserId() ?? null;
-
-  if (
-    loginState !== undefined &&
-    ACTIVE_LOGIN_STATUSES.has(loginState.status) &&
-    pendingUserId !== user.id
-  ) {
-    throw new AdminApiError(409, 'BIND_IN_PROGRESS', '已有扫码流程进行中，请稍后再试。');
-  }
-
-  options.wechatBindCoordinator?.begin(user.id);
-
-  try {
-    const state = await service.startLogin(true);
-
-    return {
-      ok: true,
-      data: {
-        ...(state.qrcodeDataUrl === undefined ? {} : { qrcodeDataUrl: state.qrcodeDataUrl }),
-        ...(state.qrcodeUrl === undefined ? {} : { qrcodeUrl: state.qrcodeUrl }),
-        status: state.status,
-      },
-    };
-  } catch (error) {
-    options.wechatBindCoordinator?.clear();
-
-    throw new AdminApiError(
-      502,
-      'WECHAT_BRIDGE_FAILED',
-      error instanceof Error ? error.message : '发起扫码绑定失败。',
-    );
-  }
+  const coordinator = requireWechatBindCoordinator(options);
+  return coordinator.runForUser(user.id, async () => {
+    const synced = await coordinator.sync(service, options.storage);
+    if (synced.wechatTargets.some((target) => target.ownerUserId === user.id)) {
+      throw new AdminApiError(409, 'BINDING_LIMIT', '每个账号只能绑定一个微信号，请先解绑当前微信。');
+    }
+    const current = synced.states.get(user.id);
+    if (current !== undefined && ACTIVE_LOGIN_STATUSES.has(current.status)) {
+      return { ok: true, data: current };
+    }
+    const previousSessionId = coordinator.getSessionId(user.id);
+    if (previousSessionId !== undefined) await service.cancelLogin(previousSessionId);
+    const sessionId = coordinator.begin(user.id);
+    try {
+      const state = await service.startLogin(true, sessionId);
+      return {
+        ok: true,
+        data: {
+          ...(state.qrcodeDataUrl === undefined ? {} : { qrcodeDataUrl: state.qrcodeDataUrl }),
+          ...(state.qrcodeUrl === undefined ? {} : { qrcodeUrl: state.qrcodeUrl }),
+          status: state.status,
+        },
+      };
+    } catch (error) {
+      // Stop timed-out QR creation too; its late result must not remain bindable.
+      await service.cancelLogin(sessionId).catch(() => undefined);
+      coordinator.clear(user.id, sessionId);
+      throw new AdminApiError(502, 'WECHAT_BRIDGE_FAILED', error instanceof Error ? error.message : '发起扫码绑定失败。');
+    }
+  });
 }
 
 export async function submitUserWechatLoginCode(
@@ -272,7 +251,9 @@ export async function submitUserWechatLoginCode(
 ): Promise<{ ok: true; data: { submitted: true } }> {
   const service = requireWechatBridge(options);
 
-  if (options.wechatBindCoordinator?.getPendingUserId() !== user.id) {
+  const sessionId = requireWechatBindCoordinator(options).getSessionId(user.id);
+
+  if (sessionId === undefined) {
     throw new AdminApiError(409, 'NO_ACTIVE_BIND', '当前没有你的扫码流程。');
   }
 
@@ -281,7 +262,7 @@ export async function submitUserWechatLoginCode(
   }
 
   try {
-    await service.submitLoginCode(body.code);
+    await service.submitLoginCode(body.code, sessionId);
   } catch (error) {
     throw new AdminApiError(
       502,
@@ -297,13 +278,17 @@ export async function cancelUserWechatBind(
   user: User,
   options: UserControllerOptions,
 ): Promise<{ ok: true; data: { cancelled: boolean } }> {
-  const isPending = options.wechatBindCoordinator?.getPendingUserId() === user.id;
-
-  if (isPending) {
-    options.wechatBindCoordinator?.clear();
-  }
-
-  return { ok: true, data: { cancelled: isPending } };
+  const service = requireWechatBridge(options);
+  const coordinator = requireWechatBindCoordinator(options);
+  return coordinator.runForUser(user.id, async () => {
+    // Save an already-confirmed binding before discarding its session.
+    await coordinator.sync(service, options.storage);
+    const sessionId = coordinator.getSessionId(user.id);
+    if (sessionId === undefined) return { ok: true, data: { cancelled: false } };
+    if (!await service.cancelLogin(sessionId)) await coordinator.sync(service, options.storage);
+    coordinator.clear(user.id, sessionId);
+    return { ok: true, data: { cancelled: true } };
+  });
 }
 
 export async function updateUserWechatQuietHours(
@@ -385,46 +370,30 @@ export async function unbindUserWechatAccount(
   }
 }
 
-async function readSyncedWechatState(options: UserControllerOptions): Promise<{
+async function readSyncedWechatState(options: UserControllerOptions, userId: string): Promise<{
   accounts: WechatAccount[];
   loginState: WechatLoginState;
   wechatTargets: DeliveryTarget[];
 }> {
   const service = options.wechatBridge;
-
-  if (service === undefined) {
-    return {
-      accounts: [],
-      loginState: { loggedIn: false, status: 'unavailable' },
-      wechatTargets: [],
-    };
-  }
-
-  const status = service.getStatus();
-  const loginState = await service.getLoginState().catch(
-    (): WechatLoginState => ({ loggedIn: false, status: 'unavailable' }),
-  );
-  const accounts = status.running ? await service.getAccounts().catch(() => []) : [];
-
-  if (status.running) {
-    const pendingOwner = options.wechatBindCoordinator?.getPendingUserId() ?? undefined;
-    const syncResult = await syncWechatDeliveryTargets({
-      accounts,
-      bridgeBaseUrl: `http://127.0.0.1:${status.port}/send`,
-      deliveryTargets: options.storage.deliveryTargets,
-      ...(pendingOwner === undefined ? {} : { ownerUserIdForNewAccounts: pendingOwner }),
-    }).catch(() => undefined);
-
-    if (syncResult !== undefined) {
-      options.wechatBindCoordinator?.clearIfCreated(syncResult.created);
+  if (service?.isRunning()) {
+    try {
+      const state = await requireWechatBindCoordinator(options).sync(service, options.storage);
+      return { ...state, loginState: state.states.get(userId) ?? { loggedIn: false, status: 'idle' } };
+    } catch {
+      // Keep existing bindings visible while the bridge is unavailable.
     }
   }
+  return {
+    accounts: [],
+    loginState: { loggedIn: false, status: 'unavailable' },
+    wechatTargets: (await options.storage.deliveryTargets.listAll()).filter((target) => target.channelType === 'wechat_clawbot'),
+  };
+}
 
-  const wechatTargets = (await options.storage.deliveryTargets.listAll()).filter(
-    (target) => target.channelType === 'wechat_clawbot',
-  );
-
-  return { accounts, loginState, wechatTargets };
+function requireWechatBindCoordinator(options: UserControllerOptions): WechatBindCoordinator {
+  if (options.wechatBindCoordinator === undefined) throw new AdminApiError(503, 'WECHAT_UNAVAILABLE', '微信绑定服务未初始化。');
+  return options.wechatBindCoordinator;
 }
 
 async function findOwnWechatTarget(

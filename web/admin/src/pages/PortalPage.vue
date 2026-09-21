@@ -342,7 +342,7 @@ import { signOut, useAuth } from '../auth';
 import BrandLogo from '../components/BrandLogo.vue';
 import ConfirmModal from '../components/ConfirmModal.vue';
 import ToastNotice from '../components/ToastNotice.vue';
-import { useI18n, type MessageKey } from '../i18n';
+import { tBackend, useI18n, type MessageKey } from '../i18n';
 import {
   SOURCE_GROUP_LABEL_KEYS,
   SOURCE_GROUP_ORDER,
@@ -545,6 +545,14 @@ async function refreshBindStatus(): Promise<void> {
     loginStatus.value = next.login.status;
     qrDataUrl.value = next.login.qrcodeDataUrl ?? null;
     qrUrl.value = next.login.qrcodeUrl ?? null;
+
+    if (next.login.status === 'failed' || (qrVisible.value && next.login.status === 'idle' && next.accounts.length === 0)) {
+      qrVisible.value = false;
+      stopPolling();
+      noticeDanger.value = true;
+      notice.value = tBackend(next.login.message ?? t('portal.bindFailed'));
+      return;
+    }
 
     if (next.accounts.length > 0) {
       const active = next.accounts[0]?.sessionActive === true;
