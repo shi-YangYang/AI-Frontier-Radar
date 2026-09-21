@@ -25,6 +25,15 @@ export async function syncWechatDeliveryTargets(
   const wechatTargets = knownTargets.filter((target) => target.channelType === 'wechat_clawbot');
   const accountIds = new Set(options.accounts.map((account) => account.accountId));
 
+  // Retire old channels and their queued deliveries before publishing replacement channels.
+  for (const target of wechatTargets) {
+    const accountId = target.config.accountId;
+    if (accountId === undefined || accountId.length === 0) continue;
+    if (accountIds.has(accountId) && target.targetKey === buildWechatTargetKey(accountId)) continue;
+    const deleted = await options.deliveryTargets.delete(target.id);
+    if (deleted.deleted) result.removed += 1;
+  }
+
   for (const account of options.accounts) {
     const targetKey = buildWechatTargetKey(account.accountId);
     const existing = wechatTargets.find((target) => target.targetKey === targetKey);
@@ -68,27 +77,6 @@ export async function syncWechatDeliveryTargets(
         ...(shouldClaimOwner ? { ownerUserId } : {}),
       });
       result.updated += 1;
-    }
-  }
-
-  for (const target of wechatTargets) {
-    const accountId = target.config.accountId;
-
-    if (accountId === undefined || accountId.length === 0) {
-      continue;
-    }
-
-    const isCanonical = target.targetKey === buildWechatTargetKey(accountId);
-    const accountMissing = !accountIds.has(accountId);
-
-    if (!accountMissing && isCanonical) {
-      continue;
-    }
-
-    const deleted = await options.deliveryTargets.delete(target.id);
-
-    if (deleted.deleted) {
-      result.removed += 1;
     }
   }
 

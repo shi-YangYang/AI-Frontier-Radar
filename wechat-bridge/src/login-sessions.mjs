@@ -1,5 +1,7 @@
 import { fork } from 'node:child_process';
 
+import { saveWechatBinding } from './account-bindings.mjs';
+
 const ACTIVE = new Set(['pending', 'scanned', 'need-code']);
 const LOGIN_TTL_MS = 8 * 60_000;
 const RESULT_TTL_MS = 10 * 60_000;
@@ -7,10 +9,11 @@ const RESULT_TTL_MS = 10 * 60_000;
 export class LoginSessions {
   constructor(accounts, { spawnWorker = () => fork(new URL('./login-worker.mjs', import.meta.url), [], {
     execArgv: [], stdio: ['pipe', 'ignore', 'ignore', 'ipc'],
-  }), timeoutMs = LOGIN_TTL_MS } = {}) {
+  }), timeoutMs = LOGIN_TTL_MS, onRemoveAccount } = {}) {
     this.accounts = accounts;
     this.spawnWorker = spawnWorker;
     this.timeoutMs = timeoutMs;
+    this.onRemoveAccount = onRemoveAccount;
     this.sessions = new Map();
   }
 
@@ -50,10 +53,7 @@ export class LoginSessions {
           if (result.connected === true && result.accountId && result.botToken) {
             try {
               // Only this parent writes the shared account index, in event-loop order.
-              this.accounts.saveWeixinAccount(result.accountId, {
-                baseUrl: result.baseUrl, token: result.botToken, userId: result.userId,
-              });
-              this.accounts.registerWeixinAccountId(result.accountId);
+              saveWechatBinding(this.accounts, result, this.onRemoveAccount);
               finish({ accountId: result.accountId, userId: result.userId, status: 'connected', message: '登录成功。请给微信里的 ClawBot 发一条消息以登记会话。' });
             } catch (error) {
               finish({ status: 'failed', message: error instanceof Error ? error.message : String(error) });

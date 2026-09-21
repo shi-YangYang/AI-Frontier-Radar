@@ -42,11 +42,14 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
 
   const wechatBindCoordinator = options.wechatBindCoordinator ?? new WechatBindCoordinator();
   let bindSync: Promise<void> | null = null;
+  let bindingsSynced = false;
   // Finalize ownership even if the user closes the page after confirming on their phone.
   const bindSyncTimer = setInterval(() => {
-    if (bindSync === null && options.wechatBridge?.isRunning() && wechatBindCoordinator.hasPendingBindings()) {
+    if (!options.wechatBridge?.isRunning()) bindingsSynced = false;
+    if (bindSync === null && options.wechatBridge?.isRunning() &&
+        (!bindingsSynced || wechatBindCoordinator.hasPendingBindings())) {
       bindSync = wechatBindCoordinator.sync(options.wechatBridge, storage)
-        .then(() => undefined)
+        .then(() => { bindingsSynced = true; })
         .catch((error) => { options.logger.warn({ err: error }, '同步微信扫码绑定失败'); })
         .finally(() => { bindSync = null; });
     }

@@ -57,11 +57,17 @@ export class WechatBindCoordinator {
       ] as const)));
       // A failed bridge request is not an empty account list: never remove targets on an outage.
       const accounts = await service.getAccounts();
+      const accountIds = new Set(accounts.map((account) => account.accountId));
       const owners = new Map<string, string>();
       for (const [userId, session] of sessions) {
         const state = states.get(userId);
         if (state?.status === 'failed') session.failure = state;
         if (this.sessions.get(userId) !== session || state?.status !== 'connected' || !state.accountId) continue;
+        if (!accountIds.has(state.accountId)) {
+          session.failure = { loggedIn: false, status: 'failed', message: '该微信连接已被重新绑定替换，请刷新查看当前绑定。' };
+          states.set(userId, session.failure);
+          continue;
+        }
         if (!owners.has(state.accountId) && await storage.users.findById(userId) !== null) {
           owners.set(state.accountId, userId);
         }
