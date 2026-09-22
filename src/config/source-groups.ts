@@ -20,7 +20,7 @@ export const SOURCE_GROUPS: readonly SourceGroupDefinition[] = [
     details:
       'arXiv cs.AI / cs.CL / cs.LG / cs.CV、HF Daily Papers、Techmeme、Hacker News、Reddit r/LocalLLaMA、Product Hunt、OpenAI News、Google AI、Google DeepMind、Anthropic News、AI at Meta、xAI News、Mistral、Stability AI、Hugging Face Blog、AI2 Blog、Moonshot Blog、量子位、GitHub Trending（每日）。',
     id: 'ai-news',
-    name: 'AI 消息',
+    name: '论文包',
     sources: [
       { sourceType: 'rss', sourceUrl: 'https://export.arxiv.org/rss/cs.AI' },
       { sourceType: 'rss', sourceUrl: 'https://export.arxiv.org/rss/cs.CL' },

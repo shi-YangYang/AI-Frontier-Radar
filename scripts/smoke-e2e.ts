@@ -15,7 +15,7 @@ import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, Youtube
 import { createV1TextMessageFormatter, isWithinQuietHours, runDeliveryWorkerJob } from '../src/modules/delivery';
 import { createWechatBridgeSender } from '../src/modules/delivery/channel';
 import { createRuntimeScheduler, createRuntimeSourceProviders } from '../src/modules/scheduler';
-import { createPrismaClient, createStorage, seedSourcePacks } from '../src/modules/storage';
+import { createPrismaClient, createRuntimeSettingsService, createStorage, seedSourcePacks } from '../src/modules/storage';
 import { SOURCE_GROUPS } from '../src/config/source-groups';
 import { ConfigValidationError } from '../src/shared/env/config-validation-error';
 
@@ -283,6 +283,23 @@ async function main(): Promise<void> {
       sqlitePath: groupsSqlitePath,
       watchAccountsSource: { items: [], type: 'database' },
     });
+    // smoke 环境无外网：YouTube 频道解析用桩替换（Neuralink 模拟解析失败，验证跳过不阻塞）。
+    const smokeYoutubeFeedUrls = new Map<string, string>([
+      ['TwoMinutePapers', 'https://www.youtube.com/feeds/videos.xml?channel_id=UCsmokeAI1'],
+      ['ai-explained', 'https://www.youtube.com/feeds/videos.xml?channel_id=UCsmokeAI2'],
+      ['YannicKilcher', 'https://www.youtube.com/feeds/videos.xml?channel_id=UCsmokeAI3'],
+      ['BostonDynamics', 'https://www.youtube.com/feeds/videos.xml?channel_id=UCsmokeRobot1'],
+      ['jamesbruton', 'https://www.youtube.com/feeds/videos.xml?channel_id=UCsmokeRobot2'],
+    ]);
+    const youtubeChannelResolver = async (handle: string) => {
+      const feedUrl = smokeYoutubeFeedUrls.get(handle);
+
+      if (feedUrl === undefined) {
+        throw new YoutubeChannelResolveError('resolve-failed', `smoke: no channel for ${handle}`);
+      }
+
+      return { feedUrl, label: `Smoke ${handle}` };
+    };
 
     try {
       await groupsStorage.initialize();
@@ -290,33 +307,298 @@ async function main(): Promise<void> {
       const aiGroup = SOURCE_GROUPS.find((group) => group.id === 'ai-news');
       assert(aiGroup !== undefined, 'ai-news source group should exist');
 
+      // 验证 start-server 的种子 resolver 从运行时设置（SQLite app_settings）读取 RSS 代理，
+      // 而非 .env：注入 7897 等价 mock 代理并断言 resolver 收到的 proxyUrl 来自 database_override。
+      const seedRuntimeSettings = createRuntimeSettingsService({
+        config: { ...config, source: { ...config.source, rss: undefined } },
+        storage: groupsStorage,
+      });
+      const mockProxyUrl = 'http://127.0.0.1:7897/';
+      await groupsStorage.appSettings.setJson('source.rss.proxyUrl', mockProxyUrl);
+      const recordedProxyUrls: Array<string | undefined> = [];
+      const proxiedYoutubeChannelResolver = async (handle: string) => {
+        const rssSettings = await seedRuntimeSettings.getEffectiveRssProxySettings();
+        recordedProxyUrls.push(rssSettings.proxyUrl);
+        return youtubeChannelResolver(handle);
+      };
+
       const firstSeed = await seedSourcePacks({
         sourcePacks: groupsStorage.sourcePacks,
         watchAccounts: groupsStorage.watchAccounts,
+        youtubeChannelResolver: proxiedYoutubeChannelResolver,
       });
       assert(
-        firstSeed.created && firstSeed.memberCount === aiGroup.sources.length,
-        `first seed should create the pack with ${aiGroup.sources.length} sources, got ${JSON.stringify(firstSeed)}`,
+        recordedProxyUrls.length > 0 &&
+          recordedProxyUrls.every((proxyUrl) => proxyUrl === mockProxyUrl),
+        `seed youtube resolver should receive the runtime-settings proxy (${mockProxyUrl}), got ${JSON.stringify(recordedProxyUrls)}`,
+      );
+      const rssProxyAfterSeed = await seedRuntimeSettings.getEffectiveRssProxySettings();
+      assert(
+        rssProxyAfterSeed.proxySource === 'database_override' && rssProxyAfterSeed.proxyUrl === mockProxyUrl,
+        `rss proxy should resolve from SQLite with database_override source, got ${JSON.stringify(rssProxyAfterSeed)}`,
+      );
+      checks.push({ name: 'seed YouTube 解析的代理来自运行时设置（SQLite 优先，回落 .env）' });
+      assert(
+        firstSeed.paperPackCreated && firstSeed.paperPackName === '论文包' &&
+          firstSeed.createdPackNames.length === 4,
+        `first seed should create the paper pack plus 4 built-in packs, got ${JSON.stringify(firstSeed)}`,
       );
 
       const secondSeed = await seedSourcePacks({
         sourcePacks: groupsStorage.sourcePacks,
         watchAccounts: groupsStorage.watchAccounts,
+        youtubeChannelResolver,
       });
       assert(
-        !secondSeed.created && secondSeed.packId === firstSeed.packId,
-        `second seed should skip the existing pack, got ${JSON.stringify(secondSeed)}`,
+        !secondSeed.paperPackCreated && secondSeed.paperPackId === firstSeed.paperPackId &&
+          secondSeed.createdPackNames.length === 0 && secondSeed.createdSourceCount === 0,
+        `second seed should be a no-op, got ${JSON.stringify(secondSeed)}`,
+      );
+      assert(
+        secondSeed.skippedSources.some((skipped) => skipped.source === 'Neuralink'),
+        `unresolvable YouTube channel should be skipped without blocking the seed, got ${JSON.stringify(secondSeed.skippedSources)}`,
       );
 
       const seededPacks = await groupsStorage.sourcePacks.listAll();
       assert(
-        seededPacks.length === 1 && seededPacks[0]?.name === 'AI 消息' &&
-          seededPacks[0]?.memberSourceIds.length === aiGroup.sources.length,
-        `seed pack should persist with all preset sources, got ${JSON.stringify(seededPacks)}`,
+        seededPacks.length === 5 &&
+          seededPacks.some((pack) => pack.name === '论文包' && pack.memberSourceIds.length === aiGroup.sources.length) &&
+          ['AI 包', '机器人包', '脑机包', '融资包'].every((name) =>
+            seededPacks.some((pack) => pack.name === name),
+          ),
+        `seed should persist 论文包 plus 4 built-in packs, got ${JSON.stringify(seededPacks.map((pack) => [pack.name, pack.memberSourceIds.length]))}`,
       );
-      checks.push({ name: '首启 seed：创建「AI 消息」包且重复执行不重复' });
+
+      const samaAccount = await groupsStorage.watchAccounts.findByUsername('sama');
+      assert(
+        samaAccount !== null && samaAccount.displayName === 'Sam Altman' && samaAccount.enabled,
+        `seed X source @sama should exist with its display name, got ${JSON.stringify(samaAccount)}`,
+      );
+      const robotReportAccount = await groupsStorage.watchAccounts.findBySource({
+        sourceType: 'rss',
+        sourceUrl: 'https://www.therobotreport.com/feed/',
+      });
+      assert(robotReportAccount !== null, 'seed RSS source The Robot Report should exist');
+      const youtubeFeedUrl = smokeYoutubeFeedUrls.get('TwoMinutePapers') ?? '';
+      const youtubeAccount = await groupsStorage.watchAccounts.findBySource({
+        sourceType: 'rss',
+        sourceUrl: youtubeFeedUrl,
+      });
+      assert(
+        youtubeAccount !== null && youtubeAccount.displayName === 'Smoke TwoMinutePapers',
+        `resolved YouTube channel should be stored as an rss feed source, got ${JSON.stringify(youtubeAccount)}`,
+      );
+      const aiPack = seededPacks.find((pack) => pack.name === 'AI 包');
+      assert(
+        aiPack !== undefined && aiPack.memberSourceIds.includes(samaAccount.id) &&
+          aiPack.memberSourceIds.includes(youtubeAccount.id),
+        `AI pack should include the seeded X source and the resolved YouTube feed, got ${JSON.stringify(aiPack)}`,
+      );
+      checks.push({ name: '首启 seed：论文包 + 4 内置包，X/RSS/YouTube 源挂包，重复执行不重复' });
+
+      const groupsAuth = createAuthService({
+        adminPassword: SMOKE_ADMIN_PASSWORD,
+        adminUsername: SMOKE_ADMIN_USERNAME,
+        storage: groupsStorage,
+      });
+      await groupsAuth.ensureSeedAdmin();
+      const groupsApp = createApp({
+        auth: groupsAuth,
+        config,
+        logger,
+        storage: groupsStorage,
+      });
+      await groupsApp.ready();
+      const groupsLoginResponse = await groupsApp.inject({
+        method: 'POST',
+        payload: { password: SMOKE_ADMIN_PASSWORD, username: SMOKE_ADMIN_USERNAME },
+        url: '/auth/login',
+      });
+      assert(
+        groupsLoginResponse.statusCode === 200,
+        `groups admin login returned ${groupsLoginResponse.statusCode}`,
+      );
+      const groupsPacksResponse = await groupsApp.inject({
+        headers: { cookie: readSessionCookie(groupsLoginResponse.headers['set-cookie']) },
+        method: 'GET',
+        url: '/admin/api/source-packs',
+      });
+      const groupsPacksBody = groupsPacksResponse.json() as {
+        data?: { packs?: Array<{ enabled: boolean; name: string; sourceCount: number }> };
+      };
+      assert(
+        groupsPacksResponse.statusCode === 200 &&
+          groupsPacksBody.data?.packs?.length === 5 &&
+          groupsPacksBody.data.packs.some(
+            (pack) => pack.name === '论文包' && pack.enabled && pack.sourceCount === aiGroup.sources.length,
+          ),
+        `source-packs GET should return the 5 seeded packs, got ${groupsPacksResponse.body}`,
+      );
+      await groupsApp.close();
+      checks.push({ name: '种子后 source-packs GET 返回 5 个包' });
     } finally {
       await groupsStorage.close();
+    }
+
+    // (a) YouTube 全失败场景：单条源失败不中断种子，4 个内置包仍然创建（允许部分成员）。
+    const allFailSqlitePath = join(tempDir, 'all-fail-seed.sqlite');
+    const allFailStorage = createStorage({
+      databaseUrl: toPrismaSqliteDatabaseUrl(allFailSqlitePath),
+      sqlitePath: allFailSqlitePath,
+      watchAccountsSource: { items: [], type: 'database' },
+    });
+
+    try {
+      await allFailStorage.initialize();
+      const allFailResolver = async (handle: string): Promise<{ feedUrl: string }> => {
+        throw new YoutubeChannelResolveError('resolve-failed', `smoke: youtube all failed for ${handle}`);
+      };
+      const failSeed = await seedSourcePacks({
+        sourcePacks: allFailStorage.sourcePacks,
+        watchAccounts: allFailStorage.watchAccounts,
+        youtubeChannelResolver: allFailResolver,
+      });
+      assert(
+        failSeed.paperPackCreated && failSeed.createdPackNames.length === 4 &&
+          ['AI 包', '机器人包', '脑机包', '融资包'].every((name) =>
+            failSeed.createdPackNames.includes(name),
+          ),
+        `all-Youtube-failed seed should still create the 4 built-in packs, got ${JSON.stringify(failSeed)}`,
+      );
+      assert(
+        failSeed.skippedSources.length === 6 &&
+          ['TwoMinutePapers', 'ai-explained', 'YannicKilcher', 'BostonDynamics', 'jamesbruton', 'Neuralink']
+            .every((handle) => failSeed.skippedSources.some((skipped) => skipped.source === handle)),
+        `all 6 Youtube handles should be recorded as skipped, got ${JSON.stringify(failSeed.skippedSources)}`,
+      );
+
+      const packsAfterFailSeed = await allFailStorage.sourcePacks.listAll();
+      const packMemberCount = (packs: Awaited<ReturnType<typeof allFailStorage.sourcePacks.listAll>>, name: string): number =>
+        packs.find((pack) => pack.name === name)?.memberSourceIds.length ?? -1;
+      assert(
+        packMemberCount(packsAfterFailSeed, '论文包') === 22 &&
+          packMemberCount(packsAfterFailSeed, 'AI 包') === 24 &&
+          packMemberCount(packsAfterFailSeed, '机器人包') === 6 &&
+          packMemberCount(packsAfterFailSeed, '脑机包') === 3 &&
+          packMemberCount(packsAfterFailSeed, '融资包') === 7,
+        `packs should be created with partial members when all Youtube resolutions fail, got ${JSON.stringify(
+          packsAfterFailSeed.map((pack) => [pack.name, pack.memberSourceIds.length]),
+        )}`,
+      );
+      checks.push({ name: 'YouTube 全失败：4 内置包仍创建，缺失成员跳过不阻塞种子' });
+
+      // 收敛语义：管理员从内置包删除的种子成员会在下次启动补挂；管理员自建包完全不受影响。
+      const samaAccount = await allFailStorage.watchAccounts.findByUsername('sama');
+      assert(samaAccount !== null, 'seed X source @sama should exist after fail seed');
+      const customPack = await allFailStorage.sourcePacks.create({
+        description: '管理员自建包',
+        name: '自定义包',
+        sourceIds: [samaAccount.id],
+      });
+      const aiPackBeforeRetry = packsAfterFailSeed.find((pack) => pack.name === 'AI 包');
+      assert(aiPackBeforeRetry !== undefined, 'AI pack should exist after fail seed');
+      await allFailStorage.sourcePacks.update(aiPackBeforeRetry.id, {
+        sourceIds: aiPackBeforeRetry.memberSourceIds.filter((id) => id !== samaAccount.id),
+      });
+
+      // (b) 下一次 seed（模拟解析成功）：源补建并自动补挂进已存在的内置包（幂等）。
+      const retryResolver = async (handle: string): Promise<{ feedUrl: string; label?: string }> => {
+        if (handle === 'Neuralink') {
+          return {
+            feedUrl: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCsmokeBCI1',
+            label: 'Smoke Neuralink',
+          };
+        }
+
+        return youtubeChannelResolver(handle);
+      };
+      const retrySeed = await seedSourcePacks({
+        sourcePacks: allFailStorage.sourcePacks,
+        watchAccounts: allFailStorage.watchAccounts,
+        youtubeChannelResolver: retryResolver,
+      });
+      assert(
+        retrySeed.createdPackNames.length === 0 && retrySeed.createdSourceCount === 6 &&
+          retrySeed.repairedPackNames.length === 3 &&
+          ['AI 包', '机器人包', '脑机包'].every((name) => retrySeed.repairedPackNames.includes(name)),
+        `retry seed should create the 6 Youtube sources and re-attach them into the existing packs, got ${JSON.stringify(retrySeed)}`,
+      );
+
+      const packsAfterRetry = await allFailStorage.sourcePacks.listAll();
+      assert(
+        packMemberCount(packsAfterRetry, 'AI 包') === 27 &&
+          packMemberCount(packsAfterRetry, '机器人包') === 8 &&
+          packMemberCount(packsAfterRetry, '脑机包') === 4 &&
+          packMemberCount(packsAfterRetry, '融资包') === 7,
+        `resolved Youtube feeds should be backfilled into the existing built-in packs, got ${JSON.stringify(
+          packsAfterRetry.map((pack) => [pack.name, pack.memberSourceIds.length]),
+        )}`,
+      );
+      const aiPackAfterRetry = packsAfterRetry.find((pack) => pack.name === 'AI 包');
+      assert(
+        aiPackAfterRetry !== undefined && aiPackAfterRetry.memberSourceIds.includes(samaAccount.id),
+        'admin-removed seed member should be re-attached into the built-in AI pack',
+      );
+      const customPackAfterRetry = await allFailStorage.sourcePacks.findById(customPack.id);
+      assert(
+        customPackAfterRetry !== null && customPackAfterRetry.memberSourceIds.length === 1 &&
+          customPackAfterRetry.memberSourceIds[0] === samaAccount.id &&
+          customPackAfterRetry.description === '管理员自建包',
+        `admin-created pack must not be touched by seed backfill, got ${JSON.stringify(customPackAfterRetry)}`,
+      );
+      checks.push({ name: '内置包种子成员收敛补挂，管理员自建包不受影响' });
+      const thirdSeed = await seedSourcePacks({
+        sourcePacks: allFailStorage.sourcePacks,
+        watchAccounts: allFailStorage.watchAccounts,
+        youtubeChannelResolver: retryResolver,
+      });
+      assert(
+        thirdSeed.createdPackNames.length === 0 && thirdSeed.createdSourceCount === 0 &&
+          thirdSeed.repairedPackNames.length === 0 && thirdSeed.skippedSources.length === 0,
+        `third seed should be a full no-op after backfill, got ${JSON.stringify(thirdSeed)}`,
+      );
+      checks.push({ name: 'YouTube 解析恢复：源补建并自动补挂进已存在内置包，重复 seed 幂等' });
+    } finally {
+      await allFailStorage.close();
+    }
+
+    const legacySqlitePath = join(tempDir, 'legacy-pack.sqlite');
+    const legacyStorage = createStorage({
+      databaseUrl: toPrismaSqliteDatabaseUrl(legacySqlitePath),
+      sqlitePath: legacySqlitePath,
+      watchAccountsSource: { items: [], type: 'database' },
+    });
+
+    try {
+      await legacyStorage.initialize();
+
+      const legacySource = await legacyStorage.watchAccounts.create({
+        enabled: true,
+        sourceType: 'rss',
+        sourceUrl: 'https://export.arxiv.org/rss/cs.AI',
+      });
+      const legacyPack = await legacyStorage.sourcePacks.create({
+        description: '存量 AI 消息包描述',
+        name: 'AI 消息',
+        sourceIds: [legacySource.id],
+      });
+
+      const renameSeed = await seedSourcePacks({
+        sourcePacks: legacyStorage.sourcePacks,
+        watchAccounts: legacyStorage.watchAccounts,
+        youtubeChannelResolver,
+      });
+      const renamedPack = await legacyStorage.sourcePacks.findById(legacyPack.id);
+      assert(
+        renameSeed.renamedFromLegacy && renamedPack !== null &&
+          renamedPack.id === legacyPack.id && renamedPack.name === '论文包' &&
+          renamedPack.description === '存量 AI 消息包描述' &&
+          renamedPack.memberSourceIds.length === 1,
+        `legacy pack should be renamed in place keeping id, members and description, got ${JSON.stringify(renameSeed)} / ${JSON.stringify(renamedPack)}`,
+      );
+      checks.push({ name: '存量「AI 消息」包改名「论文包」且保留 id、成员与描述' });
+    } finally {
+      await legacyStorage.close();
     }
 
     const removedGroupsResponse = await app.inject({ method: 'GET', url: '/admin/api/source-groups' });

@@ -312,10 +312,12 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(pack, index) in sourcePacks" :key="pack.id" :class="{ 'pack-row-disabled': !pack.enabled }">
-              <td>
-                <strong>{{ pack.name }}</strong>
-                <span v-if="!pack.enabled" class="status-badge neutral pack-disabled-badge">{{ t('accounts.packs.disabled') }}</span>
+            <tr v-for="pack in sourcePacks" :key="pack.id" :class="{ 'pack-row-disabled': !pack.enabled }">
+              <td class="pack-name-cell">
+                <div class="pack-name-row">
+                  <strong>{{ pack.name }}</strong>
+                  <span v-if="!pack.enabled" class="status-badge neutral pack-disabled-badge">{{ t('accounts.packs.disabled') }}</span>
+                </div>
                 <p class="muted pack-description">{{ pack.description }}</p>
               </td>
               <td>{{ pack.sourceCount }}</td>
@@ -338,18 +340,10 @@
                 <button
                   class="text-button"
                   type="button"
-                  :disabled="packBusy || index === 0"
-                  @click="movePack(pack, -1)"
+                  :disabled="packBusy"
+                  @click="packDetailTarget = pack"
                 >
-                  {{ t('accounts.packs.moveUp') }}
-                </button>
-                <button
-                  class="text-button"
-                  type="button"
-                  :disabled="packBusy || index === sourcePacks.length - 1"
-                  @click="movePack(pack, 1)"
-                >
-                  {{ t('accounts.packs.moveDown') }}
+                  {{ t('accounts.packs.viewDetails') }}
                 </button>
                 <button class="text-button" type="button" :disabled="packBusy" @click="openPackEditor(pack)">
                   {{ t('actions.edit') }}
@@ -380,6 +374,12 @@
       :detail="t('accounts.packs.deleteBody', { count: packDeleteTarget?.selectedByUsers ?? 0 })"
       @cancel="packDeleteTarget = null"
       @confirm="confirmPackDelete"
+    />
+
+    <PackDetailModal
+      :open="packDetailTarget !== null"
+      :pack="packDetailTarget"
+      @close="packDetailTarget = null"
     />
 
     <ConfirmModal
@@ -413,6 +413,7 @@ import {
 } from '../api/admin-api';
 import ConfirmModal from '../components/ConfirmModal.vue';
 import EmptyState from '../components/EmptyState.vue';
+import PackDetailModal from '../components/PackDetailModal.vue';
 import PageHeader from '../components/PageHeader.vue';
 import PaginationBar from '../components/PaginationBar.vue';
 import SelectControl from '../components/SelectControl.vue';
@@ -471,6 +472,7 @@ const packMemberIds = ref<string[]>([]);
 const packMemberResults = ref<WatchAccount[]>([]);
 const packBusy = ref(false);
 const packDeleteTarget = ref<SourcePackView | null>(null);
+const packDetailTarget = ref<SourcePackView | null>(null);
 const activeQuery = ref('');
 const addingAccount = ref(false);
 const busy = ref(false);
@@ -981,40 +983,6 @@ async function togglePackEnabled(pack: SourcePackView): Promise<void> {
   try {
     await updateSourcePack(pack.id, { enabled: !pack.enabled });
     setNotice(t(pack.enabled ? 'notice.sourcePackDisabled' : 'notice.sourcePackEnabled'));
-    await loadSourcePacks();
-  } catch (error) {
-    setNotice(
-      t('notice.sourcePackFailed', {
-        error: error instanceof Error ? error.message : String(error),
-      }),
-      true,
-    );
-  } finally {
-    packBusy.value = false;
-  }
-}
-
-async function movePack(pack: SourcePackView, direction: -1 | 1): Promise<void> {
-  const index = sourcePacks.value.findIndex((entry) => entry.id === pack.id);
-  const targetIndex = index + direction;
-
-  if (index < 0 || targetIndex < 0 || targetIndex >= sourcePacks.value.length) {
-    return;
-  }
-
-  const reordered = [...sourcePacks.value];
-  const [moved] = reordered.splice(index, 1);
-  reordered.splice(targetIndex, 0, moved!);
-
-  packBusy.value = true;
-
-  try {
-    await Promise.all(
-      reordered
-        .map((entry, newIndex) => ({ entry, newIndex }))
-        .filter(({ entry, newIndex }) => entry.sortOrder !== newIndex)
-        .map(({ entry, newIndex }) => updateSourcePack(entry.id, { sortOrder: newIndex })),
-    );
     await loadSourcePacks();
   } catch (error) {
     setNotice(

@@ -201,7 +201,19 @@ body.public-theme {
 .admin-theme .pack-member-row { align-items: center; display: flex; gap: 8px; padding: 4px 0; }
 .admin-theme .pack-member-name { font-size: 13px; }
 .admin-theme .pack-editor-actions { display: flex; gap: 10px; }
-.admin-theme .pack-description { margin: 3px 0 0; }
+.admin-theme .pack-name-cell { max-width: 460px; min-width: 0; }
+.admin-theme .pack-name-row { align-items: center; display: flex; gap: 8px; min-width: 0; }
+.admin-theme .pack-name-row strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-theme .pack-description { margin: 3px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-theme .pack-detail-modal { width: min(640px, 100%); }
+.admin-theme .pack-detail-body { display: grid; gap: 14px; }
+.admin-theme .pack-detail-field { display: grid; font-size: 13px; gap: 4px; }
+.admin-theme .pack-detail-label { color: var(--muted); font-size: 12px; }
+.admin-theme .pack-detail-value { overflow-wrap: anywhere; }
+.admin-theme .pack-detail-name { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+.admin-theme .pack-detail-members { max-height: 320px; }
+.admin-theme .pack-detail-source-row { align-items: center; display: flex; gap: 8px; padding: 4px 0; }
+.admin-theme .pack-detail-source-row .source-cell-subtitle { flex: 1; font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .admin-theme .pack-row-disabled td { color: var(--muted); }
 .admin-theme .pack-disabled-badge { margin-left: 8px; font-size: 11px; }
 .admin-theme .pack-row-disabled .me-switch { opacity: 0.6; }
