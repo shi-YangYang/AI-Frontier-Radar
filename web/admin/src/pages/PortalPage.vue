@@ -220,23 +220,34 @@
               >
                 <button
                   class="me-segment"
-                  :class="{ on: sourcesAll }"
+                  :class="{ on: sourcesMode === 'all' }"
                   type="button"
                   role="radio"
-                  :aria-checked="sourcesAll"
+                  :aria-checked="sourcesMode === 'all'"
                   :disabled="busy"
-                  @click="selectSourcesMode(true)"
+                  @click="selectSourcesMode('all')"
                 >
                   {{ t('portal.sourcesModeReceiveAll') }}
                 </button>
                 <button
                   class="me-segment"
-                  :class="{ on: !sourcesAll }"
+                  :class="{ on: sourcesMode === 'packs' }"
                   type="button"
                   role="radio"
-                  :aria-checked="!sourcesAll"
+                  :aria-checked="sourcesMode === 'packs'"
                   :disabled="busy"
-                  @click="selectSourcesMode(false)"
+                  @click="selectSourcesMode('packs')"
+                >
+                  {{ t('portal.sourcesModePacks') }}
+                </button>
+                <button
+                  class="me-segment"
+                  :class="{ on: sourcesMode === 'custom' }"
+                  type="button"
+                  role="radio"
+                  :aria-checked="sourcesMode === 'custom'"
+                  :disabled="busy"
+                  @click="selectSourcesMode('custom')"
                 >
                   {{ t('portal.sourcesModeReceiveCustom') }}
                 </button>
@@ -244,14 +255,50 @@
             </div>
 
             <p class="me-inline-state">
-              {{ sourcesAll ? t('portal.sourcesModeAll') : t('portal.sourcesSelected', { count: selectedSourceIds.length }) }}
+              {{ effectiveSourcesLabel }}
               <template v-if="saveStateLabel.length > 0"> · {{ saveStateLabel }}</template>
             </p>
+            <p v-if="sourcesMode === 'packs'" class="me-inline-state">{{ t('portal.sourcesPacksHint') }}</p>
 
-            <div v-if="!sourcesAll" class="me-source-groups">
+            <div v-if="sourcesMode === 'packs'" class="me-source-pack-list">
+              <p v-if="sourcePacks.length === 0" class="me-inline-state">{{ t('portal.sourcesPacksEmpty') }}</p>
+              <label
+                v-for="pack in sourcePacks"
+                :key="pack.id"
+                class="me-source-pack-card"
+                :class="{
+                  empty: pack.sourceCount === 0,
+                  off: !pack.enabled,
+                  on: selectedPackIds.includes(pack.id),
+                }"
+              >
+                <input
+                  type="checkbox"
+                  :checked="selectedPackIds.includes(pack.id)"
+                  :disabled="busy || !pack.enabled || pack.sourceCount === 0"
+                  @change="togglePack(pack.id)"
+                />
+                <span class="me-source-pack-main">
+                  <strong>
+                    {{ pack.name }}
+                    <span v-if="!pack.enabled" class="me-pack-badge">{{ t('portal.packDisabled') }}</span>
+                    <span v-else-if="pack.sourceCount === 0" class="me-pack-badge muted">{{ t('portal.packEmpty') }}</span>
+                  </strong>
+                  <small v-if="pack.description !== null && pack.description.length > 0">{{ pack.description }}</small>
+                  <small class="me-source-pack-meta">
+                    {{ t('portal.packMemberCount', { count: pack.sourceCount }) }}<template v-if="packPlatformSummary(pack).length > 0"> · {{ packPlatformSummary(pack) }}</template>
+                  </small>
+                </span>
+              </label>
+              <p v-if="sourcePacks.length > 0 && selectedPackIds.length === 0" class="me-inline-state">
+                {{ t('portal.sourcesPacksNoneSelected') }}
+              </p>
+            </div>
+
+            <div v-else-if="sourcesMode === 'custom'" class="me-source-groups">
               <p v-if="groupedSources.length === 0" class="me-inline-state">{{ t('portal.sourcesEmpty') }}</p>
               <section v-for="group in groupedSources" :key="group.key" class="me-source-group">
-                <p class="me-source-group-title">{{ t(group.labelKey) }}</p>
+                <p class="me-source-group-title">{{ group.label }}</p>
                 <div class="me-source-chips">
                   <button
                     v-for="source in group.sources"
@@ -263,6 +310,7 @@
                     :disabled="busy"
                     @click="toggleSource(source.id)"
                   >
+                    <span class="me-source-chip-badge">{{ platformBadge(source).label }}</span>
                     {{ sourceLabel(source) }}
                   </button>
                 </div>
@@ -405,6 +453,8 @@ import {
   type MyWechatAccount,
   type MyWechatBinding,
   type MyWechatSource,
+  type MyWechatSourcePack,
+  type MyWechatSourcesMode,
   type UserPostItem,
 } from '../api/admin-api';
 import { signOut, useAuth } from '../auth';
@@ -412,13 +462,7 @@ import BrandLogo from '../components/BrandLogo.vue';
 import ConfirmModal from '../components/ConfirmModal.vue';
 import ToastNotice from '../components/ToastNotice.vue';
 import { tBackend, useI18n, type MessageKey } from '../i18n';
-import {
-  SOURCE_GROUP_LABEL_KEYS,
-  SOURCE_GROUP_ORDER,
-  sourceGroup,
-  sourceLabel,
-  type SourceGroupKey,
-} from '../source-labels';
+import { platformBadge, sourceLabel } from '../source-labels';
 import { formatDateTime } from '../utils';
 
 type PortalTabKey = 'messages' | 'wechat';
@@ -454,7 +498,8 @@ const expandedPostIds = ref(new Set<string>());
 const activeQuery = ref('');
 const searchInput = ref('');
 const selectedSourceIds = ref<string[]>([]);
-const sourcesAll = ref(true);
+const selectedPackIds = ref<string[]>([]);
+const sourcesMode = ref<MyWechatSourcesMode>('all');
 let pollTimer: number | null = null;
 let saveStateTimer: number | null = null;
 let bindingRequestId = 0;
@@ -493,28 +538,76 @@ const saveStateLabel = computed(() =>
       ? t('portal.saved')
       : '',
 );
-const groupedSources = computed(() => {
-  const groups = new Map<SourceGroupKey, MyWechatSource[]>();
-
-  for (const source of binding.value?.sources ?? []) {
-    const key = sourceGroup(source);
-    const list = groups.get(key) ?? [];
-
-    list.push(source);
-    groups.set(key, list);
+const sourcePacks = computed<MyWechatSourcePack[]>(() => binding.value?.sourcePacks ?? []);
+const effectiveSourcesLabel = computed(() => {
+  if (sourcesMode.value === 'packs') {
+    return t('portal.sourcesEffectivePacks', { count: packUnionSize.value });
   }
 
-  return [...groups.entries()]
-    .sort(
-      ([left], [right]) => SOURCE_GROUP_ORDER.indexOf(left) - SOURCE_GROUP_ORDER.indexOf(right),
-    )
-    .map(([key, sources]) => ({
-      key,
-      labelKey: SOURCE_GROUP_LABEL_KEYS[key],
-      sources: [...sources].sort((left, right) =>
-        sourceLabel(left).localeCompare(sourceLabel(right), 'zh-Hans-CN'),
-      ),
-    }));
+  if (sourcesMode.value === 'custom') {
+    return t('portal.sourcesSelected', { count: selectedSourceIds.value.length });
+  }
+
+  return t('portal.sourcesEffectiveAll', { count: binding.value?.sources.length ?? 0 });
+});
+const packUnionSize = computed(() => {
+  const union = new Set<string>();
+
+  for (const pack of sourcePacks.value) {
+    if (selectedPackIds.value.includes(pack.id) && pack.enabled) {
+      for (const source of pack.sources) {
+        union.add(source.id);
+      }
+    }
+  }
+
+  return union.size;
+});
+const groupedSources = computed(() => {
+  const packBySourceId = new Map<string, MyWechatSourcePack>();
+
+  for (const pack of sourcePacks.value) {
+    for (const source of pack.sources) {
+      packBySourceId.set(source.id, pack);
+    }
+  }
+
+  const sourcesByPackId = new Map<string, MyWechatSource[]>();
+  const ungrouped: MyWechatSource[] = [];
+
+  for (const source of binding.value?.sources ?? []) {
+    const pack = packBySourceId.get(source.id);
+
+    if (pack === undefined) {
+      ungrouped.push(source);
+      continue;
+    }
+
+    const list = sourcesByPackId.get(pack.id) ?? [];
+    list.push(source);
+    sourcesByPackId.set(pack.id, list);
+  }
+
+  const groups: Array<{ key: string; label: string; sources: MyWechatSource[] }> = [];
+
+  for (const pack of sourcePacks.value) {
+    const list = sourcesByPackId.get(pack.id);
+
+    if (list !== undefined && list.length > 0) {
+      groups.push({ key: pack.id, label: pack.name, sources: list });
+    }
+  }
+
+  if (ungrouped.length > 0) {
+    groups.push({ key: 'ungrouped', label: t('portal.sourcesUngrouped'), sources: ungrouped });
+  }
+
+  return groups.map((group) => ({
+    ...group,
+    sources: [...group.sources].sort((left, right) =>
+      sourceLabel(left).localeCompare(sourceLabel(right), 'zh-Hans-CN'),
+    ),
+  }));
 });
 type PaginationItem = { type: 'page'; page: number; key: number } | { type: 'ellipsis'; key: number };
 const paginationItems = computed<PaginationItem[]>(() => {
@@ -574,11 +667,18 @@ async function loadBinding(): Promise<void> {
 function syncBindingState(previous: MyWechatAccount | null, resetSettings: boolean): void {
   const account = boundAccount.value;
   const accountChanged = previous?.accountId !== account?.accountId;
+  const snapshot = (entry: MyWechatAccount | null): string =>
+    JSON.stringify({
+      mode: entry?.mode ?? 'all',
+      packIds: entry?.packIds ?? [],
+      sourceIds: entry?.sourceIds ?? [],
+    });
 
-  // A status poll must not reset the unsaved choice to switch to custom sources.
-  if (resetSettings || accountChanged || JSON.stringify(previous?.sourceIds) !== JSON.stringify(account?.sourceIds)) {
+  // A status poll must not reset the unsaved choice while the server state is unchanged.
+  if (resetSettings || accountChanged || snapshot(previous) !== snapshot(account)) {
     selectedSourceIds.value = [...(account?.sourceIds ?? [])];
-    sourcesAll.value = selectedSourceIds.value.length === 0;
+    selectedPackIds.value = [...(account?.packIds ?? [])];
+    sourcesMode.value = account?.mode ?? 'all';
   }
   if (resetSettings || accountChanged || JSON.stringify(previous?.quietHours) !== JSON.stringify(account?.quietHours)) {
     quietEnabled.value = account?.quietHours?.enabled === true;
@@ -774,24 +874,29 @@ async function saveQuietHours(): Promise<void> {
   }
 }
 
-async function toggleSourcesMode(): Promise<void> {
-  if (sourcesAll.value) {
-    sourcesAll.value = false;
-
+async function selectSourcesMode(next: MyWechatSourcesMode): Promise<void> {
+  if (next === sourcesMode.value) {
     return;
   }
 
-  sourcesAll.value = true;
-  selectedSourceIds.value = [];
-  await saveSources();
+  if (next === 'all') {
+    sourcesMode.value = 'all';
+    await saveSourcesAll();
+    return;
+  }
+
+  // 「按主题包」先展示包卡片，勾选即保存；「自定义」仅切换不保存（现状语义）。
+  sourcesMode.value = next;
 }
 
-async function selectSourcesMode(nextAll: boolean): Promise<void> {
-  if (nextAll === sourcesAll.value) {
-    return;
+async function togglePack(packId: string): Promise<void> {
+  if (selectedPackIds.value.includes(packId)) {
+    selectedPackIds.value = selectedPackIds.value.filter((id) => id !== packId);
+  } else {
+    selectedPackIds.value = [...selectedPackIds.value, packId];
   }
 
-  await toggleSourcesMode();
+  await saveSourcesPacks();
 }
 
 async function toggleSource(sourceId: string): Promise<void> {
@@ -802,18 +907,30 @@ async function toggleSource(sourceId: string): Promise<void> {
   }
 
   if (selectedSourceIds.value.length === 0) {
-    sourcesAll.value = true;
+    sourcesMode.value = 'all';
     noticeDanger.value = false;
     notice.value = t('portal.sourcesAllRestored');
-    await saveSources();
+    await saveSources({ sourceIds: [] });
 
     return;
   }
 
-  await saveSources();
+  await saveSources({ mode: 'custom', sourceIds: [...selectedSourceIds.value] });
 }
 
-async function saveSources(): Promise<void> {
+async function saveSourcesPacks(): Promise<void> {
+  await saveSources({ mode: 'packs', packs: [...selectedPackIds.value] });
+}
+
+async function saveSourcesAll(): Promise<void> {
+  await saveSources({ mode: 'all' });
+}
+
+async function saveSources(input: {
+  mode?: 'all' | 'custom' | 'packs';
+  packs?: string[];
+  sourceIds?: string[];
+}): Promise<void> {
   const account = boundAccount.value;
 
   if (account === null) {
@@ -824,12 +941,14 @@ async function saveSources(): Promise<void> {
   markSaving();
 
   try {
-    const sourceIds = sourcesAll.value ? [] : selectedSourceIds.value;
-    const saved = await updateMyWechatSources(account.accountId, sourceIds);
+    const saved = await updateMyWechatSources(account.accountId, input);
 
-    selectedSourceIds.value = saved;
-    sourcesAll.value = saved.length === 0;
-    account.sourceIds = [...saved];
+    selectedPackIds.value = [...saved.packs];
+    selectedSourceIds.value = [...saved.sourceIds];
+    sourcesMode.value = saved.mode;
+    account.packIds = [...saved.packs];
+    account.sourceIds = [...saved.sourceIds];
+    account.mode = saved.mode;
     markSaved();
   } catch (error) {
     saveState.value = 'idle';
@@ -862,6 +981,20 @@ async function confirmUnbind(): Promise<void> {
   } finally {
     busy.value = false;
   }
+}
+
+function packPlatformSummary(pack: MyWechatSourcePack): string {
+  const labels: string[] = [];
+
+  for (const source of pack.sources) {
+    const badge = platformBadge(source);
+
+    if (!labels.includes(badge.label)) {
+      labels.push(badge.label);
+    }
+  }
+
+  return labels.join(' · ');
 }
 
 function formatHour(hour: number): string {

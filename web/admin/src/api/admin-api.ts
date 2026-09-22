@@ -467,13 +467,70 @@ export async function clearPostsHistory(): Promise<{
   );
 }
 
-export interface SourceGroupStatus {
-  description: string;
-  details?: string;
+export interface SourcePackSource {
+  displayName: string;
   id: string;
-  installedCount: number;
+  sourceType: string;
+  sourceUrl: string | null;
+  xUsername: string | null;
+}
+
+export interface SourcePackView {
+  createdAt: string;
+  description: string | null;
+  enabled: boolean;
+  id: string;
   name: string;
+  selectedByUsers: number;
+  sortOrder: number;
   sourceCount: number;
+  sources: SourcePackSource[];
+  updatedAt: string;
+}
+
+export async function listSourcePacks(): Promise<SourcePackView[]> {
+  const data = await requestJson<{ packs: SourcePackView[] }>('/admin/api/source-packs');
+
+  return data.packs;
+}
+
+export async function createSourcePack(input: {
+  description?: string | null;
+  name: string;
+  sourceIds?: string[];
+}): Promise<{ sourcePack: SourcePackView }> {
+  return requestJson<{ sourcePack: SourcePackView }>('/admin/api/source-packs', {
+    body: JSON.stringify(input),
+    method: 'POST',
+  });
+}
+
+export async function updateSourcePack(
+  id: string,
+  input: {
+    description?: string | null;
+    enabled?: boolean;
+    name?: string;
+    sortOrder?: number;
+    sourceIds?: string[];
+  },
+): Promise<{ sourcePack: SourcePackView }> {
+  return requestJson<{ sourcePack: SourcePackView }>(
+    '/admin/api/source-packs/' + encodeURIComponent(id),
+    {
+      body: JSON.stringify(input),
+      method: 'PUT',
+    },
+  );
+}
+
+export async function deleteSourcePack(
+  id: string,
+): Promise<{ affectedUsers: number }> {
+  return requestJson<{ affectedUsers: number }>(
+    '/admin/api/source-packs/' + encodeURIComponent(id),
+    { method: 'DELETE' },
+  );
 }
 
 export async function getDataSettings(): Promise<RetentionSettings> {
@@ -641,21 +698,6 @@ export async function listLogs(
 
   return requestJson<{ capacity: number; entries: LogBufferEntry[]; size: number }>(
     `/admin/api/logs${suffix.length === 0 ? '' : `?${suffix}`}`,
-  );
-}
-
-export async function getSourceGroups(): Promise<SourceGroupStatus[]> {
-  const data = await requestJson<{ groups: SourceGroupStatus[] }>('/admin/api/source-groups');
-
-  return data.groups;
-}
-
-export async function applySourceGroup(
-  id: string,
-): Promise<{ created: number; existing: number; group: string }> {
-  return requestJson<{ created: number; existing: number; group: string }>(
-    `/admin/api/source-groups/${encodeURIComponent(id)}/apply`,
-    { method: 'POST' },
   );
 }
 
@@ -1205,16 +1247,37 @@ export interface MyWechatQuietHours {
   startHour: number;
 }
 
+export type MyWechatSourcesMode = 'all' | 'custom' | 'packs';
+
 export interface MyWechatAccount {
   accountId: string;
   displayName: string;
   enabled: boolean;
+  mode: MyWechatSourcesMode;
+  packIds: string[];
   quietHours: MyWechatQuietHours | null;
   sendCount: number;
   sendLimit: number;
   sessionActive: boolean;
   sourceIds: string[];
   userId?: string;
+}
+
+export interface MyWechatPackSource {
+  displayName: string;
+  id: string;
+  sourceType: string;
+  sourceUrl: string | null;
+  xUsername: string | null;
+}
+
+export interface MyWechatSourcePack {
+  description: string | null;
+  enabled: boolean;
+  id: string;
+  name: string;
+  sourceCount: number;
+  sources: MyWechatPackSource[];
 }
 
 export interface MyWechatSource {
@@ -1232,6 +1295,7 @@ export interface MyWechatBinding {
     qrcodeUrl?: string;
     status: string;
   };
+  sourcePacks: MyWechatSourcePack[];
   sources: MyWechatSource[];
 }
 
@@ -1272,19 +1336,29 @@ export async function updateMyWechatQuietHours(
   return data.quietHours;
 }
 
+export interface SaveMyWechatSourcesInput {
+  mode?: 'all' | 'custom' | 'packs';
+  packs?: string[];
+  sourceIds?: string[];
+}
+
+export interface SaveMyWechatSourcesResult {
+  mode: MyWechatSourcesMode;
+  packs: string[];
+  sourceIds: string[];
+}
+
 export async function updateMyWechatSources(
   accountId: string,
-  sourceIds: string[],
-): Promise<string[]> {
-  const data = await requestJson<{ sourceIds: string[] }>(
+  input: SaveMyWechatSourcesInput,
+): Promise<SaveMyWechatSourcesResult> {
+  return requestJson<SaveMyWechatSourcesResult>(
     `/user/api/wechat/accounts/${encodeURIComponent(accountId)}/sources`,
     {
-      body: JSON.stringify({ sourceIds }),
+      body: JSON.stringify(input),
       method: 'PUT',
     },
   );
-
-  return data.sourceIds;
 }
 
 export async function cancelMyWechatBind(): Promise<void> {

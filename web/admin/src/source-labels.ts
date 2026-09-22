@@ -133,6 +133,83 @@ export function sourceGroup(source: SourceLike): SourceGroupKey {
   return 'other';
 }
 
+export type PlatformBadgeKey =
+  | 'blog'
+  | 'github'
+  | 'ranking'
+  | 'rss'
+  | 'x'
+  | 'youtube';
+
+export interface PlatformBadge {
+  key: MessageKey;
+  label: string;
+}
+
+const PROVIDER_BADGES: Record<string, { key: MessageKey; label: string }> = {
+  ai2_blog: { key: 'platformBadge.blog', label: '博客' },
+  anthropic_news: { key: 'platformBadge.blog', label: '博客' },
+  github: { key: 'platformBadge.github', label: 'GitHub' },
+  meta_ai_blog: { key: 'platformBadge.blog', label: '博客' },
+  moonshot_blog: { key: 'platformBadge.blog', label: '博客' },
+  xai_news: { key: 'platformBadge.blog', label: '博客' },
+  x: { key: 'platformBadge.x', label: 'X' },
+  youtube: { key: 'platformBadge.youtube', label: 'YouTube' },
+};
+
+const RANKING_HOST_PATTERNS: RegExp[] = [
+  /hnrss\.org/iu,
+  /producthunt\.com/iu,
+  /techmeme\.com/iu,
+  /reddit\.com/iu,
+  /huggingface\.co\/api\/daily_papers/iu,
+  /arxiv\.org/iu,
+];
+
+const BLOG_HOST_PATTERNS: RegExp[] = [
+  /openai\.com/iu,
+  /blog\.google/iu,
+  /deepmind\.google/iu,
+  /anthropic\.com/iu,
+  /ai\.meta\.com/iu,
+  /x\.ai/iu,
+  /allenai\.org/iu,
+  /platform\.moonshot\.cn/iu,
+  /mistral\.ai/iu,
+  /stability\.ai/iu,
+  /huggingface\.co/iu,
+  /qbitai\.com/iu,
+];
+
+/** chip 与包卡片共用的平台小标：X / YouTube / 博客 / GitHub / 榜单 / RSS。 */
+export function platformBadge(source: SourceLike): PlatformBadge {
+  const providerBadge = PROVIDER_BADGES[source.sourceType];
+
+  if (providerBadge !== undefined) {
+    return providerBadge;
+  }
+
+  const url = source.sourceUrl ?? '';
+
+  if (url.includes('youtube.com')) {
+    return PROVIDER_BADGES.youtube!;
+  }
+
+  if (url.includes('github.com')) {
+    return PROVIDER_BADGES.github!;
+  }
+
+  if (RANKING_HOST_PATTERNS.some((pattern) => pattern.test(url))) {
+    return { key: 'platformBadge.ranking', label: '榜单' };
+  }
+
+  if (BLOG_HOST_PATTERNS.some((pattern) => pattern.test(url))) {
+    return { key: 'platformBadge.blog', label: '博客' };
+  }
+
+  return { key: 'platformBadge.rss', label: 'RSS' };
+}
+
 function looksLikeFeedTitle(value: string): boolean {
   return /updates on arxiv\.org|^rss$|^feed$/iu.test(value);
 }

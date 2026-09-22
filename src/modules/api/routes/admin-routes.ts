@@ -22,8 +22,9 @@ import {
   deleteAdminDeliveryEvent,
   deleteAdminPollRun,
   deleteAdminWatchAccount,
-  applyAdminSourceGroup,
   clearAdminPostsHistory,
+  createAdminSourcePack,
+  deleteAdminSourcePack,
   deleteAllAdminWatchAccounts,
   deleteAdminWechatAccount,
   downloadAdminBackup,
@@ -33,7 +34,7 @@ import {
   getAdminRssSettings,
   getAdminWechatStatus,
   getAdminSettings,
-  getAdminSourceGroups,
+  getAdminSourcePacks,
   getAdminSubscriptionRules,
   getAdminSummary,
   getAdminXSourceSettings,
@@ -62,6 +63,7 @@ import {
   updateAdminDingtalkSettings,
   updateAdminFeishuSettings,
   updateAdminRssSettings,
+  updateAdminSourcePack,
   updateAdminSubscriptionRules,
   updateAdminXBrowserSettings,
   updateAdminPollingSettings,
@@ -243,24 +245,44 @@ export function registerAdminRoutes(app: FastifyInstance, options: RegisterAdmin
   );
 
   app.get(
-    '/admin/api/source-groups',
+    '/admin/api/source-packs',
     {
       schema: {
         response: adminJsonResponseSchema,
       },
     },
-    async (_, reply) => sendAdminResponse(reply, () => getAdminSourceGroups(options)),
+    async (_, reply) => sendAdminResponse(reply, () => getAdminSourcePacks(options)),
   );
 
   app.post(
-    '/admin/api/source-groups/:id/apply',
+    '/admin/api/source-packs',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) => sendAdminResponse(reply, () => createAdminSourcePack(request.body, options)),
+  );
+
+  app.put(
+    '/admin/api/source-packs/:id',
     {
       schema: {
         response: adminJsonResponseSchema,
       },
     },
     async (request, reply) =>
-      sendAdminResponse(reply, () => applyAdminSourceGroup(request.params, options)),
+      sendAdminResponse(reply, () => updateAdminSourcePack(request.params, request.body, options)),
+  );
+
+  app.delete(
+    '/admin/api/source-packs/:id',
+    {
+      schema: {
+        response: adminJsonResponseSchema,
+      },
+    },
+    async (request, reply) => sendAdminResponse(reply, () => deleteAdminSourcePack(request.params, options)),
   );
 
   app.get(

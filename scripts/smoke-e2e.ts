@@ -15,7 +15,7 @@ import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, Youtube
 import { createV1TextMessageFormatter, isWithinQuietHours, runDeliveryWorkerJob } from '../src/modules/delivery';
 import { createWechatBridgeSender } from '../src/modules/delivery/channel';
 import { createRuntimeScheduler, createRuntimeSourceProviders } from '../src/modules/scheduler';
-import { applySourceGroup, createPrismaClient, createStorage, getSourceGroupStatuses } from '../src/modules/storage';
+import { createPrismaClient, createStorage, seedSourcePacks } from '../src/modules/storage';
 import { SOURCE_GROUPS } from '../src/config/source-groups';
 import { ConfigValidationError } from '../src/shared/env/config-validation-error';
 
@@ -290,55 +290,49 @@ async function main(): Promise<void> {
       const aiGroup = SOURCE_GROUPS.find((group) => group.id === 'ai-news');
       assert(aiGroup !== undefined, 'ai-news source group should exist');
 
-      const beforeStatuses = await getSourceGroupStatuses(
-        groupsStorage.watchAccounts,
-        SOURCE_GROUPS,
-      );
+      const firstSeed = await seedSourcePacks({
+        sourcePacks: groupsStorage.sourcePacks,
+        watchAccounts: groupsStorage.watchAccounts,
+      });
       assert(
-        beforeStatuses[0]?.installedCount === 0,
-        `fresh database should have no group sources installed, got ${beforeStatuses[0]?.installedCount}`,
+        firstSeed.created && firstSeed.memberCount === aiGroup.sources.length,
+        `first seed should create the pack with ${aiGroup.sources.length} sources, got ${JSON.stringify(firstSeed)}`,
       );
 
-      const firstApply = await applySourceGroup(groupsStorage.watchAccounts, aiGroup);
+      const secondSeed = await seedSourcePacks({
+        sourcePacks: groupsStorage.sourcePacks,
+        watchAccounts: groupsStorage.watchAccounts,
+      });
       assert(
-        firstApply.created === aiGroup.sources.length,
-        `group apply should create ${aiGroup.sources.length} sources, got ${firstApply.created}`,
+        !secondSeed.created && secondSeed.packId === firstSeed.packId,
+        `second seed should skip the existing pack, got ${JSON.stringify(secondSeed)}`,
       );
 
-      const secondApply = await applySourceGroup(groupsStorage.watchAccounts, aiGroup);
-      assert(secondApply.created === 0, 'second group apply should not create duplicates');
+      const seededPacks = await groupsStorage.sourcePacks.listAll();
       assert(
-        secondApply.existing === aiGroup.sources.length,
-        `second apply should report ${aiGroup.sources.length} existing, got ${secondApply.existing}`,
+        seededPacks.length === 1 && seededPacks[0]?.name === 'AI 消息' &&
+          seededPacks[0]?.memberSourceIds.length === aiGroup.sources.length,
+        `seed pack should persist with all preset sources, got ${JSON.stringify(seededPacks)}`,
       );
-
-      const afterStatuses = await getSourceGroupStatuses(
-        groupsStorage.watchAccounts,
-        SOURCE_GROUPS,
-      );
-      assert(
-        afterStatuses[0]?.installedCount === aiGroup.sources.length,
-        'group status should report all sources installed',
-      );
-      checks.push({ name: '监听组合：一键添加且重复应用不重复' });
+      checks.push({ name: '首启 seed：创建「AI 消息」包且重复执行不重复' });
     } finally {
       await groupsStorage.close();
     }
 
-    const groupsResponse = await app.inject({ method: 'GET', url: '/admin/api/source-groups' });
+    const removedGroupsResponse = await app.inject({ method: 'GET', url: '/admin/api/source-groups' });
     assert(
-      groupsResponse.statusCode === 200,
-      `GET source-groups returned ${groupsResponse.statusCode}`,
+      removedGroupsResponse.statusCode === 404,
+      `removed source-groups API should return 404, got ${removedGroupsResponse.statusCode}`,
     );
-    const missingGroupResponse = await app.inject({
+    const removedApplyResponse = await app.inject({
       method: 'POST',
       url: '/admin/api/source-groups/not-exist/apply',
     });
     assert(
-      missingGroupResponse.statusCode === 404,
-      `unknown group should return 404, got ${missingGroupResponse.statusCode}`,
+      removedApplyResponse.statusCode === 404,
+      `removed source-groups apply API should return 404, got ${removedApplyResponse.statusCode}`,
     );
-    checks.push({ name: '监听组合 API：查询与未知组合 404' });
+    checks.push({ name: '旧监听组合 API 已删除（404）' });
 
     const emptyPoll = await runPollingJob({
       config,
@@ -2755,6 +2749,422 @@ async function main(): Promise<void> {
     );
     checks.push({ name: '源过滤生效：未选源不投递、其它绑定不受影响' });
 
+    // ---- 主题包（source packs）----
+    const createPackResponse = await app.inject({
+      method: 'POST',
+      payload: { name: 'Smoke 主题包', sourceIds: [seededAccount.id] },
+      url: '/admin/api/source-packs',
+    });
+    assert(
+      createPackResponse.statusCode === 200,
+      `create source pack returned ${createPackResponse.statusCode}`,
+    );
+    const createdPack = (
+      createPackResponse.json() as {
+        data: {
+          sourcePack: {
+            enabled: boolean;
+            id: string;
+            name: string;
+            selectedByUsers: number;
+            sourceCount: number;
+            sources: Array<{ id: string }>;
+          };
+        };
+      }
+    ).data.sourcePack;
+    assert(
+      createdPack.sourceCount === 1 &&
+        createdPack.sources[0]?.id === seededAccount.id &&
+        createdPack.enabled === true &&
+        createdPack.selectedByUsers === 0,
+      `created pack should carry its sources, got ${JSON.stringify(createdPack)}`,
+    );
+
+    const duplicatePackResponse = await app.inject({
+      method: 'POST',
+      payload: { name: 'Smoke 主题包', sourceIds: [] },
+      url: '/admin/api/source-packs',
+    });
+    assert(
+      duplicatePackResponse.statusCode === 409,
+      `duplicate pack name should return 409, got ${duplicatePackResponse.statusCode}`,
+    );
+
+    const packsListResponse = await app.inject({ method: 'GET', url: '/admin/api/source-packs' });
+    const packsList = packsListResponse.json() as {
+      data: { packs: Array<{ id: string; name: string; sourceCount: number; sources: Array<{ id: string; sourceType: string; sourceUrl: string | null }> }> };
+    };
+    assert(
+      packsListResponse.statusCode === 200 &&
+        packsList.data.packs.some(
+          (pack) =>
+            pack.id === createdPack.id && pack.sourceCount === 1 && Array.isArray(pack.sources),
+        ),
+      `source-packs list should include the created pack, got ${JSON.stringify(packsList.data)}`,
+    );
+
+    const setPacksResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'PUT',
+      payload: { mode: 'packs', packs: [createdPack.id] },
+      url: `/user/api/wechat/accounts/${encodeURIComponent(boundAccountId)}/sources`,
+    });
+    assert(
+      setPacksResponse.statusCode === 200,
+      `setting wechat packs returned ${setPacksResponse.statusCode}`,
+    );
+    const setPacksResult = (
+      setPacksResponse.json() as { data: { mode: string; packs: string[]; sourceIds: string[] } }
+    ).data;
+    assert(
+      setPacksResult.mode === 'packs' &&
+        setPacksResult.packs.includes(createdPack.id) &&
+        setPacksResult.sourceIds.length === 0,
+      `pack mode save should clear sourceIds and keep packs, got ${JSON.stringify(setPacksResult)}`,
+    );
+
+    const bindingWithPacks = (
+      await rawInject({ headers: { cookie: userCookie }, method: 'GET', url: '/user/api/wechat' })
+    ).json() as {
+      data: {
+        accounts: Array<{ mode: string; packIds: string[] }>;
+        sourcePacks: Array<{ description: string | null; enabled: boolean; id: string; name: string; sourceCount: number; sources: Array<{ id: string }> }>;
+      };
+    };
+    assert(
+      bindingWithPacks.data.accounts[0]?.mode === 'packs' &&
+        bindingWithPacks.data.accounts[0]?.packIds.includes(createdPack.id),
+      `binding should report pack mode and packIds, got ${JSON.stringify(bindingWithPacks.data.accounts)}`,
+    );
+    assert(
+      bindingWithPacks.data.sourcePacks.some(
+        (pack) =>
+          pack.id === createdPack.id && pack.name === 'Smoke 主题包' &&
+          pack.enabled && pack.sources.some((source) => source.id === seededAccount.id),
+      ),
+      `binding should expose source packs with member sources, got ${JSON.stringify(bindingWithPacks.data.sourcePacks)}`,
+    );
+    checks.push({ name: '管理员建包 + 用户按包订阅（GET 结构与 PUT mode=packs）' });
+
+    // 包内源投递：mock_ai 帖子应创建事件
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T06:00:00.000Z',
+        id: '1000000010000000010',
+        text: 'Pack included post',
+      },
+    ]);
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const packIncludedEvent = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000010',
+      wechatTargetKey,
+    );
+    assert(
+      packIncludedEvent !== null,
+      'post from a pack source should be delivered to the pack subscriber',
+    );
+
+    // 包内新增源 → 新帖自动投递
+    const packAddMemberResponse = await app.inject({
+      method: 'PUT',
+      payload: { sourceIds: [seededAccount.id, excludedAccountRow.id] },
+      url: `/admin/api/source-packs/${createdPack.id}`,
+    });
+    assert(
+      packAddMemberResponse.statusCode === 200,
+      `updating pack members returned ${packAddMemberResponse.statusCode}`,
+    );
+    const packAfterAdd = (
+      packAddMemberResponse.json() as { data: { sourcePack: { sourceCount: number } } }
+    ).data.sourcePack;
+    assert(
+      packAfterAdd.sourceCount === 2,
+      `pack should have 2 sources after member edit, got ${JSON.stringify(packAfterAdd)}`,
+    );
+
+    rssApi.setFeed(excludedFeedPath, {
+      body: createRssDocument('Excluded Source', [
+        createRssItem({
+          description: '<p>Pack auto-added source body</p>',
+          guid: 'excluded-item-3',
+          link: 'https://example.com/excluded/3',
+          pubDate: 'Fri, 24 Apr 2026 06:30:00 GMT',
+          title: 'Pack auto-added source post',
+        }),
+        createRssItem({
+          description: '<p>Excluded source body</p>',
+          guid: 'excluded-item-1',
+          link: 'https://example.com/excluded/1',
+          pubDate: 'Fri, 24 Apr 2026 03:30:00 GMT',
+          title: 'Excluded source post',
+        }),
+      ]),
+      contentType: 'application/rss+xml; charset=utf-8',
+      statusCode: 200,
+    });
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const autoAddedPosts = await prisma.xPostRaw.findMany({
+      where: { authorUserId: excludedAccountRow?.xUserId ?? '' },
+    });
+    const autoAddedPost = autoAddedPosts.find((post) =>
+      post.textContent.includes('Pack auto-added source'),
+    );
+    assert(autoAddedPost !== undefined, 'newly added pack source post should be stored');
+    const autoAddedEvent = await storage.deliveryEvents.findByPostAndTarget(
+      autoAddedPost.xPostId,
+      wechatTargetKey,
+    );
+    assert(
+      autoAddedEvent !== null,
+      'new source added to the pack should be delivered automatically to pack subscribers',
+    );
+    checks.push({ name: '包内新增源自动投递给选包用户' });
+
+    // 停用包：不投递且用户选择保留
+    const disablePackResponse = await app.inject({
+      method: 'PUT',
+      payload: { enabled: false },
+      url: `/admin/api/source-packs/${createdPack.id}`,
+    });
+    assert(
+      disablePackResponse.statusCode === 200 &&
+        (disablePackResponse.json() as { data: { sourcePack: { enabled: boolean } } }).data.sourcePack
+          .enabled === false,
+      `disabling pack should succeed, got ${disablePackResponse.statusCode}`,
+    );
+
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T07:00:00.000Z',
+        id: '1000000010000000011',
+        text: 'Disabled pack post',
+      },
+    ]);
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const disabledPackEvent = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000011',
+      wechatTargetKey,
+    );
+    assert(
+      disabledPackEvent === null,
+      'disabled pack must not deliver to its subscribers',
+    );
+    const disabledUnfilteredEvent = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000011',
+      'wechat:wechat-b@im.bot',
+    );
+    assert(
+      disabledUnfilteredEvent !== null,
+      'unfiltered targets should still receive the post while a pack is disabled',
+    );
+
+    const bindingDisabledPack = (
+      await rawInject({ headers: { cookie: userCookie }, method: 'GET', url: '/user/api/wechat' })
+    ).json() as {
+      data: {
+        accounts: Array<{ packIds: string[] }>;
+        sourcePacks: Array<{ enabled: boolean; id: string }>;
+      };
+    };
+    assert(
+      bindingDisabledPack.data.accounts[0]?.packIds.includes(createdPack.id),
+      `disabling a pack must keep the user selection, got ${JSON.stringify(bindingDisabledPack.data.accounts)}`,
+    );
+    assert(
+      bindingDisabledPack.data.sourcePacks.some(
+        (pack) => pack.id === createdPack.id && pack.enabled === false,
+      ),
+      'binding should report the disabled pack state for the disabled badge',
+    );
+    checks.push({ name: '停用包：不投递且用户 packIds 保留' });
+
+    // 重新启用：自动恢复投递
+    const enablePackResponse = await app.inject({
+      method: 'PUT',
+      payload: { enabled: true },
+      url: `/admin/api/source-packs/${createdPack.id}`,
+    });
+    assert(
+      enablePackResponse.statusCode === 200 &&
+        (enablePackResponse.json() as { data: { sourcePack: { enabled: boolean } } }).data.sourcePack
+          .enabled === true,
+      `re-enabling pack should succeed, got ${enablePackResponse.statusCode}`,
+    );
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T07:30:00.000Z',
+        id: '1000000010000000012',
+        text: 'Re-enabled pack post',
+      },
+    ]);
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const reEnabledEvent = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000012',
+      wechatTargetKey,
+    );
+    assert(
+      reEnabledEvent !== null,
+      're-enabling a pack should restore delivery to its subscribers',
+    );
+    checks.push({ name: '重新启用包后自动恢复投递' });
+
+    // 包模式空集（空包）不推送
+    const emptyPackCreateResponse = await app.inject({
+      method: 'POST',
+      payload: { name: 'Smoke 空包' },
+      url: '/admin/api/source-packs',
+    });
+    assert(
+      emptyPackCreateResponse.statusCode === 200,
+      `creating an empty pack returned ${emptyPackCreateResponse.statusCode}`,
+    );
+    const emptyPack = (
+      emptyPackCreateResponse.json() as { data: { sourcePack: { id: string; sourceCount: number } } }
+    ).data.sourcePack;
+    assert(emptyPack.sourceCount === 0, 'empty pack should have no sources');
+    const setEmptyPackResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'PUT',
+      payload: { mode: 'packs', packs: [emptyPack.id] },
+      url: `/user/api/wechat/accounts/${encodeURIComponent(boundAccountId)}/sources`,
+    });
+    assert(
+      setEmptyPackResponse.statusCode === 200,
+      `selecting the empty pack returned ${setEmptyPackResponse.statusCode}`,
+    );
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T08:00:00.000Z',
+        id: '1000000010000000013',
+        text: 'Empty pack post',
+      },
+    ]);
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const emptyPackEvent = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000013',
+      wechatTargetKey,
+    );
+    assert(
+      emptyPackEvent === null,
+      'pack mode with an empty effective source set must not deliver',
+    );
+    checks.push({ name: '包模式有效源集为空：不推送' });
+
+    // 删除包：级联清理用户选择，无其它包时回退全部接收
+    const deletePackResponse = await app.inject({
+      method: 'DELETE',
+      url: `/admin/api/source-packs/${createdPack.id}`,
+    });
+    assert(
+      deletePackResponse.statusCode === 200,
+      `deleting the pack returned ${deletePackResponse.statusCode}`,
+    );
+    const deletePackResult = (
+      deletePackResponse.json() as { data: { affectedUsers: number } }
+    ).data;
+    assert(
+      deletePackResult.affectedUsers === 0,
+      `the pack was deselected before deletion, affected users should be 0, got ${JSON.stringify(deletePackResult)}`,
+    );
+    const deleteEmptyPackResponse = await app.inject({
+      method: 'DELETE',
+      url: `/admin/api/source-packs/${emptyPack.id}`,
+    });
+    assert(
+      deleteEmptyPackResponse.statusCode === 200 &&
+        (deleteEmptyPackResponse.json() as { data: { affectedUsers: number } }).data
+          .affectedUsers === 1,
+      `deleting the selected empty pack should report one affected user, got ${deleteEmptyPackResponse.statusCode}`,
+    );
+
+    const targetAfterDelete = await storage.deliveryTargets.findByTargetKey(wechatTargetKey);
+    assert(
+      targetAfterDelete !== null && targetAfterDelete.config.packIds === undefined,
+      `deleted pack ids must be cleaned from user configs, got ${JSON.stringify(targetAfterDelete?.config)}`,
+    );
+
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T08:30:00.000Z',
+        id: '1000000010000000014',
+        text: 'After pack deletion post',
+      },
+    ]);
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const fallbackEvent = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000014',
+      wechatTargetKey,
+    );
+    assert(
+      fallbackEvent !== null,
+      'user with no packs left should fall back to receiving everything',
+    );
+    checks.push({ name: '删除包级联清理用户选择并回退全部接收' });
+
+    // 旧体兼容：仅 { sourceIds: [...] }（空=全部）
+    const legacyFilterResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'PUT',
+      payload: { sourceIds: [excludedAccountRow.id] },
+      url: `/user/api/wechat/accounts/${encodeURIComponent(boundAccountId)}/sources`,
+    });
+    assert(
+      legacyFilterResponse.statusCode === 200,
+      `legacy body sources PUT returned ${legacyFilterResponse.statusCode}`,
+    );
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T09:00:00.000Z',
+        id: '1000000010000000015',
+        text: 'Legacy filter post',
+      },
+    ]);
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const legacyFilteredEvent = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000015',
+      wechatTargetKey,
+    );
+    assert(
+      legacyFilteredEvent === null,
+      'legacy body should still apply the custom source filter',
+    );
+
+    const legacyClearResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'PUT',
+      payload: { sourceIds: [] },
+      url: `/user/api/wechat/accounts/${encodeURIComponent(boundAccountId)}/sources`,
+    });
+    assert(
+      legacyClearResponse.statusCode === 200,
+      `legacy empty sources PUT returned ${legacyClearResponse.statusCode}`,
+    );
+    const legacyClearResult = (
+      legacyClearResponse.json() as { data: { mode: string; packs: string[]; sourceIds: string[] } }
+    ).data;
+    assert(
+      legacyClearResult.mode === 'all' && legacyClearResult.packs.length === 0,
+      `legacy empty sources should restore receive-all, got ${JSON.stringify(legacyClearResult)}`,
+    );
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T09:30:00.000Z',
+        id: '1000000010000000016',
+        text: 'Legacy restore post',
+      },
+    ]);
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const legacyRestoredEvent = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000016',
+      wechatTargetKey,
+    );
+    assert(
+      legacyRestoredEvent !== null,
+      'legacy body with empty sourceIds should restore receive-all delivery',
+    );
+    checks.push({ name: '旧体兼容：仅 sourceIds 数组仍按现状（空=全部）' });
+
     const quietReference = new Date('2026-04-24T18:00:00.000Z');
     const quietWindow = findQuietWindow(quietReference, true);
     const openWindow = findQuietWindow(quietReference, false);
@@ -2778,12 +3188,12 @@ async function main(): Promise<void> {
     xApi.setPosts([
       {
         created_at: '2026-04-24T04:00:00.000Z',
-        id: '1000000010000000002',
+        id: '1000000010000000017',
         text: 'Quiet hours post one',
       },
       {
         created_at: '2026-04-24T04:10:00.000Z',
-        id: '1000000010000000003',
+        id: '1000000010000000018',
         text: 'Quiet hours post two',
       },
     ]);
@@ -2796,7 +3206,7 @@ async function main(): Promise<void> {
       entry.url.startsWith('/mock-wechat-bridge'),
     ).length;
     const quietEventOne = await storage.deliveryEvents.findByPostAndTarget(
-      '1000000010000000002',
+      '1000000010000000017',
       wechatTargetKey,
     );
     assert(
@@ -2824,11 +3234,11 @@ async function main(): Promise<void> {
     const digestRequest = digestRequests.at(-1);
     const digestText = JSON.stringify(digestRequest?.body ?? {});
     const quietEventOneAfterFlush = await storage.deliveryEvents.findByPostAndTarget(
-      '1000000010000000002',
+      '1000000010000000017',
       wechatTargetKey,
     );
     const quietEventTwoAfterFlush = await storage.deliveryEvents.findByPostAndTarget(
-      '1000000010000000003',
+      '1000000010000000018',
       wechatTargetKey,
     );
     assert(
@@ -2849,23 +3259,23 @@ async function main(): Promise<void> {
     xApi.setPosts([
       {
         created_at: '2026-04-24T05:00:00.000Z',
-        id: '1000000010000000004',
+        id: '1000000010000000019',
         text: 'Digest failure post one',
       },
       {
         created_at: '2026-04-24T05:10:00.000Z',
-        id: '1000000010000000005',
+        id: '1000000010000000020',
         text: 'Digest failure post two',
       },
     ]);
     await runPollingJob({ config, logger, sourceProviders, storage });
     await runDeliveryWorkerJob({ logger, now: () => quietReference, storage });
     const failureEventOne = await storage.deliveryEvents.findByPostAndTarget(
-      '1000000010000000004',
+      '1000000010000000019',
       wechatTargetKey,
     );
     const failureEventTwo = await storage.deliveryEvents.findByPostAndTarget(
-      '1000000010000000005',
+      '1000000010000000020',
       wechatTargetKey,
     );
     assert(

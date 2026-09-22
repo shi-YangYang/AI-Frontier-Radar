@@ -3,6 +3,8 @@ import type { DeliveryEventRepository } from '../../storage';
 import type { SourceDescriptor, SourceProviderRegistry, StandardizedPost } from '../types';
 import type { SubscriptionRuleMatcher } from './subscription-rule-matcher';
 
+export type EffectiveSourceSet = ReadonlySet<string> | 'all';
+
 export interface PollingAccountServiceOptions {
   deliveryEvents: DeliveryEventRepository;
   excludeReplies?: boolean;
@@ -34,6 +36,7 @@ export class PollingAccountService {
   public async pollAccount(
     account: WatchAccount,
     deliveryTargets: DeliveryTarget[],
+    effectiveSourceSets: Map<string, EffectiveSourceSet>,
   ): Promise<PollingAccountResult> {
     const fetchCursor = account.lastSeenPostId ?? account.baselinePostId ?? undefined;
     const sourceProvider = this.options.sourceProviders.get(account.sourceType);
@@ -60,6 +63,7 @@ export class PollingAccountService {
 
     const persistResult = await this.persistPosts(eligiblePosts, deliveryTargets, {
       createEvents: !baselineAllOnFirstRun,
+      effectiveSourceSets,
       sourceId: account.id,
     });
 
@@ -76,7 +80,11 @@ export class PollingAccountService {
   private async persistPosts(
     posts: StandardizedPost[],
     deliveryTargets: DeliveryTarget[],
-    options: { createEvents: boolean; sourceId: string },
+    options: {
+      createEvents: boolean;
+      effectiveSourceSets: Map<string, EffectiveSourceSet>;
+      sourceId: string;
+    },
   ): Promise<{
     eventsCreated: number;
     newPostsDetected: number;
@@ -103,7 +111,11 @@ export class PollingAccountService {
   private async persistPost(
     post: StandardizedPost,
     deliveryTargets: DeliveryTarget[],
-    options: { createEvents: boolean; sourceId: string },
+    options: {
+      createEvents: boolean;
+      effectiveSourceSets: Map<string, EffectiveSourceSet>;
+      sourceId: string;
+    },
   ): Promise<{
     eventsCreated: number;
     isNewPost: boolean;
@@ -145,7 +157,7 @@ export class PollingAccountService {
           continue;
         }
 
-        if (!acceptsSource(deliveryTarget, options.sourceId)) {
+        if (!acceptsSource(deliveryTarget, options.sourceId, options.effectiveSourceSets)) {
           continue;
         }
 
@@ -296,12 +308,100 @@ function sortPostsAscending(posts: StandardizedPost[]): StandardizedPost[] {
   return [...posts].sort((left, right) => comparePostIds(left.xPostId, right.xPostId));
 }
 
-function acceptsSource(target: DeliveryTarget, sourceId: string): boolean {
-  const sourceIds = target.config.sourceIds;
+function acceptsSource(
+  target: DeliveryTarget,
+  sourceId: string,
+  effectiveSourceSets: Map<string, EffectiveSourceSet>,
+): boolean {
+  const effectiveSet = effectiveSourceSets.get(target.id);
 
-  if (sourceIds === undefined || sourceIds.length === 0) {
+  if (effectiveSet === undefined) {
     return true;
   }
 
-  return sourceIds.includes(sourceId);
+  if (effectiveSet === 'all') {
+    return true;
+  }
+
+  return effectiveSet.has(sourceId);
+}
+
+type SourcePackMemberReader = {
+  listMemberSourceIdsByPackIds(
+    packIds: string[],
+    options?: { enabledOnly?: boolean },
+  ): Promise<Map<string, string[]>>;
+};
+
+/**
+ * 解析每个投递通道本次轮询周期的生效源集合：
+ * - config.packIds 存在（数组）：启用包成员 ∪ sourceIds（并存数据层 union 兼容）；解析为空 → 不推送
+ * - 否则 config.sourceIds 非空 → 按列表（空数组 = 全部，现状不变）
+ * - 均无 → 'all'
+ */
+export async function resolveEffectiveSourceSets(
+  sourcePacks: SourcePackMemberReader,
+  deliveryTargets: DeliveryTarget[],
+): Promise<Map<string, EffectiveSourceSet>> {
+  const targetPackIds = new Map<string, string[]>();
+  const allPackIds = new Set<string>();
+
+  for (const target of deliveryTargets) {
+    const packIds = target.config.packIds;
+
+    if (Array.isArray(packIds)) {
+      const normalizedPackIds = packIds.filter(
+        (packId) => typeof packId === 'string' && packId.length > 0,
+      );
+
+      targetPackIds.set(target.id, normalizedPackIds);
+
+      for (const packId of normalizedPackIds) {
+        allPackIds.add(packId);
+      }
+    }
+  }
+
+  const membersByPackId =
+    allPackIds.size > 0
+      ? await sourcePacks.listMemberSourceIdsByPackIds([...allPackIds], { enabledOnly: true })
+      : new Map<string, string[]>();
+
+  const result = new Map<string, EffectiveSourceSet>();
+
+  for (const target of deliveryTargets) {
+    const packIds = targetPackIds.get(target.id);
+
+    if (packIds === undefined) {
+      const sourceIds = target.config.sourceIds;
+
+      if (sourceIds === undefined || sourceIds.length === 0) {
+        result.set(target.id, 'all');
+      } else {
+        result.set(target.id, new Set(sourceIds));
+      }
+
+      continue;
+    }
+
+    const effectiveSet = new Set<string>();
+
+    for (const packId of packIds) {
+      for (const sourceId of membersByPackId.get(packId) ?? []) {
+        effectiveSet.add(sourceId);
+      }
+    }
+
+    const sourceIds = target.config.sourceIds;
+
+    if (sourceIds !== undefined) {
+      for (const sourceId of sourceIds) {
+        effectiveSet.add(sourceId);
+      }
+    }
+
+    result.set(target.id, effectiveSet);
+  }
+
+  return result;
 }
