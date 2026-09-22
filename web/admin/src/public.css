@@ -113,6 +113,12 @@
 .public-theme .me-account-id { white-space: normal; overflow-wrap: anywhere; color: var(--text-secondary); background: #f0f4f5; margin-top: 4px; padding: 4px 8px; line-height: 20px; }
 .public-theme .me-status { margin-top: 16px; line-height: 21px; align-items: flex-start; }
 .public-theme .me-status-dot { margin-top: 7px; }
+.public-theme .me-bind-guide { margin-top: 16px; padding: 14px 16px; }
+.public-theme .me-qr .me-bind-guide { margin-top: 0; }
+.public-theme .me-bind-guide .me-card-icon { width: 36px; height: 36px; }
+.public-theme .me-bind-guide-text { gap: 3px; }
+.public-theme .me-bind-guide-text strong { font-size: 14px; line-height: 22px; }
+.public-theme .me-bind-guide-text small { font-size: 13px; line-height: 20px; }
 .public-theme .me-quota { background: #f8fafb; border-radius: 10px; padding: 18px; margin-top: 20px; }
 .public-theme .me-quota-head { gap: 12px; }
 .public-theme .me-quota-value { flex-shrink: 0; }

@@ -97,9 +97,25 @@
               </button>
             </div>
 
-            <div class="me-status" :class="sessionActive && boundAccount?.enabled ? 'ok' : 'warn'">
+            <div
+              v-if="bindingUnavailable || boundAccount?.enabled === false || sessionActive"
+              class="me-status"
+              :class="sessionActive && boundAccount?.enabled ? 'ok' : 'warn'"
+            >
               <span class="me-status-dot" aria-hidden="true"></span>
               <span>{{ sessionStateLabel }}</span>
+            </div>
+            <div v-else class="me-bind-guide" role="status">
+              <span class="me-card-icon me-card-icon-wechat" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M8.5 4.5c-3.6 0-6.5 2.4-6.5 5.4 0 1.7.9 3.2 2.4 4.2l-.6 2 2.3-1.2c.8.2 1.6.3 2.4.3" />
+                  <path d="M15 9.5c-3.3 0-6 2.2-6 5s2.7 5 6 5c.7 0 1.4-.1 2-.3l2.1 1.1-.5-1.8c1.4-1 2.4-2.4 2.4-4 0-2.8-2.7-5-6-5z" />
+                </svg>
+              </span>
+              <span class="me-bind-guide-text">
+                <strong>{{ t('me.bind.waitingMessage') }}</strong>
+                <small>{{ t('me.bind.hintAfterScan') }}</small>
+              </span>
             </div>
 
             <div v-if="!bindingUnavailable" class="me-quota">
@@ -117,10 +133,24 @@
           </template>
 
           <div v-if="loginPending && !bindingUnavailable" class="me-qr">
-            <p class="me-qr-hint">{{ t(qrVisible ? 'portal.scanHint' : 'portal.qrLoading') }}</p>
-            <img v-if="qrDataUrl !== null" :src="qrDataUrl" alt="WeChat login QR" class="wechat-qr-image" />
-            <a v-if="qrUrl !== null" :href="qrUrl" rel="noreferrer" target="_blank">{{ t('portal.openQrLink') }}</a>
-            <p class="me-bind-hint">{{ t('me.bind.hintAfterScan') }}</p>
+            <div v-if="loginStatus === 'scanned'" class="me-bind-guide" role="status">
+              <span class="me-card-icon me-card-icon-wechat" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M8.5 4.5c-3.6 0-6.5 2.4-6.5 5.4 0 1.7.9 3.2 2.4 4.2l-.6 2 2.3-1.2c.8.2 1.6.3 2.4.3" />
+                  <path d="M15 9.5c-3.3 0-6 2.2-6 5s2.7 5 6 5c.7 0 1.4-.1 2-.3l2.1 1.1-.5-1.8c1.4-1 2.4-2.4 2.4-4 0-2.8-2.7-5-6-5z" />
+                </svg>
+              </span>
+              <span class="me-bind-guide-text">
+                <strong>{{ t('me.bind.confirmOnPhone') }}</strong>
+                <small>{{ t('me.bind.hintAfterScan') }}</small>
+              </span>
+            </div>
+            <template v-else>
+              <p class="me-qr-hint">{{ t(qrVisible ? 'portal.scanHint' : 'portal.qrLoading') }}</p>
+              <img v-if="qrDataUrl !== null" :src="qrDataUrl" alt="WeChat login QR" class="wechat-qr-image" />
+              <a v-if="qrUrl !== null" :href="qrUrl" rel="noreferrer" target="_blank">{{ t('portal.openQrLink') }}</a>
+              <p class="me-bind-hint">{{ t('me.bind.hintAfterScan') }}</p>
+            </template>
             <form v-if="loginStatus === 'need-code'" class="me-code-form" @submit.prevent="submitCode">
               <label>
                 <span>{{ t('portal.codeLabel') }}</span>

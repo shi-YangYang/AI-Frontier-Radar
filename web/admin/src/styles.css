@@ -3341,6 +3341,40 @@ thead th {
   width: 7px;
 }
 
+.me-bind-guide {
+  align-items: center;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius);
+  color: var(--warn);
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.me-qr .me-bind-guide {
+  margin-top: 0;
+}
+
+.me-bind-guide-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.me-bind-guide-text strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.me-bind-guide-text small {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .me-quota {
   background: #fafbfc;
   border: 1px solid var(--border);
