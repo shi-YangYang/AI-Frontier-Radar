@@ -118,7 +118,7 @@
 .public-theme .me-bind-guide-text { gap: 3px; }
 .public-theme .me-bind-guide-text strong { font-size: 14px; line-height: 22px; }
 .public-theme .me-bind-guide-text small { font-size: 13px; line-height: 20px; }
-.public-theme .me-quota { background: #f8fafb; border-radius: 10px; padding: 18px; margin-top: 20px; }
+.public-theme .me-quota { background: #f8fafb; border-radius: 10px; padding: 18px; margin-top: 12px; }
 .public-theme .me-quota-head { gap: 12px; }
 .public-theme .me-quota-value { flex-shrink: 0; }
 .public-theme .me-quota-value b { font-size: 28px; font-weight: 600; }

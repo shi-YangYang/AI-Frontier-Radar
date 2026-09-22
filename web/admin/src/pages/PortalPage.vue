@@ -105,6 +105,21 @@
               <span class="me-status-dot" aria-hidden="true"></span>
               <span>{{ sessionStateLabel }}</span>
             </div>
+            <div v-else-if="boundAccount?.sessionInvalidated === true" class="me-bind-guide danger" role="status">
+              <span class="me-card-icon me-card-icon-wechat" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M8.5 4.5c-3.6 0-6.5 2.4-6.5 5.4 0 1.7.9 3.2 2.4 4.2l-.6 2 2.3-1.2c.8.2 1.6.3 2.4.3" />
+                  <path d="M15 9.5c-3.3 0-6 2.2-6 5s2.7 5 6 5c.7 0 1.4-.1 2-.3l2.1 1.1-.5-1.8c1.4-1 2.4-2.4 2.4-4 0-2.8-2.7-5-6-5z" />
+                </svg>
+              </span>
+              <span class="me-bind-guide-text">
+                <strong>{{ t('me.bind.invalidated') }}</strong>
+                <small>{{ t('me.bind.invalidatedHint') }}</small>
+              </span>
+              <button class="me-link-button" type="button" :disabled="busy || bindingUnavailable || qrVisible" @click="startBind">
+                {{ t('portal.bindAction') }}
+              </button>
+            </div>
             <div v-else class="me-bind-guide" role="status">
               <span class="me-card-icon me-card-icon-wechat" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -569,8 +584,12 @@ const categoryOptions: Array<{ labelKey: MessageKey; value: UserPostCategory }> 
 const hourOptions = Array.from({ length: 24 }, (_, index) => index);
 const hasBinding = computed(() => (binding.value?.accounts.length ?? 0) > 0);
 const boundAccount = computed<MyWechatAccount | null>(() => binding.value?.accounts[0] ?? null);
+const sessionInvalidated = computed(() => boundAccount.value?.sessionInvalidated === true);
 const quotaLimit = computed(() => boundAccount.value?.sendLimit ?? 10);
-const quotaCount = computed(() => Math.min(boundAccount.value?.sendCount ?? 0, quotaLimit.value));
+// 会话已在其它环境作废后，旧会话的额度计数不再有意义；重新绑定后额度从 0 开始
+const quotaCount = computed(() =>
+  sessionInvalidated.value ? 0 : Math.min(boundAccount.value?.sendCount ?? 0, quotaLimit.value),
+);
 const quotaFull = computed(() => quotaCount.value >= quotaLimit.value);
 const quotaPercent = computed(() =>
   quotaLimit.value === 0 ? '0%' : `${Math.min(100, Math.round((quotaCount.value / quotaLimit.value) * 100))}%`,

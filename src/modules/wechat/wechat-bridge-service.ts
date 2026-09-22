@@ -30,6 +30,8 @@ export interface WechatAccount {
   accountId: string;
   baseUrl: string;
   hasContextToken?: boolean;
+  /** 会话已在其它环境重新绑定被作废（桥端 errcode=-14 检测结果） */
+  sessionInvalidated?: boolean;
   sendCount?: number;
   sendLimit?: number;
   tokenMasked: string;
