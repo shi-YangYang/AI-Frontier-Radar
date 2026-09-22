@@ -118,7 +118,7 @@ export const BUILT_IN_SOURCE_PACK_SEEDS: readonly SourcePackSeedDefinition[] = [
         displayName: 'PubMed 脑机接口检索',
         kind: 'feed',
         sourceType: 'rss',
-        sourceUrl: 'https://pubmed.ncbi.nlm.nih.gov/rss/search/brain-computer+interface/?limit=20',
+        sourceUrl: 'https://neurosciencenews.com/feed/',
       },
       { displayName: 'Neuralink', handle: 'Neuralink', kind: 'youtube' },
     ],
@@ -132,7 +132,7 @@ export const BUILT_IN_SOURCE_PACK_SEEDS: readonly SourcePackSeedDefinition[] = [
         displayName: 'TechCrunch Funding',
         kind: 'feed',
         sourceType: 'rss',
-        sourceUrl: 'https://techcrunch.com/category/funding/feed/',
+        sourceUrl: 'https://techcrunch.com/category/startups/feed/',
       },
       {
         displayName: 'TechCrunch Startups',

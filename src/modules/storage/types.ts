@@ -87,7 +87,17 @@ export interface XPostRawWithDeliveryEvents extends XPostRaw {
   deliveryEvents: DeliveryEvent[];
 }
 
+export interface XPostAuthorUserIdMatch {
+  /** 命中筛选的源账号 authorUserId 集合 */
+  in: string[];
+  /** 全部源账号 authorUserId 集合（用于识别无源账号的帖子） */
+  known: string[];
+  /** 将无源账号的帖子并入结果（来源缺失兜底） */
+  orUnmapped: boolean;
+}
+
 export interface XPostPageQuery {
+  authorUserIdMatch?: XPostAuthorUserIdMatch;
   authorUsername?: string;
   detectedFrom?: string;
   detectedTo?: string;

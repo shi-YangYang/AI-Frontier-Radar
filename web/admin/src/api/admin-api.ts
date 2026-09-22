@@ -1212,12 +1212,15 @@ export interface UserPostItem {
   isReply: boolean;
   isRepost: boolean;
   permalinkUrl: string;
+  platformCategory: string;
   postedAt: string;
   sourceDisplayName: string | null;
   sourceType: string;
   textContent: string;
   title: string | null;
 }
+
+export type UserPostCategory = 'all' | 'x' | 'youtube' | 'blog' | 'paper' | 'community';
 
 export interface UserPostsPage {
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
@@ -1228,6 +1231,7 @@ export async function listMyPosts(
   page = 1,
   pageSize = 18,
   query = '',
+  category: UserPostCategory = 'all',
 ): Promise<UserPostsPage> {
   const params = new URLSearchParams({
     page: String(page),
@@ -1236,6 +1240,10 @@ export async function listMyPosts(
 
   if (query.trim().length > 0) {
     params.set('query', query.trim());
+  }
+
+  if (category !== 'all') {
+    params.set('category', category);
   }
 
   return requestJson<UserPostsPage>(`/user/api/posts?${params.toString()}`);

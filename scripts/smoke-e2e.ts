@@ -2935,6 +2935,246 @@ async function main(): Promise<void> {
     assert(missBody.data.pagination.total === 0, 'search should return empty for no match');
     checks.push({ name: '用户端消息搜索（标题/正文，空结果）' });
 
+    const { watchAccount: arxivCategoryAccount } = await storage.watchAccounts.createIfAbsentBySource({
+      enabled: false,
+      sourceType: 'rss',
+      sourceUrl: 'https://export.arxiv.org/rss/cs.AI',
+    });
+    const { watchAccount: hnCategoryAccount } = await storage.watchAccounts.createIfAbsentBySource({
+      enabled: false,
+      sourceType: 'rss',
+      sourceUrl: 'https://hnrss.org/frontpage',
+    });
+    const { watchAccount: youtubeCategoryAccount } = await storage.watchAccounts.createIfAbsentBySource({
+      enabled: false,
+      sourceType: 'rss',
+      sourceUrl: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCsmokeCategory',
+    });
+    await storage.watchAccounts.update(arxivCategoryAccount.id, { xUserId: 'category-arxiv-uid' });
+    await storage.watchAccounts.update(hnCategoryAccount.id, { xUserId: 'category-hn-uid' });
+    await storage.watchAccounts.update(youtubeCategoryAccount.id, {
+      xUserId: 'category-youtube-uid',
+    });
+    const categorySeedAccount = await storage.watchAccounts.findByUsername(WATCH_USERNAME);
+    assert(categorySeedAccount !== null, 'category probe needs the seeded X account');
+    await prisma.xPostRaw.create({
+      data: {
+        authorUserId: categorySeedAccount.xUserId ?? WATCH_USER_ID,
+        authorUsername: WATCH_USERNAME,
+        createdAt: new Date().toISOString(),
+        detectedAt: new Date().toISOString(),
+        id: 'category-probe-x',
+        isReply: false,
+        isRepost: false,
+        permalinkUrl: 'https://example.com/category-probe-x',
+        postedAt: new Date().toISOString(),
+        rawPayloadJson: '{}',
+        textContent: '分类筛选探针：X 源',
+        title: '分类探针 X',
+        xPostId: '9000000000000000041',
+      },
+    });
+    await prisma.xPostRaw.create({
+      data: {
+        authorUserId: 'category-arxiv-uid',
+        authorUsername: 'arxiv-cs-ai',
+        createdAt: new Date().toISOString(),
+        detectedAt: new Date().toISOString(),
+        id: 'category-probe-arxiv',
+        isReply: false,
+        isRepost: false,
+        permalinkUrl: 'https://example.com/category-probe-arxiv',
+        postedAt: new Date().toISOString(),
+        rawPayloadJson: '{}',
+        textContent: '分类筛选探针：arXiv 论文源',
+        title: '分类探针 arXiv',
+        xPostId: '9000000000000000042',
+      },
+    });
+    await prisma.xPostRaw.create({
+      data: {
+        authorUserId: 'category-hn-uid',
+        authorUsername: 'hacker-news',
+        createdAt: new Date().toISOString(),
+        detectedAt: new Date().toISOString(),
+        id: 'category-probe-hn',
+        isReply: false,
+        isRepost: false,
+        permalinkUrl: 'https://example.com/category-probe-hn',
+        postedAt: new Date().toISOString(),
+        rawPayloadJson: '{}',
+        textContent: '分类筛选探针：Hacker News 社区源',
+        title: '分类探针 HN',
+        xPostId: '9000000000000000043',
+      },
+    });
+    await prisma.xPostRaw.create({
+      data: {
+        authorUserId: 'category-youtube-uid',
+        authorUsername: 'youtube-channel',
+        createdAt: new Date().toISOString(),
+        detectedAt: new Date().toISOString(),
+        id: 'category-probe-youtube',
+        isReply: false,
+        isRepost: false,
+        permalinkUrl: 'https://example.com/category-probe-youtube',
+        postedAt: new Date().toISOString(),
+        rawPayloadJson: '{}',
+        textContent: '分类筛选探针：YouTube 频道源',
+        title: '分类探针 YouTube',
+        xPostId: '9000000000000000044',
+      },
+    });
+    const categoryListResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: '/user/api/posts?page=1&pageSize=50',
+    });
+    assert(
+      categoryListResponse.statusCode === 200,
+      `category list returned ${categoryListResponse.statusCode}`,
+    );
+    const categoryListBody = categoryListResponse.json() as {
+      data: {
+        pagination: { total: number };
+        posts: Array<{ id: string; platformCategory: string }>;
+      };
+    };
+    const platformCategoryById = new Map(
+      categoryListBody.data.posts.map((post) => [post.id, post.platformCategory]),
+    );
+    assert(
+      platformCategoryById.get('category-probe-x') === 'x' &&
+        platformCategoryById.get('category-probe-arxiv') === 'paper' &&
+        platformCategoryById.get('category-probe-hn') === 'community' &&
+        platformCategoryById.get('category-probe-youtube') === 'youtube',
+      `posts should carry the platform category of their source account, got ${JSON.stringify(
+        [...platformCategoryById].filter(([id]) => id.startsWith('category-probe-')),
+      )}`,
+    );
+    const unmappedCategoryResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: `/user/api/posts?page=1&pageSize=5&query=${encodeURIComponent('探针标题')}`,
+    });
+    const unmappedCategoryBody = unmappedCategoryResponse.json() as {
+      data: { posts: Array<{ id: string; platformCategory: string }> };
+    };
+    assert(
+      unmappedCategoryBody.data.posts.length === 1 &&
+        unmappedCategoryBody.data.posts[0]?.id === 'posts-probe-1' &&
+        unmappedCategoryBody.data.posts[0]?.platformCategory === 'blog',
+      `posts without a source account should fall back to blog, got ${JSON.stringify(unmappedCategoryBody.data.posts)}`,
+    );
+    checks.push({ name: '用户端消息按来源平台归类（X/YouTube/论文/社区，缺源兜底 blog）' });
+
+    const categoryProbeUrl = (category: string): string =>
+      `/user/api/posts?page=1&pageSize=50${category.length > 0 ? `&category=${category}` : ''}`;
+    const paperCategoryResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: categoryProbeUrl('paper'),
+    });
+    const paperCategoryBody = paperCategoryResponse.json() as typeof categoryListBody;
+    assert(
+      paperCategoryResponse.statusCode === 200 &&
+        paperCategoryBody.data.pagination.total >= 1 &&
+        paperCategoryBody.data.pagination.totalPages === 1 &&
+        paperCategoryBody.data.posts.some((post) => post.id === 'category-probe-arxiv') &&
+        paperCategoryBody.data.posts.every((post) => post.platformCategory === 'paper'),
+      `category=paper should only return paper posts, got ${JSON.stringify(paperCategoryBody.data)}`,
+    );
+    const xCategoryResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: categoryProbeUrl('x'),
+    });
+    const xCategoryBody = xCategoryResponse.json() as typeof categoryListBody;
+    assert(
+      xCategoryResponse.statusCode === 200 &&
+        xCategoryBody.data.posts.some((post) => post.id === 'category-probe-x') &&
+        xCategoryBody.data.posts.every((post) => post.platformCategory === 'x') &&
+        !xCategoryBody.data.posts.some((post) =>
+          ['category-probe-arxiv', 'category-probe-hn', 'category-probe-youtube'].includes(post.id),
+        ),
+      `category=x should only return X source posts, got ${JSON.stringify(xCategoryBody.data)}`,
+    );
+    const communityCategoryResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: categoryProbeUrl('community'),
+    });
+    const communityCategoryBody = communityCategoryResponse.json() as typeof categoryListBody;
+    assert(
+      communityCategoryResponse.statusCode === 200 &&
+        communityCategoryBody.data.posts.some((post) => post.id === 'category-probe-hn') &&
+        communityCategoryBody.data.posts.every((post) => post.platformCategory === 'community'),
+      `category=community should only return community posts, got ${JSON.stringify(communityCategoryBody.data)}`,
+    );
+    const youtubeCategoryResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: categoryProbeUrl('youtube'),
+    });
+    const youtubeCategoryBody = youtubeCategoryResponse.json() as typeof categoryListBody;
+    assert(
+      youtubeCategoryResponse.statusCode === 200 &&
+        youtubeCategoryBody.data.posts.some((post) => post.id === 'category-probe-youtube') &&
+        youtubeCategoryBody.data.posts.every((post) => post.platformCategory === 'youtube'),
+      `category=youtube should only return YouTube feed posts, got ${JSON.stringify(youtubeCategoryBody.data)}`,
+    );
+    const blogCategoryResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: categoryProbeUrl('blog'),
+    });
+    const blogCategoryBody = blogCategoryResponse.json() as typeof categoryListBody;
+    assert(
+      blogCategoryResponse.statusCode === 200 &&
+        blogCategoryBody.data.posts.some((post) => post.id === 'posts-probe-1') &&
+        blogCategoryBody.data.posts.every((post) => post.platformCategory === 'blog') &&
+        !blogCategoryBody.data.posts.some((post) =>
+          ['category-probe-x', 'category-probe-arxiv', 'category-probe-hn', 'category-probe-youtube'].includes(post.id),
+        ),
+      `category=blog should include sourceless posts as blog fallback, got ${JSON.stringify(blogCategoryBody.data)}`,
+    );
+    const invalidCategoryResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: categoryProbeUrl('zzz-not-a-category'),
+    });
+    const invalidCategoryBody = invalidCategoryResponse.json() as typeof categoryListBody;
+    assert(
+      invalidCategoryResponse.statusCode === 200 &&
+        invalidCategoryBody.data.pagination.total === categoryListBody.data.pagination.total,
+      `invalid category should be ignored, got ${JSON.stringify(invalidCategoryBody.data.pagination)} vs ${JSON.stringify(categoryListBody.data.pagination)}`,
+    );
+    checks.push({ name: '用户端消息按分类服务端过滤（分页计数正确，非法分类忽略）' });
+
+    const keywordProbeUrl = `/user/api/posts?page=1&pageSize=50&query=${encodeURIComponent('分类探针')}`;
+    const keywordOnlyResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: keywordProbeUrl,
+    });
+    const keywordOnlyBody = keywordOnlyResponse.json() as typeof categoryListBody;
+    const keywordAndCategoryResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: `${keywordProbeUrl}&category=x`,
+    });
+    const keywordAndCategoryBody = keywordAndCategoryResponse.json() as typeof categoryListBody;
+    assert(
+      keywordOnlyBody.data.pagination.total === 4 &&
+        keywordAndCategoryBody.data.pagination.total === 1 &&
+        keywordAndCategoryBody.data.posts[0]?.id === 'category-probe-x',
+      `search + category should combine with AND (4 keyword posts -> 1 for category=x), got ${JSON.stringify({
+        keywordOnly: keywordOnlyBody.data.pagination,
+        keywordAndCategory: keywordAndCategoryBody.data,
+      })}`,
+    );
+    checks.push({ name: '分类与搜索叠加 AND（翻页由前端携带 category）' });
+
     const secondBindResponse = await rawInject({
       headers: { cookie: userCookie },
       method: 'POST',

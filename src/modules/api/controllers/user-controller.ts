@@ -1,5 +1,11 @@
 import { AuthValidationError, type AuthService } from '../../auth';
+import {
+  SOURCE_PLATFORM_CATEGORIES,
+  sourcePlatformCategory,
+  type SourcePlatformCategory,
+} from '../../../config/source-groups';
 import type { DeliveryTarget, StorageContext, User, UserRole } from '../../storage';
+import type { XPostPageQuery } from '../../storage/types';
 import {
   type WechatAccount,
   type WechatBindCoordinator,
@@ -556,6 +562,7 @@ export interface UserPostItem {
   isReply: boolean;
   isRepost: boolean;
   permalinkUrl: string;
+  platformCategory: SourcePlatformCategory;
   postedAt: string;
   sourceDisplayName: string | null;
   sourceType: string;
@@ -580,17 +587,43 @@ export async function listUserPosts(
     typeof record.query === 'string' && record.query.trim().length > 0
       ? record.query.trim()
       : undefined;
-  const filter = searchQuery === undefined ? {} : { query: searchQuery };
-  const total = await options.storage.xPosts.countAll(filter);
-  const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
-  const resolvedPage = totalPages === 0 ? 1 : Math.min(page, totalPages);
-  const [posts, watchAccounts] = await Promise.all([
-    options.storage.xPosts.listPage({ page: resolvedPage, pageSize, ...filter }),
-    options.storage.watchAccounts.listAll(),
-  ]);
+  const category = readPostCategory(record.category);
+  const filter: Partial<XPostPageQuery> = searchQuery === undefined ? {} : { query: searchQuery };
+  const watchAccounts = await options.storage.watchAccounts.listAll();
   const accountByAuthorUserId = new Map(
     watchAccounts.map((account) => [account.xUserId ?? '', account]),
   );
+
+  if (category !== undefined) {
+    const matchedUserIds = watchAccounts
+      .filter((account) => sourcePlatformCategory(account.sourceType, account.sourceUrl) === category)
+      .map((account) => account.xUserId)
+      .filter((xUserId): xUserId is string => xUserId !== null && xUserId.length > 0);
+    const orUnmapped = category === 'blog';
+
+    if (!orUnmapped && matchedUserIds.length === 0) {
+      return {
+        ok: true,
+        data: {
+          pagination: { page: 1, pageSize, total: 0, totalPages: 0 },
+          posts: [],
+        },
+      };
+    }
+
+    filter.authorUserIdMatch = {
+      in: matchedUserIds,
+      known: watchAccounts
+        .map((account) => account.xUserId)
+        .filter((xUserId): xUserId is string => xUserId !== null && xUserId.length > 0),
+      orUnmapped,
+    };
+  }
+
+  const total = await options.storage.xPosts.countAll(filter);
+  const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
+  const resolvedPage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+  const posts = await options.storage.xPosts.listPage({ page: resolvedPage, pageSize, ...filter });
 
   return {
     ok: true,
@@ -607,6 +640,10 @@ export async function listUserPosts(
           isReply: post.isReply,
           isRepost: post.isRepost,
           permalinkUrl: post.permalinkUrl,
+          platformCategory: sourcePlatformCategory(
+            account?.sourceType ?? '',
+            account?.sourceUrl ?? null,
+          ),
           postedAt: post.postedAt,
           sourceDisplayName: account?.displayName ?? null,
           sourceType: account?.sourceType ?? 'x',
@@ -618,10 +655,20 @@ export async function listUserPosts(
   };
 }
 
+function readPostCategory(value: unknown): SourcePlatformCategory | undefined {
+  if (typeof value !== 'string' || !(SOURCE_PLATFORM_CATEGORIES as readonly string[]).includes(value)) {
+    return undefined;
+  }
+
+  return value as SourcePlatformCategory;
+}
+
 function readPositiveInt(value: unknown, fallback: number): number {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+  const parsed = typeof value === 'string' ? Number(value) : value;
+
+  if (typeof parsed !== 'number' || !Number.isInteger(parsed) || parsed < 1) {
     return fallback;
   }
 
-  return value;
+  return parsed;
 }

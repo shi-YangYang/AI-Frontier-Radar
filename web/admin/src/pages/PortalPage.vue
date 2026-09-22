@@ -380,6 +380,22 @@
             </button>
           </form>
 
+          <div class="me-category-bar" role="radiogroup" :aria-label="t('me.posts.categoryLabel')">
+            <button
+              v-for="option in categoryOptions"
+              :key="option.value"
+              class="me-segment"
+              :class="{ on: selectedCategory === option.value }"
+              type="button"
+              role="radio"
+              :aria-checked="selectedCategory === option.value"
+              :disabled="postsLoading"
+              @click="selectCategory(option.value)"
+            >
+              {{ t(option.labelKey) }}
+            </button>
+          </div>
+
           <div v-if="posts.length === 0" class="me-empty me-messages-empty" role="status">
             <svg class="me-empty-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
               <rect x="7" y="10" width="34" height="28" rx="5" />
@@ -485,6 +501,7 @@ import {
   type MyWechatSource,
   type MyWechatSourcePack,
   type MyWechatSourcesMode,
+  type UserPostCategory,
   type UserPostItem,
 } from '../api/admin-api';
 import { signOut, useAuth } from '../auth';
@@ -527,6 +544,7 @@ const saveState = ref<'idle' | 'saving' | 'saved'>('idle');
 const expandedPostIds = ref(new Set<string>());
 const activeQuery = ref('');
 const searchInput = ref('');
+const selectedCategory = ref<UserPostCategory>('all');
 const selectedSourceIds = ref<string[]>([]);
 const selectedPackIds = ref<string[]>([]);
 const sourcesMode = ref<MyWechatSourcesMode>('all');
@@ -539,6 +557,14 @@ let disposed = false;
 const tabs: Array<{ key: PortalTabKey; labelKey: MessageKey }> = [
   { key: 'wechat', labelKey: 'me.nav.wechat' },
   { key: 'messages', labelKey: 'me.nav.messages' },
+];
+const categoryOptions: Array<{ labelKey: MessageKey; value: UserPostCategory }> = [
+  { labelKey: 'me.posts.category.all', value: 'all' },
+  { labelKey: 'me.posts.category.x', value: 'x' },
+  { labelKey: 'me.posts.category.youtube', value: 'youtube' },
+  { labelKey: 'me.posts.category.blog', value: 'blog' },
+  { labelKey: 'me.posts.category.paper', value: 'paper' },
+  { labelKey: 'me.posts.category.community', value: 'community' },
 ];
 const hourOptions = Array.from({ length: 24 }, (_, index) => index);
 const hasBinding = computed(() => (binding.value?.accounts.length ?? 0) > 0);
@@ -723,7 +749,12 @@ async function loadPosts(page: number): Promise<void> {
   postsFailed.value = false;
 
   try {
-    const result = await listMyPosts(page, postsPagination.value.pageSize, activeQuery.value);
+    const result = await listMyPosts(
+      page,
+      postsPagination.value.pageSize,
+      activeQuery.value,
+      selectedCategory.value,
+    );
 
     posts.value = result.posts;
     postsPagination.value = result.pagination;
@@ -733,6 +764,14 @@ async function loadPosts(page: number): Promise<void> {
   } finally {
     postsLoading.value = false;
   }
+}
+
+async function selectCategory(category: UserPostCategory): Promise<void> {
+  if (selectedCategory.value === category) return;
+
+  selectedCategory.value = category;
+  expandedPostIds.value = new Set();
+  await loadPosts(1);
 }
 
 function applySearch(): void {

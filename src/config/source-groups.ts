@@ -51,3 +51,51 @@ export const SOURCE_GROUPS: readonly SourceGroupDefinition[] = [
 export function findSourceGroup(id: string): SourceGroupDefinition | undefined {
   return SOURCE_GROUPS.find((group) => group.id === id);
 }
+
+export type SourcePlatformCategory = 'x' | 'youtube' | 'blog' | 'paper' | 'community';
+
+export const SOURCE_PLATFORM_CATEGORIES: readonly SourcePlatformCategory[] = [
+  'x',
+  'youtube',
+  'blog',
+  'paper',
+  'community',
+];
+
+export function sourcePlatformCategory(
+  sourceType: string,
+  sourceUrl: string | null,
+): SourcePlatformCategory {
+  if (sourceType === 'x') {
+    return 'x';
+  }
+
+  if (sourceType === 'github') {
+    return 'community';
+  }
+
+  if (sourceType === 'hf_papers') {
+    return 'paper';
+  }
+
+  const url = (sourceUrl ?? '').toLowerCase();
+
+  if (url.includes('youtube.com/feeds')) {
+    return 'youtube';
+  }
+
+  if (url.includes('arxiv.org') || url.includes('pubmed.ncbi.nlm.nih.gov')) {
+    return 'paper';
+  }
+
+  if (
+    url.includes('hnrss.org') ||
+    url.includes('reddit.com') ||
+    url.includes('producthunt.com') ||
+    url.includes('techmeme.com')
+  ) {
+    return 'community';
+  }
+
+  return 'blog';
+}
