@@ -2176,7 +2176,7 @@ async function main(): Promise<void> {
     );
     checks.push({ name: '无发送历史的微信号：删除时移除通道且不影响其他微信' });
 
-    // History-bearing channels must be retired, not erased; rebinding the same ID must also work.
+    // Deleting a channel physically removes its row; delivery history stays in delivery_events keyed by targetKey.
     fakeWechatAccounts.push({
       accountId: 'wechat-b@im.bot',
       baseUrl: 'https://ilinkai.weixin.qq.com',
@@ -2186,25 +2186,23 @@ async function main(): Promise<void> {
     });
     const restoredWechatResponse = await app.inject({ method: 'GET', url: '/admin/api/wechat/status' });
     assert(restoredWechatResponse.statusCode === 200, `wechat restore failed: ${restoredWechatResponse.body}`);
-    const archivedWechatTarget = await storage.deliveryTargets.findByTargetKey('wechat:wechat-b@im.bot');
-    assert(archivedWechatTarget !== null, 'rebound wechat target should exist');
+    const historyWechatTarget = await storage.deliveryTargets.findByTargetKey('wechat:wechat-b@im.bot');
+    assert(historyWechatTarget !== null, 'rebound wechat target should exist');
     const sentWechatEvent = await storage.deliveryEvents.create({
       status: 'sent', sentAt: new Date().toISOString(), attemptCount: 1,
-      targetKey: archivedWechatTarget.targetKey, xPostId: routedPost.xPostId,
+      targetKey: historyWechatTarget.targetKey, xPostId: routedPost.xPostId,
     });
     assert(nonMatchingRepoPost !== null, 'wechat pending fixture requires a stored post');
     const pendingWechatEvent = await storage.deliveryEvents.create({
-      status: 'pending', targetKey: archivedWechatTarget.targetKey, xPostId: nonMatchingRepoPost.xPostId,
+      status: 'pending', targetKey: historyWechatTarget.targetKey, xPostId: nonMatchingRepoPost.xPostId,
     });
     const deleteWithHistoryResponse = await app.inject({ method: 'DELETE', url: '/admin/api/wechat/accounts/wechat-b@im.bot' });
     assert(deleteWithHistoryResponse.statusCode === 200, `wechat delete with history failed: ${deleteWithHistoryResponse.body}`);
-    const retiredWechatTarget = await storage.deliveryTargets.findById(archivedWechatTarget.id);
-    assert(retiredWechatTarget !== null && !retiredWechatTarget.enabled && retiredWechatTarget.webhookUrl === '', 'history-bearing wechat channel must be disabled and hidden');
-    assert(!(await storage.deliveryTargets.listAll()).some(target => target.id === archivedWechatTarget.id), 'retired wechat channel must disappear from active channel lists');
+    assert(await storage.deliveryTargets.findById(historyWechatTarget.id) === null, 'history-bearing wechat channel must be physically removed');
     assert((await storage.deliveryEvents.findById(sentWechatEvent.id))?.status === 'sent', 'deleting a binding must preserve sent history');
     assert((await storage.deliveryEvents.findById(pendingWechatEvent.id))?.status === 'dead', 'deleting a binding must stop its pending deliveries');
     assert((await storage.deliveryTargets.findById(wechatTargetA.id))?.enabled === true, 'deleting one binding must leave other bindings enabled');
-    checks.push({ name: '有发送历史的微信号：停用旧通道、终止待发送任务、保留历史' });
+    checks.push({ name: '有发送历史的微信号：物理删除通道、终止待发送任务、保留历史' });
 
     if (wechatTargetAAfterDelete !== null) {
       await storage.deliveryTargets.delete(wechatTargetAAfterDelete.id);
@@ -2217,10 +2215,16 @@ async function main(): Promise<void> {
     });
     const rebindWithHistoryResponse = await app.inject({ method: 'GET', url: '/admin/api/wechat/status' });
     assert(rebindWithHistoryResponse.statusCode === 200, `wechat rebind with history failed: ${rebindWithHistoryResponse.body}`);
-    const reboundWechatTarget = await storage.deliveryTargets.findByTargetKey(archivedWechatTarget.targetKey);
-    assert(reboundWechatTarget?.id === archivedWechatTarget.id && reboundWechatTarget.enabled && reboundWechatTarget.webhookUrl !== '', 'rebinding a historical channel should restore it without duplicate keys');
+    const reboundWechatTarget = await storage.deliveryTargets.findByTargetKey(historyWechatTarget.targetKey);
+    assert(
+      reboundWechatTarget !== null &&
+        reboundWechatTarget.id !== historyWechatTarget.id &&
+        reboundWechatTarget.enabled &&
+        reboundWechatTarget.webhookUrl !== '',
+      'rebinding a deleted channel must create a fresh enabled row for the same targetKey',
+    );
     assert((await storage.deliveryEvents.findById(sentWechatEvent.id))?.status === 'sent' && (await storage.deliveryEvents.findById(pendingWechatEvent.id))?.status === 'dead', 'rebinding must not replay historical or cancelled deliveries');
-    checks.push({ name: '重新绑定已有历史的微信通道：恢复连接且不重发旧任务' });
+    checks.push({ name: '重新绑定已删除的微信通道：按原 key 新建通道且不重发旧任务' });
 
     const feedXmlResponse = await app.inject({ method: 'GET', url: '/feed.xml' });
     assert(feedXmlResponse.statusCode === 200, `feed.xml returned ${feedXmlResponse.statusCode}`);

@@ -86,30 +86,7 @@ export class DeliveryTargetRepository {
       },
     });
 
-    const deliveryEventCount = await this.prisma.deliveryEvent.count({
-      where: {
-        targetKey: deliveryTarget.targetKey,
-      },
-    });
-
-    if (deliveryEventCount === 0) {
-      const result = await this.prisma.deliveryTarget.deleteMany({
-        where: { id },
-      });
-
-      return {
-        deadEventsCount: deadEventsResult.count,
-        deleted: result.count > 0,
-      };
-    }
-
-    const result = await this.prisma.deliveryTarget.updateMany({
-      data: {
-        displayName: `[deleted] ${deliveryTarget.displayName}`,
-        enabled: false,
-        updatedAt: createTimestamp(),
-        webhookUrl: '',
-      },
+    const result = await this.prisma.deliveryTarget.deleteMany({
       where: { id },
     });
 

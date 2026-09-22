@@ -26,6 +26,8 @@ export async function syncWechatDeliveryTargets(
   const accountIds = new Set(options.accounts.map((account) => account.accountId));
 
   // Retire old channels and their queued deliveries before publishing replacement channels.
+  // delete() physically removes the row; rebinding the same account later creates a fresh row
+  // with the same targetKey, so delivery history (keyed by targetKey) naturally continues.
   for (const target of wechatTargets) {
     const accountId = target.config.accountId;
     if (accountId === undefined || accountId.length === 0) continue;
@@ -57,19 +59,6 @@ export async function syncWechatDeliveryTargets(
         webhookUrl,
       });
       result.created += 1;
-      continue;
-    }
-
-    // Deleted channels can remain for delivery history; reuse their unique key on a confirmed return.
-    if (existing.webhookUrl === '') {
-      await options.deliveryTargets.update(existing.id, {
-        config,
-        displayName,
-        enabled: true,
-        ownerUserId: ownerUserId ?? null,
-        webhookUrl,
-      });
-      result.updated += 1;
       continue;
     }
 

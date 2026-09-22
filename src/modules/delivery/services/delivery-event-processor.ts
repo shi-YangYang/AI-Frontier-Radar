@@ -67,10 +67,18 @@ export class DeliveryEventProcessor {
       const target = await this.options.storage.deliveryTargets.findByTargetKey(claimedEvent.targetKey);
 
       if (target === null) {
-        return this.recordFailure(claimedEvent, {
-          message: `Delivery target ${claimedEvent.targetKey} was not found.`,
-          retryable: false,
-        });
+        // 通道已物理删除：不保留作废记录，直接删除事件并记日志说明原因。
+        await this.options.storage.deliveryEvents.delete(claimedEvent.id);
+        this.options.logger?.info?.(
+          { targetKey: claimedEvent.targetKey },
+          '投递通道已被删除，丢弃该通道残留的投递事件',
+        );
+
+        return {
+          eventId: claimedEvent.id,
+          reason: 'delivery target was deleted',
+          status: 'not_found',
+        };
       }
 
       if (!target.enabled) {

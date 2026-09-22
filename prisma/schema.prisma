@@ -76,17 +76,16 @@ model XPostRaw {
 }
 
 model DeliveryTarget {
-  id             String          @id
-  targetKey      String          @unique @map("target_key")
-  channelType    String          @map("channel_type")
-  displayName    String          @map("display_name")
-  webhookUrl     String          @map("webhook_url")
-  configJson     String          @default("{}") @map("config_json")
-  ownerUserId    String?         @map("owner_user_id")
-  enabled        Boolean         @default(true)
-  createdAt      String          @map("created_at")
-  updatedAt      String          @map("updated_at")
-  deliveryEvents DeliveryEvent[]
+  id          String @id
+  targetKey   String @unique @map("target_key")
+  channelType String @map("channel_type")
+  displayName String @map("display_name")
+  webhookUrl  String @map("webhook_url")
+  configJson  String @default("{}") @map("config_json")
+  ownerUserId String? @map("owner_user_id")
+  enabled     Boolean @default(true)
+  createdAt   String @map("created_at")
+  updatedAt   String @map("updated_at")
 
   @@index([enabled])
   @@map("delivery_targets")
@@ -112,10 +111,9 @@ model DeliveryEvent {
   lastError      String?        @map("last_error")
   lockedAt       String?        @map("locked_at")
   sentAt         String?        @map("sent_at")
-  createdAt      String         @map("created_at")
-  updatedAt      String         @map("updated_at")
-  deliveryTarget DeliveryTarget @relation(fields: [targetKey], references: [targetKey], onUpdate: Cascade)
-  xPost          XPostRaw       @relation(fields: [xPostId], references: [xPostId], onUpdate: Cascade)
+  createdAt   String  @map("created_at")
+  updatedAt   String  @map("updated_at")
+  xPost       XPostRaw @relation(fields: [xPostId], references: [xPostId], onUpdate: Cascade)
 
   @@unique([xPostId, targetKey])
   @@index([status, nextRetryAt])
