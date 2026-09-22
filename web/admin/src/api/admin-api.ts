@@ -1267,6 +1267,7 @@ export interface MyWechatAccount {
   sendCount: number;
   sendLimit: number;
   sessionActive: boolean;
+  sessionInvalidated?: boolean;
   sourceIds: string[];
   userId?: string;
 }

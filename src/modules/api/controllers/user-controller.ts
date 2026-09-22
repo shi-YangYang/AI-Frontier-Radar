@@ -114,6 +114,7 @@ export async function getUserWechatBinding(
       sendCount: number;
       sendLimit: number;
       sessionActive: boolean;
+      sessionInvalidated: boolean;
       sourceIds: string[];
       userId?: string;
     }>;
@@ -170,6 +171,7 @@ export async function getUserWechatBinding(
         sendLimit: accountById.get(target.config.accountId ?? '')?.sendLimit ?? 10,
         sessionActive:
           accountById.get(target.config.accountId ?? '')?.hasContextToken === true,
+        sessionInvalidated: accountById.get(target.config.accountId ?? '')?.sessionInvalidated === true,
         sourceIds: target.config.sourceIds ?? [],
         ...(target.config.target === undefined ? {} : { userId: target.config.target }),
       })),

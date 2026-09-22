@@ -3358,6 +3358,17 @@ thead th {
   margin-top: 0;
 }
 
+.me-bind-guide.danger {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+
+.me-bind-guide .me-link-button {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .me-bind-guide-text {
   display: flex;
   flex-direction: column;

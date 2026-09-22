@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { LoginSessions } from './login-sessions.mjs';
 import { pruneStaleWechatBindings, saveWechatBinding } from './account-bindings.mjs';
+import { isSessionInvalidated } from './session-health.mjs';
 
 const bridgeDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const stateDir = process.env.OPENCLAW_STATE_DIR?.trim() || path.join(bridgeDir, '.state');
@@ -44,14 +45,34 @@ function readContextTokens(accountId) {
   }
 }
 
+// 会话被平台作废（errcode=-14）后在 tokens 文件里留下显式标记：文件存在但只有该键，
+// 既让 readContextTokens 回落为空（hasContextToken=false），也让 sendText 能区分
+// 「曾被判失效」与「新账号从未登记会话」（后者不拒绝发送）。
+const INVALIDATED_CONTEXT_KEY = '__invalidated__';
+
+function markContextTokensInvalidated(accountId) {
+  fs.mkdirSync(path.dirname(resolveContextTokensPath(accountId)), { recursive: true });
+  fs.writeFileSync(
+    resolveContextTokensPath(accountId),
+    JSON.stringify({ [INVALIDATED_CONTEXT_KEY]: true }),
+    'utf-8',
+  );
+}
+
+function isContextTokensInvalidated(accountId) {
+  return readContextTokens(accountId)[INVALIDATED_CONTEXT_KEY] === true;
+}
+
 function saveContextToken(accountId, userId, token) {
   if (typeof token !== 'string' || token.length === 0) {
     return;
   }
 
   const tokens = readContextTokens(accountId);
+  const wasInvalidated = tokens[INVALIDATED_CONTEXT_KEY] === true;
+  delete tokens[INVALIDATED_CONTEXT_KEY];
 
-  if (tokens[userId] === token) {
+  if (!wasInvalidated && tokens[userId] === token) {
     return;
   }
 
@@ -230,10 +251,11 @@ function listAccounts(plugin) {
     return {
       accountId,
       baseUrl: account.baseUrl ?? plugin.accounts.DEFAULT_BASE_URL,
-      contextUserIds: Object.keys(tokens),
+      contextUserIds: Object.keys(tokens).filter((key) => key !== INVALIDATED_CONTEXT_KEY),
       tokenMasked: maskToken(account.token),
       userId,
       ...(userId === null ? {} : { hasContextToken: typeof tokens[userId] === 'string' }),
+      sessionInvalidated: isContextTokensInvalidated(accountId),
       sendCount: counterActive ? counter.count : 0,
       sendLimit: SEND_QUOTA_LIMIT,
     };
@@ -355,6 +377,13 @@ async function sendText(plugin, options) {
 
   const contextToken = resolveContextToken(resolved.accountId, target);
 
+  // 「从未登记会话」的新账号（无 tokens 文件）仍走原路径；只有被 -14 判定失效过
+  // （tokens 文件带 invalidated 标记）才拒绝发送，错误信息需命中主服务的
+  // WECHAT_SESSION_EXPIRED 识别模式（尚未登录）并映射 503。
+  if (isContextTokensInvalidated(resolved.accountId)) {
+    fail('微信会话已失效，尚未登录，请重新扫码绑定。');
+  }
+
   const counter = readSendCounter(resolved.accountId, target);
   const counterStartedMs = counter === undefined ? 0 : Date.parse(counter.windowStartedAt);
   const counterActive =
@@ -451,6 +480,8 @@ async function commandServe(plugin, args) {
   const loginSessions = new LoginSessions(plugin.accounts, { onRemoveAccount: clearBridgeAccountState });
 
   async function watchAccount(accountId) {
+    let lastErrcodeWarned;
+
     while (!watchAbort) {
       const account = plugin.accounts.loadWeixinAccount(accountId);
 
@@ -474,6 +505,26 @@ async function commandServe(plugin, args) {
         // A long poll started before rebinding must not recreate the removed session's files.
         if (!plugin.accounts.listIndexedWeixinAccountIds().includes(accountId) ||
             plugin.accounts.loadWeixinAccount(accountId)?.token !== account.token) return;
+
+        // 平台作废会话（同号在其它环境重新扫码）：清掉本地会话凭证并停止该账号监听。
+        // 账号文件保留，重新扫码后 saveWechatBinding 复用并重新拾起监听。
+        // 返回前停 60 秒，避免 watchTargets 每 5 秒重新拾起造成对平台的热轮询。
+        if (isSessionInvalidated(response)) {
+          markContextTokensInvalidated(accountId);
+          log(`会话已在其它环境重新绑定，本地会话已失效：${accountId}（请重新扫码绑定）`);
+          await new Promise((resolve) => setTimeout(resolve, 60_000));
+          return;
+        }
+
+        if (typeof response.errcode === 'number' && response.errcode !== 0 &&
+            lastErrcodeWarned !== response.errcode) {
+          lastErrcodeWarned = response.errcode;
+          log(
+            `账号 ${accountId} 轮询返回异常（errcode=${response.errcode}${
+              typeof response.errmsg === 'string' ? `：${response.errmsg}` : ''
+            }），继续监听`,
+          );
+        }
 
         if (typeof response.get_updates_buf === 'string' && response.get_updates_buf.length > 0) {
           plugin.syncBuf.saveGetUpdatesBuf(syncBufPath, response.get_updates_buf);

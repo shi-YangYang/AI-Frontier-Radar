@@ -14,6 +14,9 @@ import type { WechatLoginState } from '../src/modules/wechat';
 import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, YoutubeChannelResolveError, createAi2BlogSourceProvider, createAnthropicNewsSourceProvider, createGithubTrendingSourceProvider, createHfDailyPapersSourceProvider, createMoonshotBlogSourceProvider, createRssSourceProvider, createSourceProviderRegistry, createSubscriptionRuleMatcher, createXSourceProvider, normalizeMetaBlogRawEntries, parseAi2BlogHtml, parseMoonshotBlogHtml, parseXaiNewsHtml, resolveYoutubeChannel, runPollingJob } from '../src/modules/polling';
 import { createV1TextMessageFormatter, isWithinQuietHours, runDeliveryWorkerJob } from '../src/modules/delivery';
 import { createWechatBridgeSender } from '../src/modules/delivery/channel';
+// 微信桥是独立 fork 的 .mjs 子进程，smoke 无法 stub 其内部 fetch；会话失效判定
+// 以导出的纯函数直接测（见 spec-030）。
+import { isSessionInvalidated, SESSION_TIMEOUT_ERRCODE } from '../wechat-bridge/src/session-health.mjs';
 import { createRuntimeScheduler, createRuntimeSourceProviders } from '../src/modules/scheduler';
 import { createPrismaClient, createRuntimeSettingsService, createStorage, seedSourcePacks } from '../src/modules/storage';
 import { SOURCE_GROUPS } from '../src/config/source-groups';
@@ -3833,6 +3836,42 @@ async function main(): Promise<void> {
       `expired wechat session must fail fast without retry, got ${JSON.stringify(expiredResult)}`,
     );
     checks.push({ name: '微信会话失效判定为不可重试（避免烧掉重试额度）' });
+
+    assert(
+      isSessionInvalidated({ errcode: SESSION_TIMEOUT_ERRCODE, errmsg: 'session timeout' }) === true,
+      'errcode=-14 should be detected as session invalidation',
+    );
+    assert(
+      isSessionInvalidated({ errcode: 0, msgs: [] }) === false &&
+        isSessionInvalidated({ get_updates_buf: '' }) === false &&
+        isSessionInvalidated({ errcode: 5 }) === false &&
+        isSessionInvalidated(null) === false &&
+        isSessionInvalidated(undefined) === false &&
+        isSessionInvalidated('errcode=-14') === false,
+      'only exact errcode=-14 should count as session invalidation',
+    );
+    checks.push({ name: '微信桥轮询会话作废判定：仅 errcode=-14 命中（session-health 纯函数）' });
+
+    const invalidatedSender = createWechatBridgeSender({
+      fetchImplementation: async () =>
+        new Response(JSON.stringify({ error: '微信会话已失效，尚未登录，请重新扫码绑定。', ok: false }), {
+          headers: { 'content-type': 'application/json' },
+          status: 503,
+        }),
+    });
+    const invalidatedResult = await invalidatedSender.send({
+      config: {},
+      message: { author: 't', postedAt: new Date().toISOString(), text: 't', url: 'https://e.com' },
+      targetKey: wechatTargetKey,
+      webhookUrl: 'http://127.0.0.1:3991/send',
+    });
+    assert(
+      invalidatedResult.ok === false &&
+        invalidatedResult.error.code === 'WECHAT_SESSION_EXPIRED' &&
+        invalidatedResult.error.retryable === false,
+      `bridge 503 session-invalidated message must map to non-retryable WECHAT_SESSION_EXPIRED, got ${JSON.stringify(invalidatedResult)}`,
+    );
+    checks.push({ name: '桥 503「尚未登录」错误映射为不可重试的 WECHAT_SESSION_EXPIRED' });
 
     const selfDeleteResponse = await app.inject({
       method: 'DELETE',
