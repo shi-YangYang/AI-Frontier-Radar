@@ -129,12 +129,6 @@ export const BUILT_IN_SOURCE_PACK_SEEDS: readonly SourcePackSeedDefinition[] = [
     name: '融资包',
     sources: [
       {
-        displayName: 'TechCrunch Funding',
-        kind: 'feed',
-        sourceType: 'rss',
-        sourceUrl: 'https://techcrunch.com/category/startups/feed/',
-      },
-      {
         displayName: 'TechCrunch Startups',
         kind: 'feed',
         sourceType: 'rss',

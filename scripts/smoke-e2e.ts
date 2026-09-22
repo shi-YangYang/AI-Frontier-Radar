@@ -480,7 +480,7 @@ async function main(): Promise<void> {
           packMemberCount(packsAfterFailSeed, 'AI 包') === 24 &&
           packMemberCount(packsAfterFailSeed, '机器人包') === 6 &&
           packMemberCount(packsAfterFailSeed, '脑机包') === 3 &&
-          packMemberCount(packsAfterFailSeed, '融资包') === 7,
+          packMemberCount(packsAfterFailSeed, '融资包') === 6,
         `packs should be created with partial members when all Youtube resolutions fail, got ${JSON.stringify(
           packsAfterFailSeed.map((pack) => [pack.name, pack.memberSourceIds.length]),
         )}`,
@@ -529,7 +529,7 @@ async function main(): Promise<void> {
         packMemberCount(packsAfterRetry, 'AI 包') === 27 &&
           packMemberCount(packsAfterRetry, '机器人包') === 8 &&
           packMemberCount(packsAfterRetry, '脑机包') === 4 &&
-          packMemberCount(packsAfterRetry, '融资包') === 7,
+          packMemberCount(packsAfterRetry, '融资包') === 6,
         `resolved Youtube feeds should be backfilled into the existing built-in packs, got ${JSON.stringify(
           packsAfterRetry.map((pack) => [pack.name, pack.memberSourceIds.length]),
         )}`,
