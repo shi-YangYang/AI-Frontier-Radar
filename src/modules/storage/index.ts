@@ -4,20 +4,15 @@ export { AppSettingRepository } from './app-setting-repository';
 export { DeliveryEventRepository } from './delivery-event-repository';
 export { DeliveryTargetRepository } from './delivery-target-repository';
 export { PollRunRepository } from './poll-run-repository';
+export { SourcePackRepository } from './source-pack-repository';
+export { seedSourcePacks } from './source-pack-seed';
+export type { SourcePackSeedResult } from './source-pack-seed';
 export {
   createRuntimeSettingsService,
   previewSecretUrl,
   RuntimeSettingsService,
 } from './runtime-settings-service';
 export { WatchAccountRepository } from './watch-account-repository';
-export {
-  applySourceGroup,
-  getSourceGroupStatuses,
-} from './source-group-service';
-export type {
-  SourceGroupApplyResult,
-  SourceGroupStatus,
-} from './source-group-service';
 export {
   createSubscriptionRuleService,
   SubscriptionRuleService,
@@ -45,6 +40,7 @@ export type {
   CreateDeliveryEventInput,
   CreateDeliveryTargetInput,
   CreatePollRunInput,
+  CreateSourcePackInput,
   CreateUserInput,
   CreateWatchAccountInput,
   CreateXPostRawInput,
@@ -55,10 +51,13 @@ export type {
   DeliveryTarget,
   PollRun,
   PollRunStatus,
+  SourcePack,
+  SourcePackWithMembers,
   UpdateAppSettingInput,
   UpdateDeliveryEventInput,
   UpdateDeliveryTargetInput,
   UpdatePollRunInput,
+  UpdateSourcePackInput,
   UpdateWatchAccountInput,
   User,
   UserRole,

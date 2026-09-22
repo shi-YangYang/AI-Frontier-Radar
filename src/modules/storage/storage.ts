@@ -7,6 +7,8 @@ import { DeliveryTargetRepository } from './delivery-target-repository';
 import { PollRunRepository } from './poll-run-repository';
 import { createPrismaClient, ensureSqliteDirectory } from './prisma-client';
 import { runPrismaMigrateDeploy } from './prisma-migrate';
+import { SourcePackRepository } from './source-pack-repository';
+import { seedSourcePacks } from './source-pack-seed';
 import type { WatchAccountsSourceConfig } from '../../shared/config/types';
 import type { DefaultDeliveryTargetInput } from './types';
 import { WatchAccountRepository } from './watch-account-repository';
@@ -22,6 +24,7 @@ export interface StorageContext {
   deliveryTargets: DeliveryTargetRepository;
   initialize(): Promise<void>;
   pollRuns: PollRunRepository;
+  sourcePacks: SourcePackRepository;
   userSessions: UserSessionRepository;
   users: UserRepository;
   watchAccounts: WatchAccountRepository;
@@ -40,6 +43,7 @@ class PrismaStorageContext implements StorageContext {
   public readonly deliveryEvents: DeliveryEventRepository;
   public readonly deliveryTargets: DeliveryTargetRepository;
   public readonly pollRuns: PollRunRepository;
+  public readonly sourcePacks: SourcePackRepository;
   public readonly userSessions: UserSessionRepository;
   public readonly users: UserRepository;
   public readonly watchAccounts: WatchAccountRepository;
@@ -56,6 +60,7 @@ class PrismaStorageContext implements StorageContext {
     this.deliveryTargets = new DeliveryTargetRepository(this.prisma);
     this.deliveryEvents = new DeliveryEventRepository(this.prisma);
     this.pollRuns = new PollRunRepository(this.prisma);
+    this.sourcePacks = new SourcePackRepository(this.prisma);
     this.users = new UserRepository(this.prisma);
     this.userSessions = new UserSessionRepository(this.prisma);
   }

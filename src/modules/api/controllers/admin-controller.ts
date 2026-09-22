@@ -56,12 +56,6 @@ import {
 } from '../../maintenance';
 import { sharedLogBuffer, type LogBufferEntry } from '../../../lib/logger';
 import { type WechatAccount, type WechatBindCoordinator, type WechatBridgeService, type WechatLoginState } from '../../wechat';
-import { SOURCE_GROUPS, findSourceGroup } from '../../../config/source-groups';
-import {
-  applySourceGroup,
-  getSourceGroupStatuses,
-  type SourceGroupStatus,
-} from '../../storage';
 import { normalizeXUsername } from '../../storage/watch-account-repository';
 
 export type AdminWatchAccountValidationInput =
@@ -1117,38 +1111,330 @@ function requireWechatBridge(options: AdminControllerOptions): WechatBridgeServi
   return service;
 }
 
-export async function getAdminSourceGroups(
+export async function getAdminSourcePacks(
   options: AdminControllerOptions,
-): Promise<{ ok: true; data: { groups: SourceGroupStatus[] } }> {
-  const groups = await getSourceGroupStatuses(options.storage.watchAccounts, SOURCE_GROUPS);
-
-  return {
-    ok: true,
-    data: { groups },
-  };
-}
-
-export async function applyAdminSourceGroup(
-  params: unknown,
-  options: AdminControllerOptions,
-): Promise<{ ok: true; data: { created: number; existing: number; group: string } }> {
-  const id = readIdParam(params);
-  const group = findSourceGroup(id);
-
-  if (group === undefined) {
-    throw new AdminApiError(404, 'NOT_FOUND', `监听组合不存在：${id}`);
-  }
-
-  const result = await applySourceGroup(options.storage.watchAccounts, group);
+): Promise<{ ok: true; data: { packs: AdminSourcePackView[] } }> {
+  const [packs, watchAccounts, deliveryTargets] = await Promise.all([
+    options.storage.sourcePacks.listAll(),
+    options.storage.watchAccounts.listAll(),
+    options.storage.deliveryTargets.listAll(),
+  ]);
+  const accountById = new Map(watchAccounts.map((account) => [account.id, account]));
+  const selectionCounts = countSourcePackSelections(deliveryTargets, packs.map((pack) => pack.id));
 
   return {
     ok: true,
     data: {
-      created: result.created,
-      existing: result.existing,
-      group: group.id,
+      packs: packs.map((pack) => ({
+        ...toAdminSourcePackView(pack, accountById),
+        selectedByUsers: selectionCounts.get(pack.id) ?? 0,
+      })),
     },
   };
+}
+
+export async function createAdminSourcePack(
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { sourcePack: AdminSourcePackView } }> {
+  const input = readSourcePackBody(body, { requireName: true });
+
+  const { name, ...restInput } = input;
+
+  if (name === undefined) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'name 不能为空。');
+  }
+
+  await assertSourcePackNameAvailable(options, name);
+  await assertSourcePackIdsExist(options, input);
+
+  const created = await options.storage.sourcePacks.create({ ...restInput, name });
+
+  return {
+    ok: true,
+    data: {
+      sourcePack: {
+        ...(await toAdminSourcePackViewById(options, created)),
+        selectedByUsers: 0,
+      },
+    },
+  };
+}
+
+export async function updateAdminSourcePack(
+  params: unknown,
+  body: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { sourcePack: AdminSourcePackView } }> {
+  const id = readIdParam(params);
+  const input = readSourcePackBody(body, { requireName: false });
+
+  if (input.name !== undefined) {
+    const existing = await options.storage.sourcePacks.findByName(input.name);
+
+    if (existing !== null && existing.id !== id) {
+      throw new AdminApiError(
+        409,
+        'SOURCE_PACK_NAME_TAKEN',
+        `主题包名称已存在：${input.name}`,
+      );
+    }
+  }
+
+  await assertSourcePackIdsExist(options, input);
+
+  const updated = await options.storage.sourcePacks.update(id, input);
+
+  if (updated === null) {
+    throw new AdminApiError(404, 'NOT_FOUND', `主题包不存在：${id}`);
+  }
+
+  return {
+    ok: true,
+    data: {
+      sourcePack: {
+        ...(await toAdminSourcePackViewById(options, updated)),
+        selectedByUsers: await countSourcePackSelection(
+          options,
+          updated.id,
+        ),
+      },
+    },
+  };
+}
+
+export async function deleteAdminSourcePack(
+  params: unknown,
+  options: AdminControllerOptions,
+): Promise<{ ok: true; data: { affectedUsers: number; deleted: true } }> {
+  const id = readIdParam(params);
+  const existing = await options.storage.sourcePacks.findById(id);
+
+  if (existing === null) {
+    throw new AdminApiError(404, 'NOT_FOUND', `主题包不存在：${id}`);
+  }
+
+  const deleted = await options.storage.sourcePacks.delete(id);
+
+  if (!deleted) {
+    throw new AdminApiError(404, 'NOT_FOUND', `主题包不存在：${id}`);
+  }
+
+  const affectedUsers = await options.storage.deliveryTargets.removePackIdFromTargets(id);
+
+  return {
+    ok: true,
+    data: { affectedUsers, deleted: true },
+  };
+}
+
+async function countSourcePackSelection(
+  options: AdminControllerOptions,
+  packId: string,
+): Promise<number> {
+  const deliveryTargets = await options.storage.deliveryTargets.listAll();
+
+  return deliveryTargets.filter((target) => target.config.packIds?.includes(packId) === true).length;
+}
+
+async function assertSourcePackNameAvailable(
+  options: AdminControllerOptions,
+  name: string,
+): Promise<void> {
+  const existing = await options.storage.sourcePacks.findByName(name);
+
+  if (existing !== null) {
+    throw new AdminApiError(
+      409,
+      'SOURCE_PACK_NAME_TAKEN',
+      `主题包名称已存在：${name}`,
+    );
+  }
+}
+
+interface SourcePackBodyInput {
+  description?: string | null;
+  enabled?: boolean;
+  name?: string;
+  sortOrder?: number;
+  sourceIds?: string[];
+}
+
+function readSourcePackBody(
+  body: unknown,
+  options: { requireName: boolean },
+): SourcePackBodyInput {
+  if (!isRecord(body)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
+  }
+
+  const result: SourcePackBodyInput = {};
+
+  if (body.name !== undefined) {
+    if (typeof body.name !== 'string') {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'name 必须是字符串。');
+    }
+
+    const name = body.name.trim();
+
+    if (name.length === 0) {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'name 不能为空。');
+    }
+
+    if (name.length > 100) {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'name 不能超过 100 个字符。');
+    }
+
+    result.name = name;
+  }
+
+  if (options.requireName && result.name === undefined) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'name 不能为空。');
+  }
+
+  if (body.description !== undefined) {
+    if (body.description !== null && typeof body.description !== 'string') {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'description 必须是字符串或 null。');
+    }
+
+    const description =
+      body.description === null ? null : body.description.trim();
+
+    result.description =
+      description === null || description.length === 0 ? null : description.slice(0, 500);
+  }
+
+  if (body.enabled !== undefined) {
+    if (typeof body.enabled !== 'boolean') {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'enabled 必须是布尔值。');
+    }
+
+    result.enabled = body.enabled;
+  }
+
+  if (body.sortOrder !== undefined) {
+    if (typeof body.sortOrder !== 'number' || !Number.isInteger(body.sortOrder) || body.sortOrder < 0) {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'sortOrder 必须是非负整数。');
+    }
+
+    result.sortOrder = body.sortOrder;
+  }
+
+  if (body.sourceIds !== undefined) {
+    if (!Array.isArray(body.sourceIds)) {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'sourceIds 必须是数组。');
+    }
+
+    result.sourceIds = [
+      ...new Set(
+        body.sourceIds
+          .filter((entry): entry is string => typeof entry === 'string')
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.length > 0),
+      ),
+    ];
+  }
+
+  return result;
+}
+
+async function assertSourcePackIdsExist(
+  options: AdminControllerOptions,
+  input: SourcePackBodyInput,
+): Promise<void> {
+  if (input.sourceIds === undefined) {
+    return;
+  }
+
+  const watchAccounts = await options.storage.watchAccounts.listAll();
+  const knownIds = new Set(watchAccounts.map((account) => account.id));
+
+  input.sourceIds = input.sourceIds.filter((sourceId) => knownIds.has(sourceId));
+}
+
+export interface AdminSourcePackSourceView {
+  displayName: string;
+  id: string;
+  sourceType: string;
+  sourceUrl: string | null;
+  xUsername: string | null;
+}
+
+export interface AdminSourcePackView {
+  createdAt: string;
+  description: string | null;
+  enabled: boolean;
+  id: string;
+  name: string;
+  selectedByUsers: number;
+  sortOrder: number;
+  sourceCount: number;
+  sources: AdminSourcePackSourceView[];
+  updatedAt: string;
+}
+
+function countSourcePackSelections(
+  deliveryTargets: DeliveryTarget[],
+  packIds: string[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+
+  for (const packId of packIds) {
+    counts.set(
+      packId,
+      deliveryTargets.filter((target) => target.config.packIds?.includes(packId) === true).length,
+    );
+  }
+
+  return counts;
+}
+
+function toAdminSourcePackSourceView(watchAccount: WatchAccount): AdminSourcePackSourceView {
+  return {
+    displayName: watchAccount.displayName ?? watchAccount.sourceUrl ?? watchAccount.xUsername ?? watchAccount.id,
+    id: watchAccount.id,
+    sourceType: watchAccount.sourceType,
+    sourceUrl: watchAccount.sourceUrl,
+    xUsername: watchAccount.xUsername,
+  };
+}
+
+function sortSourcePackSources(sources: AdminSourcePackSourceView[]): AdminSourcePackSourceView[] {
+  return [...sources].sort((left, right) => left.displayName.localeCompare(right.displayName, 'zh-Hans-CN'));
+}
+
+function toAdminSourcePackView(
+  pack: { createdAt: string; description: string | null; enabled: boolean; id: string; memberSourceIds: string[]; name: string; sortOrder: number; updatedAt: string },
+  accountById: Map<string, WatchAccount>,
+): Omit<AdminSourcePackView, 'selectedByUsers'> {
+  const sources = sortSourcePackSources(
+    pack.memberSourceIds
+      .map((sourceId) => accountById.get(sourceId))
+      .filter((watchAccount): watchAccount is WatchAccount => watchAccount !== undefined)
+      .map(toAdminSourcePackSourceView),
+  );
+
+  return {
+    createdAt: pack.createdAt,
+    description: pack.description,
+    enabled: pack.enabled,
+    id: pack.id,
+    name: pack.name,
+    sortOrder: pack.sortOrder,
+    sourceCount: sources.length,
+    sources,
+    updatedAt: pack.updatedAt,
+  };
+}
+
+async function toAdminSourcePackViewById(
+  options: AdminControllerOptions,
+  pack: { createdAt: string; description: string | null; enabled: boolean; id: string; memberSourceIds: string[]; name: string; sortOrder: number; updatedAt: string },
+): Promise<Omit<AdminSourcePackView, 'selectedByUsers'>> {
+  const watchAccounts = await options.storage.watchAccounts.listAll();
+  const accountById = new Map(watchAccounts.map((account) => [account.id, account]));
+
+  return toAdminSourcePackView(pack, accountById);
 }
 
 export async function getAdminSubscriptionRules(

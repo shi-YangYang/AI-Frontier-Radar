@@ -86,30 +86,7 @@ export class DeliveryTargetRepository {
       },
     });
 
-    const deliveryEventCount = await this.prisma.deliveryEvent.count({
-      where: {
-        targetKey: deliveryTarget.targetKey,
-      },
-    });
-
-    if (deliveryEventCount === 0) {
-      const result = await this.prisma.deliveryTarget.deleteMany({
-        where: { id },
-      });
-
-      return {
-        deadEventsCount: deadEventsResult.count,
-        deleted: result.count > 0,
-      };
-    }
-
-    const result = await this.prisma.deliveryTarget.updateMany({
-      data: {
-        displayName: `[deleted] ${deliveryTarget.displayName}`,
-        enabled: false,
-        updatedAt: createTimestamp(),
-        webhookUrl: '',
-      },
+    const result = await this.prisma.deliveryTarget.deleteMany({
       where: { id },
     });
 
@@ -279,6 +256,42 @@ export class DeliveryTargetRepository {
 
     return mapDeliveryTarget(deliveryTarget);
   }
+
+  /** 删除主题包后清理所有投递通道 config 中悬空的 packId，返回此前引用该包的通道数。 */
+  public async removePackIdFromTargets(packId: string): Promise<number> {
+    const deliveryTargets = await this.prisma.deliveryTarget.findMany({
+      orderBy: { id: 'asc' },
+    });
+    let affectedCount = 0;
+
+    for (const deliveryTarget of deliveryTargets) {
+      const config = parseDeliveryTargetConfig(deliveryTarget.configJson);
+
+      if (config.packIds === undefined || !config.packIds.includes(packId)) {
+        continue;
+      }
+
+      affectedCount += 1;
+      const remainingPackIds = config.packIds.filter((entry) => entry !== packId);
+      const nextConfig = { ...config };
+
+      if (remainingPackIds.length === 0) {
+        delete nextConfig.packIds;
+      } else {
+        nextConfig.packIds = remainingPackIds;
+      }
+
+      await this.prisma.deliveryTarget.update({
+        data: {
+          configJson: serializeDeliveryTargetConfig(nextConfig),
+          updatedAt: createTimestamp(),
+        },
+        where: { id: deliveryTarget.id },
+      });
+    }
+
+    return affectedCount;
+  }
 }
 
 function visibleDeliveryTargetWhere(
@@ -351,6 +364,7 @@ function parseDeliveryTargetConfig(rawConfigJson: string): DeliveryTarget['confi
     const target = typeof record.target === 'string' ? record.target.trim() : '';
     const accountId = typeof record.accountId === 'string' ? record.accountId.trim() : '';
     const sourceIds = normalizeSourceIds(record.sourceIds);
+    const packIds = normalizePackIds(record.packIds);
     const quietHours = normalizeQuietHours(record.quietHours);
 
     return {
@@ -359,6 +373,8 @@ function parseDeliveryTargetConfig(rawConfigJson: string): DeliveryTarget['confi
       ...(secret.length === 0 ? {} : { secret }),
       ...(sourceIds.length === 0 ? {} : { sourceIds }),
       ...(target.length === 0 ? {} : { target }),
+      // packIds 用「字段存在」表达按包模式：空数组 = 按包且未选包（不推送），不能丢弃。
+      ...(packIds === undefined ? {} : { packIds }),
     };
   } catch {
     return {};
@@ -370,6 +386,7 @@ function serializeDeliveryTargetConfig(config: DeliveryTarget['config'] | undefi
   const target = config?.target?.trim() ?? '';
   const accountId = config?.accountId?.trim() ?? '';
   const sourceIds = normalizeSourceIds(config?.sourceIds);
+  const packIds = normalizePackIds(config?.packIds);
   const quietHours = config?.quietHours;
 
   return JSON.stringify({
@@ -377,6 +394,7 @@ function serializeDeliveryTargetConfig(config: DeliveryTarget['config'] | undefi
     ...(quietHours === undefined ? {} : { quietHours }),
     ...(secret.length === 0 ? {} : { secret }),
     ...(sourceIds.length === 0 ? {} : { sourceIds }),
+    ...(packIds === undefined ? {} : { packIds }),
     ...(target.length === 0 ? {} : { target }),
   });
 }
@@ -384,6 +402,18 @@ function serializeDeliveryTargetConfig(config: DeliveryTarget['config'] | undefi
 function normalizeSourceIds(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
+  }
+
+  const normalized = value
+    .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    .map((entry) => entry.trim());
+
+  return [...new Set(normalized)];
+}
+
+function normalizePackIds(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
   }
 
   const normalized = value

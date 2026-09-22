@@ -12,7 +12,7 @@ export interface RunPollingJobOptions {
   sourceProviders: SourceProviderRegistry;
   storage: Pick<
     StorageContext,
-    'appSettings' | 'deliveryEvents' | 'deliveryTargets' | 'pollRuns' | 'watchAccounts' | 'xPosts'
+    'appSettings' | 'deliveryEvents' | 'deliveryTargets' | 'pollRuns' | 'sourcePacks' | 'watchAccounts' | 'xPosts'
   >;
 }
 

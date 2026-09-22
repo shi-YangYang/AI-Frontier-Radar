@@ -64,9 +64,9 @@ export type {
   SourceType,
   StandardizedPost,
 } from './types/index';
-export { PollingAccountService, createSubscriptionRuleMatcher } from './services/index';
+export { PollingAccountService, createSubscriptionRuleMatcher, resolveEffectiveSourceSets } from './services/index';
 export type { SubscriptionRuleMatcher } from './services/index';
-export type { PollingAccountResult, PollingAccountServiceOptions } from './services/index';
+export type { EffectiveSourceSet, PollingAccountResult, PollingAccountServiceOptions } from './services/index';
 export { PollingOrchestrator } from './orchestrator/index';
 export type {
   PollingAccountRunResult,

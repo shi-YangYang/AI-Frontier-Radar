@@ -133,6 +133,14 @@ const RULES: PatternRule[] = [
     replace: (m) => `${m[1]} was not found.`,
   },
   {
+    pattern: /^主题包名称已存在：(.+)$/u,
+    replace: (m) => `Source pack name already exists: ${m[1]}`,
+  },
+  {
+    pattern: /^主题包不存在：(.+)$/u,
+    replace: (m) => `Source pack was not found: ${m[1]}`,
+  },
+  {
     pattern: /^请求体必须是 JSON 对象。$/u,
     replace: () => 'Request body must be a JSON object.',
   },
@@ -187,6 +195,22 @@ const RULES: PatternRule[] = [
   {
     pattern: /^(.+) 必须是字符串数组。$/u,
     replace: (m) => `${m[1]} must be a string array.`,
+  },
+  {
+    pattern: /^(.+) 必须是数组。$/u,
+    replace: (m) => `${m[1]} must be an array.`,
+  },
+  {
+    pattern: /^(.+) 必须是字符串或 null。$/u,
+    replace: (m) => `${m[1]} must be a string or null.`,
+  },
+  {
+    pattern: /^(.+) 必须是非负整数。$/u,
+    replace: (m) => `${m[1]} must be a non-negative integer.`,
+  },
+  {
+    pattern: /^(.+) 必须是 all、packs 或 custom。$/u,
+    replace: (m) => `${m[1]} must be one of: all, packs, custom.`,
   },
   {
     pattern: /^(.+) 只能包含字符串。$/u,

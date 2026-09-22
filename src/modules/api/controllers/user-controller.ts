@@ -1,5 +1,11 @@
 import { AuthValidationError, type AuthService } from '../../auth';
+import {
+  SOURCE_PLATFORM_CATEGORIES,
+  sourcePlatformCategory,
+  type SourcePlatformCategory,
+} from '../../../config/source-groups';
 import type { DeliveryTarget, StorageContext, User, UserRole } from '../../storage';
+import type { XPostPageQuery } from '../../storage/types';
 import {
   type WechatAccount,
   type WechatBindCoordinator,
@@ -102,6 +108,8 @@ export async function getUserWechatBinding(
       accountId: string;
       displayName: string;
       enabled: boolean;
+      mode: WechatSourcesMode;
+      packIds: string[];
       quietHours: { enabled: boolean; endHour: number; startHour: number } | null;
       sendCount: number;
       sendLimit: number;
@@ -116,6 +124,20 @@ export async function getUserWechatBinding(
       qrcodeUrl?: string;
       status: string;
     };
+    sourcePacks: Array<{
+      description: string | null;
+      enabled: boolean;
+      id: string;
+      name: string;
+      sourceCount: number;
+      sources: Array<{
+        displayName: string;
+        id: string;
+        sourceType: string;
+        sourceUrl: string | null;
+        xUsername: string | null;
+      }>;
+    }>;
     sources: Array<{
       displayName: string;
       id: string;
@@ -127,8 +149,12 @@ export async function getUserWechatBinding(
 }> {
   const state = await readSyncedWechatState(options, user.id);
   const ownTargets = state.wechatTargets.filter((target) => target.ownerUserId === user.id);
-  const watchAccounts = await options.storage.watchAccounts.listAll();
+  const [watchAccounts, sourcePacks] = await Promise.all([
+    options.storage.watchAccounts.listAll(),
+    options.storage.sourcePacks.listAll(),
+  ]);
   const accountById = new Map(state.accounts.map((account) => [account.accountId, account]));
+  const watchAccountById = new Map(watchAccounts.map((account) => [account.id, account]));
 
   return {
     ok: true,
@@ -137,6 +163,8 @@ export async function getUserWechatBinding(
         accountId: target.config.accountId ?? '',
         displayName: target.displayName,
         enabled: target.enabled,
+        mode: resolveWechatSourcesMode(target.config),
+        packIds: target.config.packIds ?? [],
         quietHours: target.config.quietHours ?? null,
         sendCount: accountById.get(target.config.accountId ?? '')?.sendCount ?? 0,
         sendLimit: accountById.get(target.config.accountId ?? '')?.sendLimit ?? 10,
@@ -152,6 +180,23 @@ export async function getUserWechatBinding(
         ...(state.loginState.qrcodeUrl === undefined ? {} : { qrcodeUrl: state.loginState.qrcodeUrl }),
         status: state.loginState.status,
       },
+      sourcePacks: sourcePacks.map((pack) => ({
+        description: pack.description,
+        enabled: pack.enabled,
+        id: pack.id,
+        name: pack.name,
+        sourceCount: pack.memberSourceIds.length,
+        sources: pack.memberSourceIds
+          .map((sourceId) => watchAccountById.get(sourceId))
+          .filter((watchAccount): watchAccount is NonNullable<typeof watchAccount> => watchAccount !== undefined)
+          .map((watchAccount) => ({
+            displayName: watchAccount.displayName ?? watchAccount.sourceUrl ?? watchAccount.xUsername ?? watchAccount.id,
+            id: watchAccount.id,
+            sourceType: watchAccount.sourceType,
+            sourceUrl: watchAccount.sourceUrl,
+            xUsername: watchAccount.xUsername,
+          })),
+      })),
       sources: watchAccounts.map((account) => ({
         displayName: account.displayName ?? account.sourceUrl ?? account.xUsername ?? account.id,
         id: account.id,
@@ -163,18 +208,32 @@ export async function getUserWechatBinding(
   };
 }
 
+export type WechatSourcesMode = 'all' | 'custom' | 'packs';
+
+function resolveWechatSourcesMode(config: DeliveryTarget['config']): WechatSourcesMode {
+  if (Array.isArray(config.packIds)) {
+    return 'packs';
+  }
+
+  if ((config.sourceIds ?? []).length > 0) {
+    return 'custom';
+  }
+
+  return 'all';
+}
+
 export async function updateUserWechatSources(
   user: User,
   params: unknown,
   body: unknown,
   options: UserControllerOptions,
-): Promise<{ ok: true; data: { sourceIds: string[] } }> {
+): Promise<{ ok: true; data: { mode: WechatSourcesMode; packs: string[]; sourceIds: string[] } }> {
   if (!isRecord(params) || typeof params.accountId !== 'string' || params.accountId.trim().length === 0) {
     throw new AdminApiError(400, 'INVALID_REQUEST', 'accountId 无效。');
   }
 
-  if (!isRecord(body) || !Array.isArray(body.sourceIds)) {
-    throw new AdminApiError(400, 'INVALID_REQUEST', 'sourceIds 必须是数组。');
+  if (!isRecord(body)) {
+    throw new AdminApiError(400, 'INVALID_REQUEST', '请求体必须是 JSON 对象。');
   }
 
   const accountId = params.accountId.trim();
@@ -186,25 +245,72 @@ export async function updateUserWechatSources(
 
   const watchAccounts = await options.storage.watchAccounts.listAll();
   const knownSourceIds = new Set(watchAccounts.map((account) => account.id));
-  const sourceIds = [
-    ...new Set(
-      body.sourceIds
-        .filter((entry): entry is string => typeof entry === 'string')
-        .map((entry) => entry.trim())
-        .filter((entry) => entry.length > 0 && knownSourceIds.has(entry)),
-    ),
-  ];
   const nextConfig = { ...target.config };
+  const mode = typeof body.mode === 'string' ? body.mode : undefined;
+  let savedSourceIds: string[] = [];
 
-  if (sourceIds.length === 0) {
+  if (mode === undefined || mode === 'custom') {
+    // 旧体兼容：仅 { sourceIds: [...] } 按现状处理；custom 段沿用逐源细选语义。
+    if (!Array.isArray(body.sourceIds)) {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'sourceIds 必须是数组。');
+    }
+
+    const sourceIds = [
+      ...new Set(
+        body.sourceIds
+          .filter((entry): entry is string => typeof entry === 'string')
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.length > 0 && knownSourceIds.has(entry)),
+      ),
+    ];
+    delete nextConfig.packIds;
+
+    if (sourceIds.length === 0) {
+      delete nextConfig.sourceIds;
+    } else {
+      nextConfig.sourceIds = sourceIds;
+      savedSourceIds = sourceIds;
+    }
+  } else if (mode === 'all') {
+    delete nextConfig.packIds;
     delete nextConfig.sourceIds;
+  } else if (mode === 'packs') {
+    if (body.packs !== undefined && !Array.isArray(body.packs)) {
+      throw new AdminApiError(400, 'INVALID_REQUEST', 'packs 必须是数组。');
+    }
+
+    const sourcePacks = await options.storage.sourcePacks.listAll();
+    const knownPackIds = new Set(sourcePacks.map((pack) => pack.id));
+    const packIds = [
+      ...new Set(
+        (body.packs ?? [])
+          .filter((entry): entry is string => typeof entry === 'string')
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.length > 0 && knownPackIds.has(entry)),
+      ),
+    ];
+    delete nextConfig.sourceIds;
+    // 空数组保留「按包模式、未选包」语义：解析为空 → 不推送，而不是回退全部。
+    nextConfig.packIds = packIds;
+    savedSourceIds = [];
   } else {
-    nextConfig.sourceIds = sourceIds;
+    throw new AdminApiError(400, 'INVALID_REQUEST', 'mode 必须是 all、packs 或 custom。');
   }
 
   await options.storage.deliveryTargets.update(target.id, { config: nextConfig });
 
-  return { ok: true, data: { sourceIds } };
+  return {
+    ok: true,
+    data: {
+      mode: Array.isArray(nextConfig.packIds)
+        ? 'packs'
+        : (nextConfig.sourceIds ?? []).length > 0
+          ? 'custom'
+          : 'all',
+      packs: nextConfig.packIds ?? [],
+      sourceIds: savedSourceIds,
+    },
+  };
 }
 
 export async function startUserWechatBind(
@@ -456,6 +562,7 @@ export interface UserPostItem {
   isReply: boolean;
   isRepost: boolean;
   permalinkUrl: string;
+  platformCategory: SourcePlatformCategory;
   postedAt: string;
   sourceDisplayName: string | null;
   sourceType: string;
@@ -480,17 +587,43 @@ export async function listUserPosts(
     typeof record.query === 'string' && record.query.trim().length > 0
       ? record.query.trim()
       : undefined;
-  const filter = searchQuery === undefined ? {} : { query: searchQuery };
-  const total = await options.storage.xPosts.countAll(filter);
-  const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
-  const resolvedPage = totalPages === 0 ? 1 : Math.min(page, totalPages);
-  const [posts, watchAccounts] = await Promise.all([
-    options.storage.xPosts.listPage({ page: resolvedPage, pageSize, ...filter }),
-    options.storage.watchAccounts.listAll(),
-  ]);
+  const category = readPostCategory(record.category);
+  const filter: Partial<XPostPageQuery> = searchQuery === undefined ? {} : { query: searchQuery };
+  const watchAccounts = await options.storage.watchAccounts.listAll();
   const accountByAuthorUserId = new Map(
     watchAccounts.map((account) => [account.xUserId ?? '', account]),
   );
+
+  if (category !== undefined) {
+    const matchedUserIds = watchAccounts
+      .filter((account) => sourcePlatformCategory(account.sourceType, account.sourceUrl) === category)
+      .map((account) => account.xUserId)
+      .filter((xUserId): xUserId is string => xUserId !== null && xUserId.length > 0);
+    const orUnmapped = category === 'blog';
+
+    if (!orUnmapped && matchedUserIds.length === 0) {
+      return {
+        ok: true,
+        data: {
+          pagination: { page: 1, pageSize, total: 0, totalPages: 0 },
+          posts: [],
+        },
+      };
+    }
+
+    filter.authorUserIdMatch = {
+      in: matchedUserIds,
+      known: watchAccounts
+        .map((account) => account.xUserId)
+        .filter((xUserId): xUserId is string => xUserId !== null && xUserId.length > 0),
+      orUnmapped,
+    };
+  }
+
+  const total = await options.storage.xPosts.countAll(filter);
+  const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
+  const resolvedPage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+  const posts = await options.storage.xPosts.listPage({ page: resolvedPage, pageSize, ...filter });
 
   return {
     ok: true,
@@ -507,6 +640,10 @@ export async function listUserPosts(
           isReply: post.isReply,
           isRepost: post.isRepost,
           permalinkUrl: post.permalinkUrl,
+          platformCategory: sourcePlatformCategory(
+            account?.sourceType ?? '',
+            account?.sourceUrl ?? null,
+          ),
           postedAt: post.postedAt,
           sourceDisplayName: account?.displayName ?? null,
           sourceType: account?.sourceType ?? 'x',
@@ -518,10 +655,20 @@ export async function listUserPosts(
   };
 }
 
+function readPostCategory(value: unknown): SourcePlatformCategory | undefined {
+  if (typeof value !== 'string' || !(SOURCE_PLATFORM_CATEGORIES as readonly string[]).includes(value)) {
+    return undefined;
+  }
+
+  return value as SourcePlatformCategory;
+}
+
 function readPositiveInt(value: unknown, fallback: number): number {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+  const parsed = typeof value === 'string' ? Number(value) : value;
+
+  if (typeof parsed !== 'number' || !Number.isInteger(parsed) || parsed < 1) {
     return fallback;
   }
 
-  return value;
+  return parsed;
 }

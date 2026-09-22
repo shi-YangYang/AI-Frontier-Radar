@@ -20,7 +20,7 @@ export const SOURCE_GROUPS: readonly SourceGroupDefinition[] = [
     details:
       'arXiv cs.AI / cs.CL / cs.LG / cs.CV、HF Daily Papers、Techmeme、Hacker News、Reddit r/LocalLLaMA、Product Hunt、OpenAI News、Google AI、Google DeepMind、Anthropic News、AI at Meta、xAI News、Mistral、Stability AI、Hugging Face Blog、AI2 Blog、Moonshot Blog、量子位、GitHub Trending（每日）。',
     id: 'ai-news',
-    name: 'AI 消息',
+    name: '论文包',
     sources: [
       { sourceType: 'rss', sourceUrl: 'https://export.arxiv.org/rss/cs.AI' },
       { sourceType: 'rss', sourceUrl: 'https://export.arxiv.org/rss/cs.CL' },
@@ -50,4 +50,52 @@ export const SOURCE_GROUPS: readonly SourceGroupDefinition[] = [
 
 export function findSourceGroup(id: string): SourceGroupDefinition | undefined {
   return SOURCE_GROUPS.find((group) => group.id === id);
+}
+
+export type SourcePlatformCategory = 'x' | 'youtube' | 'blog' | 'paper' | 'community';
+
+export const SOURCE_PLATFORM_CATEGORIES: readonly SourcePlatformCategory[] = [
+  'x',
+  'youtube',
+  'blog',
+  'paper',
+  'community',
+];
+
+export function sourcePlatformCategory(
+  sourceType: string,
+  sourceUrl: string | null,
+): SourcePlatformCategory {
+  if (sourceType === 'x') {
+    return 'x';
+  }
+
+  if (sourceType === 'github') {
+    return 'community';
+  }
+
+  if (sourceType === 'hf_papers') {
+    return 'paper';
+  }
+
+  const url = (sourceUrl ?? '').toLowerCase();
+
+  if (url.includes('youtube.com/feeds')) {
+    return 'youtube';
+  }
+
+  if (url.includes('arxiv.org') || url.includes('pubmed.ncbi.nlm.nih.gov')) {
+    return 'paper';
+  }
+
+  if (
+    url.includes('hnrss.org') ||
+    url.includes('reddit.com') ||
+    url.includes('producthunt.com') ||
+    url.includes('techmeme.com')
+  ) {
+    return 'community';
+  }
+
+  return 'blog';
 }

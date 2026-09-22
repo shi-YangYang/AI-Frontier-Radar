@@ -2,7 +2,7 @@ import type { AppLogger } from '../../../lib/logger';
 import { createTimestamp } from '../../storage/database';
 import type { StorageContext, WatchAccount } from '../../storage';
 import type { SourceProviderRegistry } from '../types';
-import { PollingAccountService, type SubscriptionRuleMatcher } from '../services';
+import { PollingAccountService, resolveEffectiveSourceSets, type EffectiveSourceSet, type SubscriptionRuleMatcher } from '../services';
 
 export interface PollingOrchestratorOptions {
   logger?: AppLogger;
@@ -14,7 +14,7 @@ export interface PollingOrchestratorOptions {
   sourceProviders: SourceProviderRegistry;
   storage: Pick<
     StorageContext,
-    'deliveryEvents' | 'deliveryTargets' | 'pollRuns' | 'watchAccounts' | 'xPosts'
+    'deliveryEvents' | 'deliveryTargets' | 'pollRuns' | 'sourcePacks' | 'watchAccounts' | 'xPosts'
   >;
   subscriptionRuleMatcher?: SubscriptionRuleMatcher;
 }
@@ -74,11 +74,20 @@ export class PollingOrchestrator {
     try {
       const watchAccounts = await this.options.storage.watchAccounts.listEnabled();
       const deliveryTargets = await this.options.storage.deliveryTargets.listEnabled();
+      // 每个 target 的生效源集在整个轮询周期只解析一次，避免逐条消息查库。
+      const effectiveSourceSets = await resolveEffectiveSourceSets(
+        this.options.storage.sourcePacks,
+        deliveryTargets,
+      );
 
       accountsTotal = watchAccounts.length;
 
       for (const watchAccount of watchAccounts) {
-        const accountResult = await this.processAccount(watchAccount, deliveryTargets);
+        const accountResult = await this.processAccount(
+          watchAccount,
+          deliveryTargets,
+          effectiveSourceSets,
+        );
         accountResults.push(accountResult);
 
         if (accountResult.status === 'success') {
@@ -175,11 +184,16 @@ export class PollingOrchestrator {
   private async processAccount(
     watchAccount: WatchAccount,
     deliveryTargets: Awaited<ReturnType<StorageContext['deliveryTargets']['listEnabled']>>,
+    effectiveSourceSets: Map<string, EffectiveSourceSet>,
   ): Promise<PollingAccountRunResult> {
     const sourceLabel = toWatchAccountLabel(watchAccount);
 
     try {
-      const result = await this.accountService.pollAccount(watchAccount, deliveryTargets);
+      const result = await this.accountService.pollAccount(
+        watchAccount,
+        deliveryTargets,
+        effectiveSourceSets,
+      );
       const updatedAccount = await this.options.storage.watchAccounts.update(watchAccount.id, {
         baselinePostId: result.baselinePostId,
         displayName: result.resolvedDisplayName,

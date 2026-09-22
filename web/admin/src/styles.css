@@ -2348,53 +2348,6 @@ thead th {
   }
 }
 
-.source-groups-panel {
-  margin-bottom: 16px;
-}
-
-.source-group-list {
-  display: grid;
-  gap: 0;
-  padding: 0 20px;
-}
-
-.source-group-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  border-bottom: 1px solid #f4f4f5;
-  padding: 14px 0;
-}
-
-.source-group-row:last-child {
-  border-bottom: 0;
-}
-
-.source-group-info {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-  flex: 1;
-}
-
-.source-group-row > button {
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.source-group-info p {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-@media (max-width: 680px) {
-  .source-group-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-}
-
 /* ---- UI overhaul additions (spec-004) ---- */
 
 .empty-state {
@@ -2610,21 +2563,6 @@ thead th {
 
 .source-actions-cell {
   text-align: right;
-}
-
-.source-group-details {
-  font-size: 12px;
-}
-
-.source-group-details summary {
-  cursor: pointer;
-  color: var(--muted);
-}
-
-.source-group-details p {
-  margin: 6px 0 0;
-  color: var(--muted);
-  overflow-wrap: anywhere;
 }
 
 .posts-empty {
@@ -3403,6 +3341,40 @@ thead th {
   width: 7px;
 }
 
+.me-bind-guide {
+  align-items: center;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius);
+  color: var(--warn);
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.me-qr .me-bind-guide {
+  margin-top: 0;
+}
+
+.me-bind-guide-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.me-bind-guide-text strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.me-bind-guide-text small {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .me-quota {
   background: #fafbfc;
   border: 1px solid var(--border);
@@ -3678,6 +3650,96 @@ thead th {
   border-color: var(--accent-border);
   color: var(--accent-strong);
   font-weight: 600;
+}
+
+.me-source-chip-badge {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 6px;
+}
+
+.me-source-chip.on .me-source-chip-badge {
+  color: inherit;
+  opacity: 0.75;
+}
+
+/* ---------- topic packs ---------- */
+
+.me-source-pack-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.me-source-pack-card {
+  align-items: flex-start;
+  background: #ffffff;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  transition:
+    border-color 120ms ease,
+    opacity 120ms ease;
+}
+
+.me-source-pack-card input {
+  margin-top: 3px;
+}
+
+.me-source-pack-card.on {
+  border-color: var(--accent-border);
+}
+
+.me-source-pack-card.off,
+.me-source-pack-card.empty {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.me-source-pack-card.off {
+  background: #f5f6f8;
+}
+
+.me-source-pack-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.me-source-pack-main strong {
+  align-items: center;
+  display: flex;
+  font-size: 14px;
+  gap: 8px;
+}
+
+.me-source-pack-main small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.me-source-pack-main .me-source-pack-meta {
+  font-weight: 500;
+}
+
+.me-pack-badge {
+  background: #f5f6f8;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 8px;
+}
+
+.me-pack-badge.muted {
+  opacity: 0.85;
 }
 
 /* ---------- posts ---------- */

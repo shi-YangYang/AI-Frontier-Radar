@@ -5,6 +5,7 @@ import { escapeLikePattern } from './sqlite-like';
 import type {
   CreateXPostRawInput,
   DeliveryEvent,
+  XPostAuthorUserIdMatch,
   XPostPageQuery,
   XPostRaw,
   XPostRawWithDeliveryEvents,
@@ -324,15 +325,25 @@ function mapDeliveryEvent(
 }
 
 function toXPostWhereInput(input: Partial<XPostPageQuery>): Prisma.XPostRawWhereInput {
-  return {
-    ...(input.query === undefined
-      ? {}
+  const queryWhere: Prisma.XPostRawWhereInput | undefined =
+    input.query === undefined
+      ? undefined
       : {
           OR: [
             { textContent: { contains: input.query } },
             { title: { contains: input.query } },
           ],
-        }),
+        };
+  const authorUserIdMatchWhere: Prisma.XPostRawWhereInput | undefined =
+    input.authorUserIdMatch === undefined
+      ? undefined
+      : buildAuthorUserIdMatchWhere(input.authorUserIdMatch);
+  const orClauses = [queryWhere, authorUserIdMatchWhere].filter(
+    (clause): clause is Prisma.XPostRawWhereInput => clause !== undefined,
+  );
+
+  return {
+    ...(orClauses.length === 0 ? {} : orClauses.length === 1 ? orClauses[0] : { AND: orClauses }),
     ...(input.postedFrom === undefined && input.postedTo === undefined
       ? {}
       : {
@@ -352,6 +363,20 @@ function toXPostWhereInput(input: Partial<XPostPageQuery>): Prisma.XPostRawWhere
     ...(input.isReply === undefined ? {} : { isReply: input.isReply }),
     ...(input.isRepost === undefined ? {} : { isRepost: input.isRepost }),
   };
+}
+
+function buildAuthorUserIdMatchWhere(match: XPostAuthorUserIdMatch): Prisma.XPostRawWhereInput {
+  if (match.orUnmapped && match.known.length === 0) {
+    return {};
+  }
+
+  const branches: Prisma.XPostRawWhereInput[] = [{ authorUserId: { in: match.in } }];
+
+  if (match.orUnmapped) {
+    branches.push({ authorUserId: null }, { authorUserId: { notIn: match.known } });
+  }
+
+  return { OR: branches };
 }
 
 function getLocalDayStartIsoString(date: Date): string {

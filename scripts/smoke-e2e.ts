@@ -15,7 +15,7 @@ import { BrowserXSourceProvider, RssSourceProvider, SourceProviderError, Youtube
 import { createV1TextMessageFormatter, isWithinQuietHours, runDeliveryWorkerJob } from '../src/modules/delivery';
 import { createWechatBridgeSender } from '../src/modules/delivery/channel';
 import { createRuntimeScheduler, createRuntimeSourceProviders } from '../src/modules/scheduler';
-import { applySourceGroup, createPrismaClient, createStorage, getSourceGroupStatuses } from '../src/modules/storage';
+import { createPrismaClient, createRuntimeSettingsService, createStorage, seedSourcePacks } from '../src/modules/storage';
 import { SOURCE_GROUPS } from '../src/config/source-groups';
 import { ConfigValidationError } from '../src/shared/env/config-validation-error';
 
@@ -283,6 +283,23 @@ async function main(): Promise<void> {
       sqlitePath: groupsSqlitePath,
       watchAccountsSource: { items: [], type: 'database' },
     });
+    // smoke 环境无外网：YouTube 频道解析用桩替换（Neuralink 模拟解析失败，验证跳过不阻塞）。
+    const smokeYoutubeFeedUrls = new Map<string, string>([
+      ['TwoMinutePapers', 'https://www.youtube.com/feeds/videos.xml?channel_id=UCsmokeAI1'],
+      ['ai-explained', 'https://www.youtube.com/feeds/videos.xml?channel_id=UCsmokeAI2'],
+      ['YannicKilcher', 'https://www.youtube.com/feeds/videos.xml?channel_id=UCsmokeAI3'],
+      ['BostonDynamics', 'https://www.youtube.com/feeds/videos.xml?channel_id=UCsmokeRobot1'],
+      ['jamesbruton', 'https://www.youtube.com/feeds/videos.xml?channel_id=UCsmokeRobot2'],
+    ]);
+    const youtubeChannelResolver = async (handle: string) => {
+      const feedUrl = smokeYoutubeFeedUrls.get(handle);
+
+      if (feedUrl === undefined) {
+        throw new YoutubeChannelResolveError('resolve-failed', `smoke: no channel for ${handle}`);
+      }
+
+      return { feedUrl, label: `Smoke ${handle}` };
+    };
 
     try {
       await groupsStorage.initialize();
@@ -290,55 +307,314 @@ async function main(): Promise<void> {
       const aiGroup = SOURCE_GROUPS.find((group) => group.id === 'ai-news');
       assert(aiGroup !== undefined, 'ai-news source group should exist');
 
-      const beforeStatuses = await getSourceGroupStatuses(
-        groupsStorage.watchAccounts,
-        SOURCE_GROUPS,
-      );
+      // 验证 start-server 的种子 resolver 从运行时设置（SQLite app_settings）读取 RSS 代理，
+      // 而非 .env：注入 7897 等价 mock 代理并断言 resolver 收到的 proxyUrl 来自 database_override。
+      const seedRuntimeSettings = createRuntimeSettingsService({
+        config: { ...config, source: { ...config.source, rss: undefined } },
+        storage: groupsStorage,
+      });
+      const mockProxyUrl = 'http://127.0.0.1:7897/';
+      await groupsStorage.appSettings.setJson('source.rss.proxyUrl', mockProxyUrl);
+      const recordedProxyUrls: Array<string | undefined> = [];
+      const proxiedYoutubeChannelResolver = async (handle: string) => {
+        const rssSettings = await seedRuntimeSettings.getEffectiveRssProxySettings();
+        recordedProxyUrls.push(rssSettings.proxyUrl);
+        return youtubeChannelResolver(handle);
+      };
+
+      const firstSeed = await seedSourcePacks({
+        sourcePacks: groupsStorage.sourcePacks,
+        watchAccounts: groupsStorage.watchAccounts,
+        youtubeChannelResolver: proxiedYoutubeChannelResolver,
+      });
       assert(
-        beforeStatuses[0]?.installedCount === 0,
-        `fresh database should have no group sources installed, got ${beforeStatuses[0]?.installedCount}`,
+        recordedProxyUrls.length > 0 &&
+          recordedProxyUrls.every((proxyUrl) => proxyUrl === mockProxyUrl),
+        `seed youtube resolver should receive the runtime-settings proxy (${mockProxyUrl}), got ${JSON.stringify(recordedProxyUrls)}`,
+      );
+      const rssProxyAfterSeed = await seedRuntimeSettings.getEffectiveRssProxySettings();
+      assert(
+        rssProxyAfterSeed.proxySource === 'database_override' && rssProxyAfterSeed.proxyUrl === mockProxyUrl,
+        `rss proxy should resolve from SQLite with database_override source, got ${JSON.stringify(rssProxyAfterSeed)}`,
+      );
+      checks.push({ name: 'seed YouTube 解析的代理来自运行时设置（SQLite 优先，回落 .env）' });
+      assert(
+        firstSeed.paperPackCreated && firstSeed.paperPackName === '论文包' &&
+          firstSeed.createdPackNames.length === 4,
+        `first seed should create the paper pack plus 4 built-in packs, got ${JSON.stringify(firstSeed)}`,
       );
 
-      const firstApply = await applySourceGroup(groupsStorage.watchAccounts, aiGroup);
+      const secondSeed = await seedSourcePacks({
+        sourcePacks: groupsStorage.sourcePacks,
+        watchAccounts: groupsStorage.watchAccounts,
+        youtubeChannelResolver,
+      });
       assert(
-        firstApply.created === aiGroup.sources.length,
-        `group apply should create ${aiGroup.sources.length} sources, got ${firstApply.created}`,
+        !secondSeed.paperPackCreated && secondSeed.paperPackId === firstSeed.paperPackId &&
+          secondSeed.createdPackNames.length === 0 && secondSeed.createdSourceCount === 0,
+        `second seed should be a no-op, got ${JSON.stringify(secondSeed)}`,
+      );
+      assert(
+        secondSeed.skippedSources.some((skipped) => skipped.source === 'Neuralink'),
+        `unresolvable YouTube channel should be skipped without blocking the seed, got ${JSON.stringify(secondSeed.skippedSources)}`,
       );
 
-      const secondApply = await applySourceGroup(groupsStorage.watchAccounts, aiGroup);
-      assert(secondApply.created === 0, 'second group apply should not create duplicates');
+      const seededPacks = await groupsStorage.sourcePacks.listAll();
       assert(
-        secondApply.existing === aiGroup.sources.length,
-        `second apply should report ${aiGroup.sources.length} existing, got ${secondApply.existing}`,
+        seededPacks.length === 5 &&
+          seededPacks.some((pack) => pack.name === '论文包' && pack.memberSourceIds.length === aiGroup.sources.length) &&
+          ['AI 包', '机器人包', '脑机包', '融资包'].every((name) =>
+            seededPacks.some((pack) => pack.name === name),
+          ),
+        `seed should persist 论文包 plus 4 built-in packs, got ${JSON.stringify(seededPacks.map((pack) => [pack.name, pack.memberSourceIds.length]))}`,
       );
 
-      const afterStatuses = await getSourceGroupStatuses(
-        groupsStorage.watchAccounts,
-        SOURCE_GROUPS,
-      );
+      const samaAccount = await groupsStorage.watchAccounts.findByUsername('sama');
       assert(
-        afterStatuses[0]?.installedCount === aiGroup.sources.length,
-        'group status should report all sources installed',
+        samaAccount !== null && samaAccount.displayName === 'Sam Altman' && samaAccount.enabled,
+        `seed X source @sama should exist with its display name, got ${JSON.stringify(samaAccount)}`,
       );
-      checks.push({ name: '监听组合：一键添加且重复应用不重复' });
+      const robotReportAccount = await groupsStorage.watchAccounts.findBySource({
+        sourceType: 'rss',
+        sourceUrl: 'https://www.therobotreport.com/feed/',
+      });
+      assert(robotReportAccount !== null, 'seed RSS source The Robot Report should exist');
+      const youtubeFeedUrl = smokeYoutubeFeedUrls.get('TwoMinutePapers') ?? '';
+      const youtubeAccount = await groupsStorage.watchAccounts.findBySource({
+        sourceType: 'rss',
+        sourceUrl: youtubeFeedUrl,
+      });
+      assert(
+        youtubeAccount !== null && youtubeAccount.displayName === 'Smoke TwoMinutePapers',
+        `resolved YouTube channel should be stored as an rss feed source, got ${JSON.stringify(youtubeAccount)}`,
+      );
+      const aiPack = seededPacks.find((pack) => pack.name === 'AI 包');
+      assert(
+        aiPack !== undefined && aiPack.memberSourceIds.includes(samaAccount.id) &&
+          aiPack.memberSourceIds.includes(youtubeAccount.id),
+        `AI pack should include the seeded X source and the resolved YouTube feed, got ${JSON.stringify(aiPack)}`,
+      );
+      checks.push({ name: '首启 seed：论文包 + 4 内置包，X/RSS/YouTube 源挂包，重复执行不重复' });
+
+      const groupsAuth = createAuthService({
+        adminPassword: SMOKE_ADMIN_PASSWORD,
+        adminUsername: SMOKE_ADMIN_USERNAME,
+        storage: groupsStorage,
+      });
+      await groupsAuth.ensureSeedAdmin();
+      const groupsApp = createApp({
+        auth: groupsAuth,
+        config,
+        logger,
+        storage: groupsStorage,
+      });
+      await groupsApp.ready();
+      const groupsLoginResponse = await groupsApp.inject({
+        method: 'POST',
+        payload: { password: SMOKE_ADMIN_PASSWORD, username: SMOKE_ADMIN_USERNAME },
+        url: '/auth/login',
+      });
+      assert(
+        groupsLoginResponse.statusCode === 200,
+        `groups admin login returned ${groupsLoginResponse.statusCode}`,
+      );
+      const groupsPacksResponse = await groupsApp.inject({
+        headers: { cookie: readSessionCookie(groupsLoginResponse.headers['set-cookie']) },
+        method: 'GET',
+        url: '/admin/api/source-packs',
+      });
+      const groupsPacksBody = groupsPacksResponse.json() as {
+        data?: { packs?: Array<{ enabled: boolean; name: string; sourceCount: number }> };
+      };
+      assert(
+        groupsPacksResponse.statusCode === 200 &&
+          groupsPacksBody.data?.packs?.length === 5 &&
+          groupsPacksBody.data.packs.some(
+            (pack) => pack.name === '论文包' && pack.enabled && pack.sourceCount === aiGroup.sources.length,
+          ),
+        `source-packs GET should return the 5 seeded packs, got ${groupsPacksResponse.body}`,
+      );
+      await groupsApp.close();
+      checks.push({ name: '种子后 source-packs GET 返回 5 个包' });
     } finally {
       await groupsStorage.close();
     }
 
-    const groupsResponse = await app.inject({ method: 'GET', url: '/admin/api/source-groups' });
+    // (a) YouTube 全失败场景：单条源失败不中断种子，4 个内置包仍然创建（允许部分成员）。
+    const allFailSqlitePath = join(tempDir, 'all-fail-seed.sqlite');
+    const allFailStorage = createStorage({
+      databaseUrl: toPrismaSqliteDatabaseUrl(allFailSqlitePath),
+      sqlitePath: allFailSqlitePath,
+      watchAccountsSource: { items: [], type: 'database' },
+    });
+
+    try {
+      await allFailStorage.initialize();
+      const allFailResolver = async (handle: string): Promise<{ feedUrl: string }> => {
+        throw new YoutubeChannelResolveError('resolve-failed', `smoke: youtube all failed for ${handle}`);
+      };
+      const failSeed = await seedSourcePacks({
+        sourcePacks: allFailStorage.sourcePacks,
+        watchAccounts: allFailStorage.watchAccounts,
+        youtubeChannelResolver: allFailResolver,
+      });
+      assert(
+        failSeed.paperPackCreated && failSeed.createdPackNames.length === 4 &&
+          ['AI 包', '机器人包', '脑机包', '融资包'].every((name) =>
+            failSeed.createdPackNames.includes(name),
+          ),
+        `all-Youtube-failed seed should still create the 4 built-in packs, got ${JSON.stringify(failSeed)}`,
+      );
+      assert(
+        failSeed.skippedSources.length === 6 &&
+          ['TwoMinutePapers', 'ai-explained', 'YannicKilcher', 'BostonDynamics', 'jamesbruton', 'Neuralink']
+            .every((handle) => failSeed.skippedSources.some((skipped) => skipped.source === handle)),
+        `all 6 Youtube handles should be recorded as skipped, got ${JSON.stringify(failSeed.skippedSources)}`,
+      );
+
+      const packsAfterFailSeed = await allFailStorage.sourcePacks.listAll();
+      const packMemberCount = (packs: Awaited<ReturnType<typeof allFailStorage.sourcePacks.listAll>>, name: string): number =>
+        packs.find((pack) => pack.name === name)?.memberSourceIds.length ?? -1;
+      assert(
+        packMemberCount(packsAfterFailSeed, '论文包') === 22 &&
+          packMemberCount(packsAfterFailSeed, 'AI 包') === 24 &&
+          packMemberCount(packsAfterFailSeed, '机器人包') === 6 &&
+          packMemberCount(packsAfterFailSeed, '脑机包') === 3 &&
+          packMemberCount(packsAfterFailSeed, '融资包') === 6,
+        `packs should be created with partial members when all Youtube resolutions fail, got ${JSON.stringify(
+          packsAfterFailSeed.map((pack) => [pack.name, pack.memberSourceIds.length]),
+        )}`,
+      );
+      checks.push({ name: 'YouTube 全失败：4 内置包仍创建，缺失成员跳过不阻塞种子' });
+
+      // 收敛语义：管理员从内置包删除的种子成员会在下次启动补挂；管理员自建包完全不受影响。
+      const samaAccount = await allFailStorage.watchAccounts.findByUsername('sama');
+      assert(samaAccount !== null, 'seed X source @sama should exist after fail seed');
+      const customPack = await allFailStorage.sourcePacks.create({
+        description: '管理员自建包',
+        name: '自定义包',
+        sourceIds: [samaAccount.id],
+      });
+      const aiPackBeforeRetry = packsAfterFailSeed.find((pack) => pack.name === 'AI 包');
+      assert(aiPackBeforeRetry !== undefined, 'AI pack should exist after fail seed');
+      await allFailStorage.sourcePacks.update(aiPackBeforeRetry.id, {
+        sourceIds: aiPackBeforeRetry.memberSourceIds.filter((id) => id !== samaAccount.id),
+      });
+
+      // (b) 下一次 seed（模拟解析成功）：源补建并自动补挂进已存在的内置包（幂等）。
+      const retryResolver = async (handle: string): Promise<{ feedUrl: string; label?: string }> => {
+        if (handle === 'Neuralink') {
+          return {
+            feedUrl: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCsmokeBCI1',
+            label: 'Smoke Neuralink',
+          };
+        }
+
+        return youtubeChannelResolver(handle);
+      };
+      const retrySeed = await seedSourcePacks({
+        sourcePacks: allFailStorage.sourcePacks,
+        watchAccounts: allFailStorage.watchAccounts,
+        youtubeChannelResolver: retryResolver,
+      });
+      assert(
+        retrySeed.createdPackNames.length === 0 && retrySeed.createdSourceCount === 6 &&
+          retrySeed.repairedPackNames.length === 3 &&
+          ['AI 包', '机器人包', '脑机包'].every((name) => retrySeed.repairedPackNames.includes(name)),
+        `retry seed should create the 6 Youtube sources and re-attach them into the existing packs, got ${JSON.stringify(retrySeed)}`,
+      );
+
+      const packsAfterRetry = await allFailStorage.sourcePacks.listAll();
+      assert(
+        packMemberCount(packsAfterRetry, 'AI 包') === 27 &&
+          packMemberCount(packsAfterRetry, '机器人包') === 8 &&
+          packMemberCount(packsAfterRetry, '脑机包') === 4 &&
+          packMemberCount(packsAfterRetry, '融资包') === 6,
+        `resolved Youtube feeds should be backfilled into the existing built-in packs, got ${JSON.stringify(
+          packsAfterRetry.map((pack) => [pack.name, pack.memberSourceIds.length]),
+        )}`,
+      );
+      const aiPackAfterRetry = packsAfterRetry.find((pack) => pack.name === 'AI 包');
+      assert(
+        aiPackAfterRetry !== undefined && aiPackAfterRetry.memberSourceIds.includes(samaAccount.id),
+        'admin-removed seed member should be re-attached into the built-in AI pack',
+      );
+      const customPackAfterRetry = await allFailStorage.sourcePacks.findById(customPack.id);
+      assert(
+        customPackAfterRetry !== null && customPackAfterRetry.memberSourceIds.length === 1 &&
+          customPackAfterRetry.memberSourceIds[0] === samaAccount.id &&
+          customPackAfterRetry.description === '管理员自建包',
+        `admin-created pack must not be touched by seed backfill, got ${JSON.stringify(customPackAfterRetry)}`,
+      );
+      checks.push({ name: '内置包种子成员收敛补挂，管理员自建包不受影响' });
+      const thirdSeed = await seedSourcePacks({
+        sourcePacks: allFailStorage.sourcePacks,
+        watchAccounts: allFailStorage.watchAccounts,
+        youtubeChannelResolver: retryResolver,
+      });
+      assert(
+        thirdSeed.createdPackNames.length === 0 && thirdSeed.createdSourceCount === 0 &&
+          thirdSeed.repairedPackNames.length === 0 && thirdSeed.skippedSources.length === 0,
+        `third seed should be a full no-op after backfill, got ${JSON.stringify(thirdSeed)}`,
+      );
+      checks.push({ name: 'YouTube 解析恢复：源补建并自动补挂进已存在内置包，重复 seed 幂等' });
+    } finally {
+      await allFailStorage.close();
+    }
+
+    const legacySqlitePath = join(tempDir, 'legacy-pack.sqlite');
+    const legacyStorage = createStorage({
+      databaseUrl: toPrismaSqliteDatabaseUrl(legacySqlitePath),
+      sqlitePath: legacySqlitePath,
+      watchAccountsSource: { items: [], type: 'database' },
+    });
+
+    try {
+      await legacyStorage.initialize();
+
+      const legacySource = await legacyStorage.watchAccounts.create({
+        enabled: true,
+        sourceType: 'rss',
+        sourceUrl: 'https://export.arxiv.org/rss/cs.AI',
+      });
+      const legacyPack = await legacyStorage.sourcePacks.create({
+        description: '存量 AI 消息包描述',
+        name: 'AI 消息',
+        sourceIds: [legacySource.id],
+      });
+
+      const renameSeed = await seedSourcePacks({
+        sourcePacks: legacyStorage.sourcePacks,
+        watchAccounts: legacyStorage.watchAccounts,
+        youtubeChannelResolver,
+      });
+      const renamedPack = await legacyStorage.sourcePacks.findById(legacyPack.id);
+      assert(
+        renameSeed.renamedFromLegacy && renamedPack !== null &&
+          renamedPack.id === legacyPack.id && renamedPack.name === '论文包' &&
+          renamedPack.description === '存量 AI 消息包描述' &&
+          renamedPack.memberSourceIds.length === 1,
+        `legacy pack should be renamed in place keeping id, members and description, got ${JSON.stringify(renameSeed)} / ${JSON.stringify(renamedPack)}`,
+      );
+      checks.push({ name: '存量「AI 消息」包改名「论文包」且保留 id、成员与描述' });
+    } finally {
+      await legacyStorage.close();
+    }
+
+    const removedGroupsResponse = await app.inject({ method: 'GET', url: '/admin/api/source-groups' });
     assert(
-      groupsResponse.statusCode === 200,
-      `GET source-groups returned ${groupsResponse.statusCode}`,
+      removedGroupsResponse.statusCode === 404,
+      `removed source-groups API should return 404, got ${removedGroupsResponse.statusCode}`,
     );
-    const missingGroupResponse = await app.inject({
+    const removedApplyResponse = await app.inject({
       method: 'POST',
       url: '/admin/api/source-groups/not-exist/apply',
     });
     assert(
-      missingGroupResponse.statusCode === 404,
-      `unknown group should return 404, got ${missingGroupResponse.statusCode}`,
+      removedApplyResponse.statusCode === 404,
+      `removed source-groups apply API should return 404, got ${removedApplyResponse.statusCode}`,
     );
-    checks.push({ name: '监听组合 API：查询与未知组合 404' });
+    checks.push({ name: '旧监听组合 API 已删除（404）' });
 
     const emptyPoll = await runPollingJob({
       config,
@@ -1900,7 +2176,7 @@ async function main(): Promise<void> {
     );
     checks.push({ name: '无发送历史的微信号：删除时移除通道且不影响其他微信' });
 
-    // History-bearing channels must be retired, not erased; rebinding the same ID must also work.
+    // Deleting a channel physically removes its row; delivery history stays in delivery_events keyed by targetKey.
     fakeWechatAccounts.push({
       accountId: 'wechat-b@im.bot',
       baseUrl: 'https://ilinkai.weixin.qq.com',
@@ -1910,25 +2186,23 @@ async function main(): Promise<void> {
     });
     const restoredWechatResponse = await app.inject({ method: 'GET', url: '/admin/api/wechat/status' });
     assert(restoredWechatResponse.statusCode === 200, `wechat restore failed: ${restoredWechatResponse.body}`);
-    const archivedWechatTarget = await storage.deliveryTargets.findByTargetKey('wechat:wechat-b@im.bot');
-    assert(archivedWechatTarget !== null, 'rebound wechat target should exist');
+    const historyWechatTarget = await storage.deliveryTargets.findByTargetKey('wechat:wechat-b@im.bot');
+    assert(historyWechatTarget !== null, 'rebound wechat target should exist');
     const sentWechatEvent = await storage.deliveryEvents.create({
       status: 'sent', sentAt: new Date().toISOString(), attemptCount: 1,
-      targetKey: archivedWechatTarget.targetKey, xPostId: routedPost.xPostId,
+      targetKey: historyWechatTarget.targetKey, xPostId: routedPost.xPostId,
     });
     assert(nonMatchingRepoPost !== null, 'wechat pending fixture requires a stored post');
     const pendingWechatEvent = await storage.deliveryEvents.create({
-      status: 'pending', targetKey: archivedWechatTarget.targetKey, xPostId: nonMatchingRepoPost.xPostId,
+      status: 'pending', targetKey: historyWechatTarget.targetKey, xPostId: nonMatchingRepoPost.xPostId,
     });
     const deleteWithHistoryResponse = await app.inject({ method: 'DELETE', url: '/admin/api/wechat/accounts/wechat-b@im.bot' });
     assert(deleteWithHistoryResponse.statusCode === 200, `wechat delete with history failed: ${deleteWithHistoryResponse.body}`);
-    const retiredWechatTarget = await storage.deliveryTargets.findById(archivedWechatTarget.id);
-    assert(retiredWechatTarget !== null && !retiredWechatTarget.enabled && retiredWechatTarget.webhookUrl === '', 'history-bearing wechat channel must be disabled and hidden');
-    assert(!(await storage.deliveryTargets.listAll()).some(target => target.id === archivedWechatTarget.id), 'retired wechat channel must disappear from active channel lists');
+    assert(await storage.deliveryTargets.findById(historyWechatTarget.id) === null, 'history-bearing wechat channel must be physically removed');
     assert((await storage.deliveryEvents.findById(sentWechatEvent.id))?.status === 'sent', 'deleting a binding must preserve sent history');
     assert((await storage.deliveryEvents.findById(pendingWechatEvent.id))?.status === 'dead', 'deleting a binding must stop its pending deliveries');
     assert((await storage.deliveryTargets.findById(wechatTargetA.id))?.enabled === true, 'deleting one binding must leave other bindings enabled');
-    checks.push({ name: '有发送历史的微信号：停用旧通道、终止待发送任务、保留历史' });
+    checks.push({ name: '有发送历史的微信号：物理删除通道、终止待发送任务、保留历史' });
 
     if (wechatTargetAAfterDelete !== null) {
       await storage.deliveryTargets.delete(wechatTargetAAfterDelete.id);
@@ -1941,10 +2215,16 @@ async function main(): Promise<void> {
     });
     const rebindWithHistoryResponse = await app.inject({ method: 'GET', url: '/admin/api/wechat/status' });
     assert(rebindWithHistoryResponse.statusCode === 200, `wechat rebind with history failed: ${rebindWithHistoryResponse.body}`);
-    const reboundWechatTarget = await storage.deliveryTargets.findByTargetKey(archivedWechatTarget.targetKey);
-    assert(reboundWechatTarget?.id === archivedWechatTarget.id && reboundWechatTarget.enabled && reboundWechatTarget.webhookUrl !== '', 'rebinding a historical channel should restore it without duplicate keys');
+    const reboundWechatTarget = await storage.deliveryTargets.findByTargetKey(historyWechatTarget.targetKey);
+    assert(
+      reboundWechatTarget !== null &&
+        reboundWechatTarget.id !== historyWechatTarget.id &&
+        reboundWechatTarget.enabled &&
+        reboundWechatTarget.webhookUrl !== '',
+      'rebinding a deleted channel must create a fresh enabled row for the same targetKey',
+    );
     assert((await storage.deliveryEvents.findById(sentWechatEvent.id))?.status === 'sent' && (await storage.deliveryEvents.findById(pendingWechatEvent.id))?.status === 'dead', 'rebinding must not replay historical or cancelled deliveries');
-    checks.push({ name: '重新绑定已有历史的微信通道：恢复连接且不重发旧任务' });
+    checks.push({ name: '重新绑定已删除的微信通道：按原 key 新建通道且不重发旧任务' });
 
     const feedXmlResponse = await app.inject({ method: 'GET', url: '/feed.xml' });
     assert(feedXmlResponse.statusCode === 200, `feed.xml returned ${feedXmlResponse.statusCode}`);
@@ -2655,6 +2935,246 @@ async function main(): Promise<void> {
     assert(missBody.data.pagination.total === 0, 'search should return empty for no match');
     checks.push({ name: '用户端消息搜索（标题/正文，空结果）' });
 
+    const { watchAccount: arxivCategoryAccount } = await storage.watchAccounts.createIfAbsentBySource({
+      enabled: false,
+      sourceType: 'rss',
+      sourceUrl: 'https://export.arxiv.org/rss/cs.AI',
+    });
+    const { watchAccount: hnCategoryAccount } = await storage.watchAccounts.createIfAbsentBySource({
+      enabled: false,
+      sourceType: 'rss',
+      sourceUrl: 'https://hnrss.org/frontpage',
+    });
+    const { watchAccount: youtubeCategoryAccount } = await storage.watchAccounts.createIfAbsentBySource({
+      enabled: false,
+      sourceType: 'rss',
+      sourceUrl: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCsmokeCategory',
+    });
+    await storage.watchAccounts.update(arxivCategoryAccount.id, { xUserId: 'category-arxiv-uid' });
+    await storage.watchAccounts.update(hnCategoryAccount.id, { xUserId: 'category-hn-uid' });
+    await storage.watchAccounts.update(youtubeCategoryAccount.id, {
+      xUserId: 'category-youtube-uid',
+    });
+    const categorySeedAccount = await storage.watchAccounts.findByUsername(WATCH_USERNAME);
+    assert(categorySeedAccount !== null, 'category probe needs the seeded X account');
+    await prisma.xPostRaw.create({
+      data: {
+        authorUserId: categorySeedAccount.xUserId ?? WATCH_USER_ID,
+        authorUsername: WATCH_USERNAME,
+        createdAt: new Date().toISOString(),
+        detectedAt: new Date().toISOString(),
+        id: 'category-probe-x',
+        isReply: false,
+        isRepost: false,
+        permalinkUrl: 'https://example.com/category-probe-x',
+        postedAt: new Date().toISOString(),
+        rawPayloadJson: '{}',
+        textContent: '分类筛选探针：X 源',
+        title: '分类探针 X',
+        xPostId: '9000000000000000041',
+      },
+    });
+    await prisma.xPostRaw.create({
+      data: {
+        authorUserId: 'category-arxiv-uid',
+        authorUsername: 'arxiv-cs-ai',
+        createdAt: new Date().toISOString(),
+        detectedAt: new Date().toISOString(),
+        id: 'category-probe-arxiv',
+        isReply: false,
+        isRepost: false,
+        permalinkUrl: 'https://example.com/category-probe-arxiv',
+        postedAt: new Date().toISOString(),
+        rawPayloadJson: '{}',
+        textContent: '分类筛选探针：arXiv 论文源',
+        title: '分类探针 arXiv',
+        xPostId: '9000000000000000042',
+      },
+    });
+    await prisma.xPostRaw.create({
+      data: {
+        authorUserId: 'category-hn-uid',
+        authorUsername: 'hacker-news',
+        createdAt: new Date().toISOString(),
+        detectedAt: new Date().toISOString(),
+        id: 'category-probe-hn',
+        isReply: false,
+        isRepost: false,
+        permalinkUrl: 'https://example.com/category-probe-hn',
+        postedAt: new Date().toISOString(),
+        rawPayloadJson: '{}',
+        textContent: '分类筛选探针：Hacker News 社区源',
+        title: '分类探针 HN',
+        xPostId: '9000000000000000043',
+      },
+    });
+    await prisma.xPostRaw.create({
+      data: {
+        authorUserId: 'category-youtube-uid',
+        authorUsername: 'youtube-channel',
+        createdAt: new Date().toISOString(),
+        detectedAt: new Date().toISOString(),
+        id: 'category-probe-youtube',
+        isReply: false,
+        isRepost: false,
+        permalinkUrl: 'https://example.com/category-probe-youtube',
+        postedAt: new Date().toISOString(),
+        rawPayloadJson: '{}',
+        textContent: '分类筛选探针：YouTube 频道源',
+        title: '分类探针 YouTube',
+        xPostId: '9000000000000000044',
+      },
+    });
+    const categoryListResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: '/user/api/posts?page=1&pageSize=50',
+    });
+    assert(
+      categoryListResponse.statusCode === 200,
+      `category list returned ${categoryListResponse.statusCode}`,
+    );
+    const categoryListBody = categoryListResponse.json() as {
+      data: {
+        pagination: { total: number };
+        posts: Array<{ id: string; platformCategory: string }>;
+      };
+    };
+    const platformCategoryById = new Map(
+      categoryListBody.data.posts.map((post) => [post.id, post.platformCategory]),
+    );
+    assert(
+      platformCategoryById.get('category-probe-x') === 'x' &&
+        platformCategoryById.get('category-probe-arxiv') === 'paper' &&
+        platformCategoryById.get('category-probe-hn') === 'community' &&
+        platformCategoryById.get('category-probe-youtube') === 'youtube',
+      `posts should carry the platform category of their source account, got ${JSON.stringify(
+        [...platformCategoryById].filter(([id]) => id.startsWith('category-probe-')),
+      )}`,
+    );
+    const unmappedCategoryResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: `/user/api/posts?page=1&pageSize=5&query=${encodeURIComponent('探针标题')}`,
+    });
+    const unmappedCategoryBody = unmappedCategoryResponse.json() as {
+      data: { posts: Array<{ id: string; platformCategory: string }> };
+    };
+    assert(
+      unmappedCategoryBody.data.posts.length === 1 &&
+        unmappedCategoryBody.data.posts[0]?.id === 'posts-probe-1' &&
+        unmappedCategoryBody.data.posts[0]?.platformCategory === 'blog',
+      `posts without a source account should fall back to blog, got ${JSON.stringify(unmappedCategoryBody.data.posts)}`,
+    );
+    checks.push({ name: '用户端消息按来源平台归类（X/YouTube/论文/社区，缺源兜底 blog）' });
+
+    const categoryProbeUrl = (category: string): string =>
+      `/user/api/posts?page=1&pageSize=50${category.length > 0 ? `&category=${category}` : ''}`;
+    const paperCategoryResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: categoryProbeUrl('paper'),
+    });
+    const paperCategoryBody = paperCategoryResponse.json() as typeof categoryListBody;
+    assert(
+      paperCategoryResponse.statusCode === 200 &&
+        paperCategoryBody.data.pagination.total >= 1 &&
+        paperCategoryBody.data.pagination.totalPages === 1 &&
+        paperCategoryBody.data.posts.some((post) => post.id === 'category-probe-arxiv') &&
+        paperCategoryBody.data.posts.every((post) => post.platformCategory === 'paper'),
+      `category=paper should only return paper posts, got ${JSON.stringify(paperCategoryBody.data)}`,
+    );
+    const xCategoryResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: categoryProbeUrl('x'),
+    });
+    const xCategoryBody = xCategoryResponse.json() as typeof categoryListBody;
+    assert(
+      xCategoryResponse.statusCode === 200 &&
+        xCategoryBody.data.posts.some((post) => post.id === 'category-probe-x') &&
+        xCategoryBody.data.posts.every((post) => post.platformCategory === 'x') &&
+        !xCategoryBody.data.posts.some((post) =>
+          ['category-probe-arxiv', 'category-probe-hn', 'category-probe-youtube'].includes(post.id),
+        ),
+      `category=x should only return X source posts, got ${JSON.stringify(xCategoryBody.data)}`,
+    );
+    const communityCategoryResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: categoryProbeUrl('community'),
+    });
+    const communityCategoryBody = communityCategoryResponse.json() as typeof categoryListBody;
+    assert(
+      communityCategoryResponse.statusCode === 200 &&
+        communityCategoryBody.data.posts.some((post) => post.id === 'category-probe-hn') &&
+        communityCategoryBody.data.posts.every((post) => post.platformCategory === 'community'),
+      `category=community should only return community posts, got ${JSON.stringify(communityCategoryBody.data)}`,
+    );
+    const youtubeCategoryResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: categoryProbeUrl('youtube'),
+    });
+    const youtubeCategoryBody = youtubeCategoryResponse.json() as typeof categoryListBody;
+    assert(
+      youtubeCategoryResponse.statusCode === 200 &&
+        youtubeCategoryBody.data.posts.some((post) => post.id === 'category-probe-youtube') &&
+        youtubeCategoryBody.data.posts.every((post) => post.platformCategory === 'youtube'),
+      `category=youtube should only return YouTube feed posts, got ${JSON.stringify(youtubeCategoryBody.data)}`,
+    );
+    const blogCategoryResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: categoryProbeUrl('blog'),
+    });
+    const blogCategoryBody = blogCategoryResponse.json() as typeof categoryListBody;
+    assert(
+      blogCategoryResponse.statusCode === 200 &&
+        blogCategoryBody.data.posts.some((post) => post.id === 'posts-probe-1') &&
+        blogCategoryBody.data.posts.every((post) => post.platformCategory === 'blog') &&
+        !blogCategoryBody.data.posts.some((post) =>
+          ['category-probe-x', 'category-probe-arxiv', 'category-probe-hn', 'category-probe-youtube'].includes(post.id),
+        ),
+      `category=blog should include sourceless posts as blog fallback, got ${JSON.stringify(blogCategoryBody.data)}`,
+    );
+    const invalidCategoryResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: categoryProbeUrl('zzz-not-a-category'),
+    });
+    const invalidCategoryBody = invalidCategoryResponse.json() as typeof categoryListBody;
+    assert(
+      invalidCategoryResponse.statusCode === 200 &&
+        invalidCategoryBody.data.pagination.total === categoryListBody.data.pagination.total,
+      `invalid category should be ignored, got ${JSON.stringify(invalidCategoryBody.data.pagination)} vs ${JSON.stringify(categoryListBody.data.pagination)}`,
+    );
+    checks.push({ name: '用户端消息按分类服务端过滤（分页计数正确，非法分类忽略）' });
+
+    const keywordProbeUrl = `/user/api/posts?page=1&pageSize=50&query=${encodeURIComponent('分类探针')}`;
+    const keywordOnlyResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: keywordProbeUrl,
+    });
+    const keywordOnlyBody = keywordOnlyResponse.json() as typeof categoryListBody;
+    const keywordAndCategoryResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'GET',
+      url: `${keywordProbeUrl}&category=x`,
+    });
+    const keywordAndCategoryBody = keywordAndCategoryResponse.json() as typeof categoryListBody;
+    assert(
+      keywordOnlyBody.data.pagination.total === 4 &&
+        keywordAndCategoryBody.data.pagination.total === 1 &&
+        keywordAndCategoryBody.data.posts[0]?.id === 'category-probe-x',
+      `search + category should combine with AND (4 keyword posts -> 1 for category=x), got ${JSON.stringify({
+        keywordOnly: keywordOnlyBody.data.pagination,
+        keywordAndCategory: keywordAndCategoryBody.data,
+      })}`,
+    );
+    checks.push({ name: '分类与搜索叠加 AND（翻页由前端携带 category）' });
+
     const secondBindResponse = await rawInject({
       headers: { cookie: userCookie },
       method: 'POST',
@@ -2755,6 +3275,422 @@ async function main(): Promise<void> {
     );
     checks.push({ name: '源过滤生效：未选源不投递、其它绑定不受影响' });
 
+    // ---- 主题包（source packs）----
+    const createPackResponse = await app.inject({
+      method: 'POST',
+      payload: { name: 'Smoke 主题包', sourceIds: [seededAccount.id] },
+      url: '/admin/api/source-packs',
+    });
+    assert(
+      createPackResponse.statusCode === 200,
+      `create source pack returned ${createPackResponse.statusCode}`,
+    );
+    const createdPack = (
+      createPackResponse.json() as {
+        data: {
+          sourcePack: {
+            enabled: boolean;
+            id: string;
+            name: string;
+            selectedByUsers: number;
+            sourceCount: number;
+            sources: Array<{ id: string }>;
+          };
+        };
+      }
+    ).data.sourcePack;
+    assert(
+      createdPack.sourceCount === 1 &&
+        createdPack.sources[0]?.id === seededAccount.id &&
+        createdPack.enabled === true &&
+        createdPack.selectedByUsers === 0,
+      `created pack should carry its sources, got ${JSON.stringify(createdPack)}`,
+    );
+
+    const duplicatePackResponse = await app.inject({
+      method: 'POST',
+      payload: { name: 'Smoke 主题包', sourceIds: [] },
+      url: '/admin/api/source-packs',
+    });
+    assert(
+      duplicatePackResponse.statusCode === 409,
+      `duplicate pack name should return 409, got ${duplicatePackResponse.statusCode}`,
+    );
+
+    const packsListResponse = await app.inject({ method: 'GET', url: '/admin/api/source-packs' });
+    const packsList = packsListResponse.json() as {
+      data: { packs: Array<{ id: string; name: string; sourceCount: number; sources: Array<{ id: string; sourceType: string; sourceUrl: string | null }> }> };
+    };
+    assert(
+      packsListResponse.statusCode === 200 &&
+        packsList.data.packs.some(
+          (pack) =>
+            pack.id === createdPack.id && pack.sourceCount === 1 && Array.isArray(pack.sources),
+        ),
+      `source-packs list should include the created pack, got ${JSON.stringify(packsList.data)}`,
+    );
+
+    const setPacksResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'PUT',
+      payload: { mode: 'packs', packs: [createdPack.id] },
+      url: `/user/api/wechat/accounts/${encodeURIComponent(boundAccountId)}/sources`,
+    });
+    assert(
+      setPacksResponse.statusCode === 200,
+      `setting wechat packs returned ${setPacksResponse.statusCode}`,
+    );
+    const setPacksResult = (
+      setPacksResponse.json() as { data: { mode: string; packs: string[]; sourceIds: string[] } }
+    ).data;
+    assert(
+      setPacksResult.mode === 'packs' &&
+        setPacksResult.packs.includes(createdPack.id) &&
+        setPacksResult.sourceIds.length === 0,
+      `pack mode save should clear sourceIds and keep packs, got ${JSON.stringify(setPacksResult)}`,
+    );
+
+    const bindingWithPacks = (
+      await rawInject({ headers: { cookie: userCookie }, method: 'GET', url: '/user/api/wechat' })
+    ).json() as {
+      data: {
+        accounts: Array<{ mode: string; packIds: string[] }>;
+        sourcePacks: Array<{ description: string | null; enabled: boolean; id: string; name: string; sourceCount: number; sources: Array<{ id: string }> }>;
+      };
+    };
+    assert(
+      bindingWithPacks.data.accounts[0]?.mode === 'packs' &&
+        bindingWithPacks.data.accounts[0]?.packIds.includes(createdPack.id),
+      `binding should report pack mode and packIds, got ${JSON.stringify(bindingWithPacks.data.accounts)}`,
+    );
+    assert(
+      bindingWithPacks.data.sourcePacks.some(
+        (pack) =>
+          pack.id === createdPack.id && pack.name === 'Smoke 主题包' &&
+          pack.enabled && pack.sources.some((source) => source.id === seededAccount.id),
+      ),
+      `binding should expose source packs with member sources, got ${JSON.stringify(bindingWithPacks.data.sourcePacks)}`,
+    );
+    checks.push({ name: '管理员建包 + 用户按包订阅（GET 结构与 PUT mode=packs）' });
+
+    // 包内源投递：mock_ai 帖子应创建事件
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T06:00:00.000Z',
+        id: '1000000010000000010',
+        text: 'Pack included post',
+      },
+    ]);
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const packIncludedEvent = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000010',
+      wechatTargetKey,
+    );
+    assert(
+      packIncludedEvent !== null,
+      'post from a pack source should be delivered to the pack subscriber',
+    );
+
+    // 包内新增源 → 新帖自动投递
+    const packAddMemberResponse = await app.inject({
+      method: 'PUT',
+      payload: { sourceIds: [seededAccount.id, excludedAccountRow.id] },
+      url: `/admin/api/source-packs/${createdPack.id}`,
+    });
+    assert(
+      packAddMemberResponse.statusCode === 200,
+      `updating pack members returned ${packAddMemberResponse.statusCode}`,
+    );
+    const packAfterAdd = (
+      packAddMemberResponse.json() as { data: { sourcePack: { sourceCount: number } } }
+    ).data.sourcePack;
+    assert(
+      packAfterAdd.sourceCount === 2,
+      `pack should have 2 sources after member edit, got ${JSON.stringify(packAfterAdd)}`,
+    );
+
+    rssApi.setFeed(excludedFeedPath, {
+      body: createRssDocument('Excluded Source', [
+        createRssItem({
+          description: '<p>Pack auto-added source body</p>',
+          guid: 'excluded-item-3',
+          link: 'https://example.com/excluded/3',
+          pubDate: 'Fri, 24 Apr 2026 06:30:00 GMT',
+          title: 'Pack auto-added source post',
+        }),
+        createRssItem({
+          description: '<p>Excluded source body</p>',
+          guid: 'excluded-item-1',
+          link: 'https://example.com/excluded/1',
+          pubDate: 'Fri, 24 Apr 2026 03:30:00 GMT',
+          title: 'Excluded source post',
+        }),
+      ]),
+      contentType: 'application/rss+xml; charset=utf-8',
+      statusCode: 200,
+    });
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const autoAddedPosts = await prisma.xPostRaw.findMany({
+      where: { authorUserId: excludedAccountRow?.xUserId ?? '' },
+    });
+    const autoAddedPost = autoAddedPosts.find((post) =>
+      post.textContent.includes('Pack auto-added source'),
+    );
+    assert(autoAddedPost !== undefined, 'newly added pack source post should be stored');
+    const autoAddedEvent = await storage.deliveryEvents.findByPostAndTarget(
+      autoAddedPost.xPostId,
+      wechatTargetKey,
+    );
+    assert(
+      autoAddedEvent !== null,
+      'new source added to the pack should be delivered automatically to pack subscribers',
+    );
+    checks.push({ name: '包内新增源自动投递给选包用户' });
+
+    // 停用包：不投递且用户选择保留
+    const disablePackResponse = await app.inject({
+      method: 'PUT',
+      payload: { enabled: false },
+      url: `/admin/api/source-packs/${createdPack.id}`,
+    });
+    assert(
+      disablePackResponse.statusCode === 200 &&
+        (disablePackResponse.json() as { data: { sourcePack: { enabled: boolean } } }).data.sourcePack
+          .enabled === false,
+      `disabling pack should succeed, got ${disablePackResponse.statusCode}`,
+    );
+
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T07:00:00.000Z',
+        id: '1000000010000000011',
+        text: 'Disabled pack post',
+      },
+    ]);
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const disabledPackEvent = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000011',
+      wechatTargetKey,
+    );
+    assert(
+      disabledPackEvent === null,
+      'disabled pack must not deliver to its subscribers',
+    );
+    const disabledUnfilteredEvent = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000011',
+      'wechat:wechat-b@im.bot',
+    );
+    assert(
+      disabledUnfilteredEvent !== null,
+      'unfiltered targets should still receive the post while a pack is disabled',
+    );
+
+    const bindingDisabledPack = (
+      await rawInject({ headers: { cookie: userCookie }, method: 'GET', url: '/user/api/wechat' })
+    ).json() as {
+      data: {
+        accounts: Array<{ packIds: string[] }>;
+        sourcePacks: Array<{ enabled: boolean; id: string }>;
+      };
+    };
+    assert(
+      bindingDisabledPack.data.accounts[0]?.packIds.includes(createdPack.id),
+      `disabling a pack must keep the user selection, got ${JSON.stringify(bindingDisabledPack.data.accounts)}`,
+    );
+    assert(
+      bindingDisabledPack.data.sourcePacks.some(
+        (pack) => pack.id === createdPack.id && pack.enabled === false,
+      ),
+      'binding should report the disabled pack state for the disabled badge',
+    );
+    checks.push({ name: '停用包：不投递且用户 packIds 保留' });
+
+    // 重新启用：自动恢复投递
+    const enablePackResponse = await app.inject({
+      method: 'PUT',
+      payload: { enabled: true },
+      url: `/admin/api/source-packs/${createdPack.id}`,
+    });
+    assert(
+      enablePackResponse.statusCode === 200 &&
+        (enablePackResponse.json() as { data: { sourcePack: { enabled: boolean } } }).data.sourcePack
+          .enabled === true,
+      `re-enabling pack should succeed, got ${enablePackResponse.statusCode}`,
+    );
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T07:30:00.000Z',
+        id: '1000000010000000012',
+        text: 'Re-enabled pack post',
+      },
+    ]);
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const reEnabledEvent = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000012',
+      wechatTargetKey,
+    );
+    assert(
+      reEnabledEvent !== null,
+      're-enabling a pack should restore delivery to its subscribers',
+    );
+    checks.push({ name: '重新启用包后自动恢复投递' });
+
+    // 包模式空集（空包）不推送
+    const emptyPackCreateResponse = await app.inject({
+      method: 'POST',
+      payload: { name: 'Smoke 空包' },
+      url: '/admin/api/source-packs',
+    });
+    assert(
+      emptyPackCreateResponse.statusCode === 200,
+      `creating an empty pack returned ${emptyPackCreateResponse.statusCode}`,
+    );
+    const emptyPack = (
+      emptyPackCreateResponse.json() as { data: { sourcePack: { id: string; sourceCount: number } } }
+    ).data.sourcePack;
+    assert(emptyPack.sourceCount === 0, 'empty pack should have no sources');
+    const setEmptyPackResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'PUT',
+      payload: { mode: 'packs', packs: [emptyPack.id] },
+      url: `/user/api/wechat/accounts/${encodeURIComponent(boundAccountId)}/sources`,
+    });
+    assert(
+      setEmptyPackResponse.statusCode === 200,
+      `selecting the empty pack returned ${setEmptyPackResponse.statusCode}`,
+    );
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T08:00:00.000Z',
+        id: '1000000010000000013',
+        text: 'Empty pack post',
+      },
+    ]);
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const emptyPackEvent = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000013',
+      wechatTargetKey,
+    );
+    assert(
+      emptyPackEvent === null,
+      'pack mode with an empty effective source set must not deliver',
+    );
+    checks.push({ name: '包模式有效源集为空：不推送' });
+
+    // 删除包：级联清理用户选择，无其它包时回退全部接收
+    const deletePackResponse = await app.inject({
+      method: 'DELETE',
+      url: `/admin/api/source-packs/${createdPack.id}`,
+    });
+    assert(
+      deletePackResponse.statusCode === 200,
+      `deleting the pack returned ${deletePackResponse.statusCode}`,
+    );
+    const deletePackResult = (
+      deletePackResponse.json() as { data: { affectedUsers: number } }
+    ).data;
+    assert(
+      deletePackResult.affectedUsers === 0,
+      `the pack was deselected before deletion, affected users should be 0, got ${JSON.stringify(deletePackResult)}`,
+    );
+    const deleteEmptyPackResponse = await app.inject({
+      method: 'DELETE',
+      url: `/admin/api/source-packs/${emptyPack.id}`,
+    });
+    assert(
+      deleteEmptyPackResponse.statusCode === 200 &&
+        (deleteEmptyPackResponse.json() as { data: { affectedUsers: number } }).data
+          .affectedUsers === 1,
+      `deleting the selected empty pack should report one affected user, got ${deleteEmptyPackResponse.statusCode}`,
+    );
+
+    const targetAfterDelete = await storage.deliveryTargets.findByTargetKey(wechatTargetKey);
+    assert(
+      targetAfterDelete !== null && targetAfterDelete.config.packIds === undefined,
+      `deleted pack ids must be cleaned from user configs, got ${JSON.stringify(targetAfterDelete?.config)}`,
+    );
+
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T08:30:00.000Z',
+        id: '1000000010000000014',
+        text: 'After pack deletion post',
+      },
+    ]);
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const fallbackEvent = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000014',
+      wechatTargetKey,
+    );
+    assert(
+      fallbackEvent !== null,
+      'user with no packs left should fall back to receiving everything',
+    );
+    checks.push({ name: '删除包级联清理用户选择并回退全部接收' });
+
+    // 旧体兼容：仅 { sourceIds: [...] }（空=全部）
+    const legacyFilterResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'PUT',
+      payload: { sourceIds: [excludedAccountRow.id] },
+      url: `/user/api/wechat/accounts/${encodeURIComponent(boundAccountId)}/sources`,
+    });
+    assert(
+      legacyFilterResponse.statusCode === 200,
+      `legacy body sources PUT returned ${legacyFilterResponse.statusCode}`,
+    );
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T09:00:00.000Z',
+        id: '1000000010000000015',
+        text: 'Legacy filter post',
+      },
+    ]);
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const legacyFilteredEvent = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000015',
+      wechatTargetKey,
+    );
+    assert(
+      legacyFilteredEvent === null,
+      'legacy body should still apply the custom source filter',
+    );
+
+    const legacyClearResponse = await rawInject({
+      headers: { cookie: userCookie },
+      method: 'PUT',
+      payload: { sourceIds: [] },
+      url: `/user/api/wechat/accounts/${encodeURIComponent(boundAccountId)}/sources`,
+    });
+    assert(
+      legacyClearResponse.statusCode === 200,
+      `legacy empty sources PUT returned ${legacyClearResponse.statusCode}`,
+    );
+    const legacyClearResult = (
+      legacyClearResponse.json() as { data: { mode: string; packs: string[]; sourceIds: string[] } }
+    ).data;
+    assert(
+      legacyClearResult.mode === 'all' && legacyClearResult.packs.length === 0,
+      `legacy empty sources should restore receive-all, got ${JSON.stringify(legacyClearResult)}`,
+    );
+    xApi.setPosts([
+      {
+        created_at: '2026-04-24T09:30:00.000Z',
+        id: '1000000010000000016',
+        text: 'Legacy restore post',
+      },
+    ]);
+    await runPollingJob({ config, logger, sourceProviders, storage });
+    const legacyRestoredEvent = await storage.deliveryEvents.findByPostAndTarget(
+      '1000000010000000016',
+      wechatTargetKey,
+    );
+    assert(
+      legacyRestoredEvent !== null,
+      'legacy body with empty sourceIds should restore receive-all delivery',
+    );
+    checks.push({ name: '旧体兼容：仅 sourceIds 数组仍按现状（空=全部）' });
+
     const quietReference = new Date('2026-04-24T18:00:00.000Z');
     const quietWindow = findQuietWindow(quietReference, true);
     const openWindow = findQuietWindow(quietReference, false);
@@ -2778,12 +3714,12 @@ async function main(): Promise<void> {
     xApi.setPosts([
       {
         created_at: '2026-04-24T04:00:00.000Z',
-        id: '1000000010000000002',
+        id: '1000000010000000017',
         text: 'Quiet hours post one',
       },
       {
         created_at: '2026-04-24T04:10:00.000Z',
-        id: '1000000010000000003',
+        id: '1000000010000000018',
         text: 'Quiet hours post two',
       },
     ]);
@@ -2796,7 +3732,7 @@ async function main(): Promise<void> {
       entry.url.startsWith('/mock-wechat-bridge'),
     ).length;
     const quietEventOne = await storage.deliveryEvents.findByPostAndTarget(
-      '1000000010000000002',
+      '1000000010000000017',
       wechatTargetKey,
     );
     assert(
@@ -2824,11 +3760,11 @@ async function main(): Promise<void> {
     const digestRequest = digestRequests.at(-1);
     const digestText = JSON.stringify(digestRequest?.body ?? {});
     const quietEventOneAfterFlush = await storage.deliveryEvents.findByPostAndTarget(
-      '1000000010000000002',
+      '1000000010000000017',
       wechatTargetKey,
     );
     const quietEventTwoAfterFlush = await storage.deliveryEvents.findByPostAndTarget(
-      '1000000010000000003',
+      '1000000010000000018',
       wechatTargetKey,
     );
     assert(
@@ -2849,23 +3785,23 @@ async function main(): Promise<void> {
     xApi.setPosts([
       {
         created_at: '2026-04-24T05:00:00.000Z',
-        id: '1000000010000000004',
+        id: '1000000010000000019',
         text: 'Digest failure post one',
       },
       {
         created_at: '2026-04-24T05:10:00.000Z',
-        id: '1000000010000000005',
+        id: '1000000010000000020',
         text: 'Digest failure post two',
       },
     ]);
     await runPollingJob({ config, logger, sourceProviders, storage });
     await runDeliveryWorkerJob({ logger, now: () => quietReference, storage });
     const failureEventOne = await storage.deliveryEvents.findByPostAndTarget(
-      '1000000010000000004',
+      '1000000010000000019',
       wechatTargetKey,
     );
     const failureEventTwo = await storage.deliveryEvents.findByPostAndTarget(
-      '1000000010000000005',
+      '1000000010000000020',
       wechatTargetKey,
     );
     assert(

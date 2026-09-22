@@ -211,43 +211,152 @@
       />
     </div>
 
-    <details v-if="sourceGroups.length > 0" class="panel source-groups-panel disclosure-panel">
-      <summary class="disclosure-summary">
+    <div class="panel source-packs-panel">
+      <header class="panel-header">
         <div>
-          <h2>{{ t('accounts.groups.title') }}</h2>
-          <p>{{ t('accounts.groups.description') }}</p>
+          <h2>{{ t('accounts.packs.title') }}</h2>
+          <p>{{ t('accounts.packs.description') }}</p>
         </div>
-      </summary>
-      <div class="source-group-list">
-        <div v-for="group in sourceGroups" :key="group.id" class="source-group-row">
-          <div class="source-group-info">
-            <strong>
-              {{ group.name }}
-              <span class="status-badge neutral">
-                {{ group.installedCount }} / {{ group.sourceCount }}
-              </span>
-            </strong>
-            <p class="muted">{{ group.description }}</p>
-            <details v-if="group.details !== undefined" class="source-group-details">
-              <summary>{{ t('accounts.groups.showSources') }}</summary>
-              <p class="muted">{{ group.details }}</p>
-            </details>
+        <button
+          class="primary"
+          type="button"
+          :aria-expanded="packEditorOpen"
+          :disabled="packBusy"
+          @click="openPackEditor()"
+        >
+          {{ t('accounts.packs.create') }}
+        </button>
+      </header>
+
+      <div v-if="packEditorOpen" class="panel pack-editor-panel">
+        <form class="pack-editor" @submit.prevent="savePack">
+          <label class="pack-editor-field">
+            <span>{{ t('accounts.packs.nameLabel') }}</span>
+            <input
+              v-model="packNameInput"
+              autocomplete="off"
+              :disabled="packBusy"
+              maxlength="100"
+              :placeholder="t('accounts.packs.namePlaceholder')"
+            />
+          </label>
+          <label class="pack-editor-field">
+            <span>{{ t('accounts.packs.descriptionLabel') }}</span>
+            <input
+              v-model="packDescriptionInput"
+              autocomplete="off"
+              :disabled="packBusy"
+              maxlength="500"
+              :placeholder="t('accounts.packs.descriptionPlaceholder')"
+            />
+          </label>
+          <div class="pack-editor-members">
+            <div class="pack-editor-members-head">
+              <strong>{{ t('accounts.packs.membersTitle', { count: packMemberIds.length }) }}</strong>
+              <span v-if="packSelectedNames.length > 0" class="muted">{{ packSelectedNames.join('、') }}</span>
+            </div>
+            <input
+              v-model="packMemberQuery"
+              autocomplete="off"
+              class="pack-member-search"
+              :disabled="packBusy"
+              :placeholder="t('accounts.packs.memberSearchPlaceholder')"
+            />
+            <p v-if="packMemberGroups.length === 0" class="muted pack-member-empty">
+              {{ t('accounts.packs.memberSearchEmpty') }}
+            </p>
+            <ul v-else class="pack-member-list">
+              <template v-for="group in packMemberGroups" :key="group.key">
+                <li class="pack-member-group-title">{{ t(group.labelKey) }}</li>
+                <li v-for="account in group.sources" :key="account.id">
+                  <label class="pack-member-row">
+                    <input
+                      type="checkbox"
+                      :checked="packMemberIds.includes(account.id)"
+                      :disabled="packBusy"
+                      @change="togglePackMember(account.id)"
+                    />
+                    <span class="status-badge neutral source-type-badge">{{ sourceBadge(account) }}</span>
+                    <span class="pack-member-name">{{ sourceLabel(account) }}</span>
+                    <span v-if="sourceSubtitle(account).length > 0" class="muted source-cell-subtitle">
+                      {{ sourceSubtitle(account) }}
+                    </span>
+                  </label>
+                </li>
+              </template>
+            </ul>
           </div>
-          <button
-            class="bundle-action"
-            type="button"
-            :disabled="busy || group.installedCount >= group.sourceCount"
-            @click="applyGroup(group)"
-          >
-            {{
-              group.installedCount >= group.sourceCount
-                ? t('accounts.groups.added')
-                : t('accounts.groups.apply')
-            }}
-          </button>
-        </div>
+          <div class="pack-editor-actions">
+            <button class="primary" type="submit" :disabled="packBusy || packNameInput.trim().length === 0">
+              {{ t(packEditingId === null ? 'accounts.packs.create' : 'actions.saveEdit') }}
+            </button>
+            <button type="button" :disabled="packBusy" @click="closePackEditor">{{ t('actions.cancel') }}</button>
+          </div>
+        </form>
       </div>
-    </details>
+
+      <EmptyState
+        v-if="sourcePacks.length === 0"
+        :title="t('accounts.packs.emptyTitle')"
+        :description="t('accounts.packs.empty')"
+      />
+      <div v-else class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>{{ t('accounts.packs.nameLabel') }}</th>
+              <th>{{ t('accounts.packs.sourceCount') }}</th>
+              <th>{{ t('accounts.packs.selectedByUsers') }}</th>
+              <th>{{ t('settings.feishu.table.enabled') }}</th>
+              <th>{{ t('table.actions') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="pack in sourcePacks" :key="pack.id" :class="{ 'pack-row-disabled': !pack.enabled }">
+              <td class="pack-name-cell">
+                <div class="pack-name-row">
+                  <strong>{{ pack.name }}</strong>
+                  <span v-if="!pack.enabled" class="status-badge neutral pack-disabled-badge">{{ t('accounts.packs.disabled') }}</span>
+                </div>
+                <p class="muted pack-description">{{ pack.description }}</p>
+              </td>
+              <td>{{ pack.sourceCount }}</td>
+              <td>{{ pack.selectedByUsers }}</td>
+              <td>
+                <button
+                  class="me-switch"
+                  :class="{ on: pack.enabled }"
+                  type="button"
+                  role="switch"
+                  :aria-checked="pack.enabled"
+                  :aria-label="t('accounts.packs.toggleEnabled', { name: pack.name })"
+                  :disabled="packBusy"
+                  @click="togglePackEnabled(pack)"
+                >
+                  <span class="me-switch-knob"></span>
+                </button>
+              </td>
+              <td class="source-actions-cell">
+                <button
+                  class="text-button"
+                  type="button"
+                  :disabled="packBusy"
+                  @click="packDetailTarget = pack"
+                >
+                  {{ t('accounts.packs.viewDetails') }}
+                </button>
+                <button class="text-button" type="button" :disabled="packBusy" @click="openPackEditor(pack)">
+                  {{ t('actions.edit') }}
+                </button>
+                <button class="text-button danger-text" type="button" :disabled="packBusy" @click="packDeleteTarget = pack">
+                  {{ t('actions.delete') }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
 
     <ConfirmModal
       :open="deleteTarget !== null"
@@ -256,6 +365,21 @@
       :detail="t('accounts.deleteBody')"
       @cancel="deleteTarget = null"
       @confirm="confirmDelete"
+    />
+
+    <ConfirmModal
+      :open="packDeleteTarget !== null"
+      :title="t('accounts.packs.deleteTitle')"
+      :body="packDeleteTarget?.name ?? ''"
+      :detail="t('accounts.packs.deleteBody', { count: packDeleteTarget?.selectedByUsers ?? 0 })"
+      @cancel="packDeleteTarget = null"
+      @confirm="confirmPackDelete"
+    />
+
+    <PackDetailModal
+      :open="packDetailTarget !== null"
+      :pack="packDetailTarget"
+      @close="packDetailTarget = null"
     />
 
     <ConfirmModal
@@ -273,27 +397,37 @@ import { computed, onMounted, ref, watch } from 'vue';
 
 import {
   AdminApiRequestError,
+  createSourcePack,
   createWatchAccount,
   deleteAllWatchAccounts,
+  deleteSourcePack,
   deleteWatchAccount,
-  getSourceGroups,
+  listSourcePacks,
   listWatchAccounts,
-  applySourceGroup,
   resolveYoutubeChannel,
+  updateSourcePack,
   type AdminPagination,
   type ResolvedYoutubeChannel,
-  type SourceGroupStatus,
+  type SourcePackView,
   type WatchAccount,
 } from '../api/admin-api';
 import ConfirmModal from '../components/ConfirmModal.vue';
 import EmptyState from '../components/EmptyState.vue';
+import PackDetailModal from '../components/PackDetailModal.vue';
 import PageHeader from '../components/PageHeader.vue';
 import PaginationBar from '../components/PaginationBar.vue';
 import SelectControl from '../components/SelectControl.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import ToastNotice from '../components/ToastNotice.vue';
 import { t } from '../i18n';
-import { sourceLabel, sourceSubtitle } from '../source-labels';
+import {
+  SOURCE_GROUP_LABEL_KEYS,
+  SOURCE_GROUP_ORDER,
+  sourceGroup,
+  sourceLabel,
+  sourceSubtitle,
+  type SourceGroupKey,
+} from '../source-labels';
 import { DEFAULT_PAGE_SIZE, formatDateTime, formatRelativeTime } from '../utils';
 
 type SourceKind =
@@ -328,7 +462,17 @@ const REDDIT_NAME_PATTERN = /^[A-Za-z0-9_]{2,21}$/u;
 
 const newSourceOpen = ref(false);
 const accounts = ref<WatchAccount[]>([]);
-const sourceGroups = ref<SourceGroupStatus[]>([]);
+const sourcePacks = ref<SourcePackView[]>([]);
+const packEditorOpen = ref(false);
+const packEditingId = ref<string | null>(null);
+const packNameInput = ref('');
+const packDescriptionInput = ref('');
+const packMemberQuery = ref('');
+const packMemberIds = ref<string[]>([]);
+const packMemberResults = ref<WatchAccount[]>([]);
+const packBusy = ref(false);
+const packDeleteTarget = ref<SourcePackView | null>(null);
+const packDetailTarget = ref<SourcePackView | null>(null);
 const activeQuery = ref('');
 const addingAccount = ref(false);
 const busy = ref(false);
@@ -453,7 +597,7 @@ watch([redditName, redditSort, arxivCategory, hnPreset], () => {
 
 onMounted(() => {
   void loadAccounts(1, { silent: true });
-  void loadSourceGroups();
+  void loadSourcePacks();
 });
 
 async function loadAccounts(page: number, options: { silent?: boolean } = {}): Promise<void> {
@@ -680,36 +824,202 @@ function resetSourceForm(): void {
   githubUser.value = '';
 }
 
-async function loadSourceGroups(): Promise<void> {
+async function loadSourcePacks(): Promise<void> {
+  packBusy.value = true;
+
   try {
-    sourceGroups.value = await getSourceGroups();
+    sourcePacks.value = await listSourcePacks();
   } catch {
-    sourceGroups.value = [];
+    sourcePacks.value = [];
+  } finally {
+    packBusy.value = false;
   }
 }
 
-async function applyGroup(group: SourceGroupStatus): Promise<void> {
-  busy.value = true;
+const packSelectedNames = computed<string[]>(() =>
+  packMemberIds.value
+    .map((id) => {
+      const source =
+        accounts.value.find((account) => account.id === id) ??
+        packMemberResults.value.find((account) => account.id === id) ??
+        sourcePacks.value.flatMap((pack) => pack.sources).find((source) => source.id === id);
+
+      if (source === undefined) {
+        return id;
+      }
+
+      return sourceLabel(source);
+    }),
+);
+
+const packMemberOptions = computed<WatchAccount[]>(() => {
+  const merged = new Map<string, WatchAccount>();
+
+  for (const account of packMemberResults.value) {
+    merged.set(account.id, account);
+  }
+
+  for (const account of accounts.value) {
+    merged.set(account.id, account);
+  }
+
+  return [...merged.values()];
+});
+
+const packMemberGroups = computed(() => {
+  const groups = new Map<SourceGroupKey, WatchAccount[]>();
+
+  for (const account of packMemberOptions.value) {
+    const key = sourceGroup(account);
+    const list = groups.get(key) ?? [];
+
+    list.push(account);
+    groups.set(key, list);
+  }
+
+  return [...groups.entries()]
+    .sort(
+      ([left], [right]) => SOURCE_GROUP_ORDER.indexOf(left) - SOURCE_GROUP_ORDER.indexOf(right),
+    )
+    .map(([key, sources]) => ({
+      key,
+      labelKey: SOURCE_GROUP_LABEL_KEYS[key],
+      sources: [...sources].sort((left, right) =>
+        sourceLabel(left).localeCompare(sourceLabel(right), 'zh-Hans-CN'),
+      ),
+    }));
+});
+
+watch(packMemberQuery, (nextQuery) => {
+  void searchPackMembers(nextQuery);
+});
+
+async function searchPackMembers(query: string): Promise<void> {
+  const trimmedQuery = query.trim();
 
   try {
-    const result = await applySourceGroup(group.id);
-    await loadAccounts(1, { silent: true });
-    await loadSourceGroups();
-    setNotice(
-      t('notice.sourceGroupApplied', {
-        created: result.created,
-        existing: result.existing,
-      }),
-    );
+    const result = await listWatchAccounts({
+      page: 1,
+      pageSize: 100,
+      ...(trimmedQuery.length === 0 ? {} : { query: trimmedQuery }),
+    });
+
+    packMemberResults.value = result.watchAccounts;
+  } catch {
+    packMemberResults.value = [];
+  }
+}
+
+function togglePackMember(sourceId: string): void {
+  if (packMemberIds.value.includes(sourceId)) {
+    packMemberIds.value = packMemberIds.value.filter((id) => id !== sourceId);
+  } else {
+    packMemberIds.value = [...packMemberIds.value, sourceId];
+  }
+}
+
+function openPackEditor(pack?: SourcePackView): void {
+  packEditingId.value = pack?.id ?? null;
+  packNameInput.value = pack?.name ?? '';
+  packDescriptionInput.value = pack?.description ?? '';
+  packMemberIds.value = pack?.sources.map((source) => source.id) ?? [];
+  packMemberQuery.value = '';
+  packMemberResults.value = [];
+  packEditorOpen.value = true;
+
+  void searchPackMembers('');
+}
+
+function closePackEditor(): void {
+  packEditorOpen.value = false;
+  packEditingId.value = null;
+  packNameInput.value = '';
+  packDescriptionInput.value = '';
+  packMemberIds.value = [];
+  packMemberQuery.value = '';
+  packMemberResults.value = [];
+}
+
+async function savePack(): Promise<void> {
+  const name = packNameInput.value.trim();
+
+  if (name.length === 0) {
+    return;
+  }
+
+  packBusy.value = true;
+
+  try {
+    const input = {
+      description: packDescriptionInput.value.trim().length === 0 ? null : packDescriptionInput.value.trim(),
+      name,
+      sourceIds: packMemberIds.value,
+    };
+
+    if (packEditingId.value === null) {
+      await createSourcePack(input);
+    } else {
+      await updateSourcePack(packEditingId.value, input);
+    }
+
+    setNotice(t('notice.sourcePackSaved'));
+    closePackEditor();
+    await loadSourcePacks();
   } catch (error) {
     setNotice(
-      t('notice.sourceGroupFailed', {
+      t('notice.sourcePackFailed', {
         error: error instanceof Error ? error.message : String(error),
       }),
       true,
     );
   } finally {
-    busy.value = false;
+    packBusy.value = false;
+  }
+}
+
+async function togglePackEnabled(pack: SourcePackView): Promise<void> {
+  packBusy.value = true;
+
+  try {
+    await updateSourcePack(pack.id, { enabled: !pack.enabled });
+    setNotice(t(pack.enabled ? 'notice.sourcePackDisabled' : 'notice.sourcePackEnabled'));
+    await loadSourcePacks();
+  } catch (error) {
+    setNotice(
+      t('notice.sourcePackFailed', {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+      true,
+    );
+  } finally {
+    packBusy.value = false;
+  }
+}
+
+async function confirmPackDelete(): Promise<void> {
+  const pack = packDeleteTarget.value;
+
+  packDeleteTarget.value = null;
+
+  if (pack === null) {
+    return;
+  }
+
+  packBusy.value = true;
+
+  try {
+    const result = await deleteSourcePack(pack.id);
+    setNotice(t('notice.sourcePackDeleted', { count: result.affectedUsers }));
+    await loadSourcePacks();
+  } catch (error) {
+    setNotice(
+      t('notice.sourcePackFailed', {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+      true,
+    );
+  } finally {
+    packBusy.value = false;
   }
 }
 

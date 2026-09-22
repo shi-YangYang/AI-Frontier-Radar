@@ -8,24 +8,50 @@ datasource db {
 }
 
 model WatchAccount {
-  id             String  @id
-  sourceType     String  @default("x") @map("source_type")
-  sourceUrl      String? @map("source_url")
-  xUsername      String? @unique @map("x_username")
-  xUserId        String? @map("x_user_id")
-  displayName    String? @map("display_name")
-  enabled        Boolean @default(true)
-  baselinePostId String? @map("baseline_post_id")
-  lastSeenPostId String? @map("last_seen_post_id")
-  lastPolledAt   String? @map("last_polled_at")
-  lastPollStatus String? @map("last_poll_status")
-  lastPollError  String? @map("last_poll_error")
-  createdAt      String  @map("created_at")
-  updatedAt      String  @map("updated_at")
+  id              String           @id
+  sourceType      String           @default("x") @map("source_type")
+  sourceUrl       String?          @map("source_url")
+  xUsername       String?          @unique @map("x_username")
+  xUserId         String?          @map("x_user_id")
+  displayName     String?          @map("display_name")
+  enabled         Boolean          @default(true)
+  baselinePostId  String?          @map("baseline_post_id")
+  lastSeenPostId  String?          @map("last_seen_post_id")
+  lastPolledAt    String?          @map("last_polled_at")
+  lastPollStatus  String?          @map("last_poll_status")
+  lastPollError   String?          @map("last_poll_error")
+  createdAt       String           @map("created_at")
+  updatedAt       String           @map("updated_at")
+  sourcePackItems SourcePackItem[]
 
   @@unique([sourceType, sourceUrl])
   @@index([enabled])
   @@map("watch_accounts")
+}
+
+model SourcePack {
+  id          String           @id
+  name        String           @unique
+  description String?
+  sortOrder   Int              @default(0) @map("sort_order")
+  enabled     Boolean          @default(true)
+  createdAt   String           @map("created_at")
+  updatedAt   String           @map("updated_at")
+  items       SourcePackItem[]
+
+  @@map("source_packs")
+}
+
+model SourcePackItem {
+  id             String       @id
+  packId         String       @map("pack_id")
+  watchAccountId String       @map("watch_account_id")
+  pack           SourcePack   @relation(fields: [packId], references: [id], onDelete: Cascade)
+  watchAccount   WatchAccount @relation(fields: [watchAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([packId, watchAccountId])
+  @@index([watchAccountId])
+  @@map("source_pack_items")
 }
 
 model XPostRaw {
@@ -50,17 +76,16 @@ model XPostRaw {
 }
 
 model DeliveryTarget {
-  id             String          @id
-  targetKey      String          @unique @map("target_key")
-  channelType    String          @map("channel_type")
-  displayName    String          @map("display_name")
-  webhookUrl     String          @map("webhook_url")
-  configJson     String          @default("{}") @map("config_json")
-  ownerUserId    String?         @map("owner_user_id")
-  enabled        Boolean         @default(true)
-  createdAt      String          @map("created_at")
-  updatedAt      String          @map("updated_at")
-  deliveryEvents DeliveryEvent[]
+  id          String @id
+  targetKey   String @unique @map("target_key")
+  channelType String @map("channel_type")
+  displayName String @map("display_name")
+  webhookUrl  String @map("webhook_url")
+  configJson  String @default("{}") @map("config_json")
+  ownerUserId String? @map("owner_user_id")
+  enabled     Boolean @default(true)
+  createdAt   String @map("created_at")
+  updatedAt   String @map("updated_at")
 
   @@index([enabled])
   @@map("delivery_targets")
@@ -86,10 +111,9 @@ model DeliveryEvent {
   lastError      String?        @map("last_error")
   lockedAt       String?        @map("locked_at")
   sentAt         String?        @map("sent_at")
-  createdAt      String         @map("created_at")
-  updatedAt      String         @map("updated_at")
-  deliveryTarget DeliveryTarget @relation(fields: [targetKey], references: [targetKey], onUpdate: Cascade)
-  xPost          XPostRaw       @relation(fields: [xPostId], references: [xPostId], onUpdate: Cascade)
+  createdAt   String  @map("created_at")
+  updatedAt   String  @map("updated_at")
+  xPost       XPostRaw @relation(fields: [xPostId], references: [xPostId], onUpdate: Cascade)
 
   @@unique([xPostId, targetKey])
   @@index([status, nextRetryAt])

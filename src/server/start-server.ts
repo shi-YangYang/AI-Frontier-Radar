@@ -6,7 +6,8 @@ import { createAuthService } from '../modules/auth';
 import { createRetentionService } from '../modules/maintenance';
 import { createWechatBridgeService, WechatBindCoordinator } from '../modules/wechat';
 import { createRuntimeScheduler, createRuntimeSourceProviders } from '../modules/scheduler';
-import { createRuntimeSettingsService, createStorageFromConfig } from '../modules/storage';
+import { resolveYoutubeChannel } from '../modules/polling';
+import { createRuntimeSettingsService, createStorageFromConfig, seedSourcePacks } from '../modules/storage';
 
 export interface StartServerOptions {
   config: AppConfig;
@@ -186,6 +187,20 @@ export async function startServer(options: StartServerOptions): Promise<void> {
 
   try {
     await storage.initialize();
+    await seedSourcePacks({
+      logger: options.logger,
+      sourcePacks: storage.sourcePacks,
+      watchAccounts: storage.watchAccounts,
+      // 种子的 YouTube 解析与管理端/轮询保持一致：代理优先取运行时设置（SQLite），无配置时回落 .env。
+      youtubeChannelResolver: async (handle) => {
+        const rssSettings = await runtimeSettings.getEffectiveRssProxySettings();
+
+        return resolveYoutubeChannel(
+          handle,
+          rssSettings.proxyUrl === undefined ? {} : { proxyUrl: rssSettings.proxyUrl },
+        );
+      },
+    });
     await app.listen({
       host: options.config.service.host,
       port: options.config.service.port,
