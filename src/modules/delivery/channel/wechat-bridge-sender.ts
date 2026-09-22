@@ -18,6 +18,15 @@ interface WechatBridgeResponseBody {
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 
+/**
+ * 微信桌面端按 Markdown 渲染 ClawBot 消息，且不会自动识别裸链接（手机端两种
+ * 形式均可点击）。这里把文本中的裸 URL 统一转成 Markdown 链接，保证桌面端
+ * 可直接点击；手机端对两种格式均可点击，行为不受影响。
+ */
+export function toWechatMarkdownLinks(text: string): string {
+  return text.replace(/(?<!\]\()(https?:\/\/[^\s)\]]+)/gu, (url) => `[${url}](${url})`);
+}
+
 export class WechatBridgeSender implements DeliveryChannelSender {
   public readonly channelType = 'wechat_clawbot' as const;
   private readonly fetchImplementation: typeof fetch;
@@ -41,7 +50,7 @@ export class WechatBridgeSender implements DeliveryChannelSender {
           ...(accountId.length === 0 ? {} : { accountId }),
           author: input.message.author,
           postedAt: input.message.postedAt,
-          text: input.message.text,
+          text: toWechatMarkdownLinks(input.message.text),
           ...(target.length === 0 ? {} : { to: target }),
           url: input.message.url,
         }),
