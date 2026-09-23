@@ -67,7 +67,7 @@ export type {
 export { PollingAccountService, createSubscriptionRuleMatcher, resolveEffectiveSourceSets } from './services/index';
 export type { SubscriptionRuleMatcher } from './services/index';
 export type { EffectiveSourceSet, PollingAccountResult, PollingAccountServiceOptions } from './services/index';
-export { PollingOrchestrator } from './orchestrator/index';
+export { ACCOUNT_DEADLINE_MS, PollingOrchestrator } from './orchestrator/index';
 export type {
   PollingAccountRunResult,
   PollingOrchestratorOptions,

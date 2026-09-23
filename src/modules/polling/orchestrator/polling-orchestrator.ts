@@ -4,7 +4,10 @@ import type { StorageContext, WatchAccount } from '../../storage';
 import type { SourceProviderRegistry } from '../types';
 import { PollingAccountService, resolveEffectiveSourceSets, type EffectiveSourceSet, type SubscriptionRuleMatcher } from '../services';
 
+export const ACCOUNT_DEADLINE_MS = 60_000;
+
 export interface PollingOrchestratorOptions {
+  accountDeadlineMs?: number;
   logger?: AppLogger;
   polling: {
     excludeReplies?: boolean;
@@ -41,10 +44,12 @@ export interface PollingRunResult {
 }
 
 export class PollingOrchestrator {
+  private readonly accountDeadlineMs: number;
   private readonly accountService: PollingAccountService;
   private readonly logger: AppLogger | undefined;
 
   public constructor(private readonly options: PollingOrchestratorOptions) {
+    this.accountDeadlineMs = options.accountDeadlineMs ?? ACCOUNT_DEADLINE_MS;
     this.accountService = new PollingAccountService({
       deliveryEvents: options.storage.deliveryEvents,
       excludeReplies: options.polling.excludeReplies,
@@ -83,7 +88,7 @@ export class PollingOrchestrator {
       accountsTotal = watchAccounts.length;
 
       for (const watchAccount of watchAccounts) {
-        const accountResult = await this.processAccount(
+        const accountResult = await this.processAccountWithDeadline(
           watchAccount,
           deliveryTargets,
           effectiveSourceSets,
@@ -179,6 +184,51 @@ export class PollingOrchestrator {
 
       throw error;
     }
+  }
+
+  private async processAccountWithDeadline(
+    watchAccount: WatchAccount,
+    deliveryTargets: Awaited<ReturnType<StorageContext['deliveryTargets']['listEnabled']>>,
+    effectiveSourceSets: Map<string, EffectiveSourceSet>,
+  ): Promise<PollingAccountRunResult> {
+    let deadlineTimer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<PollingAccountRunResult>((resolve) => {
+      deadlineTimer = setTimeout(() => {
+        resolve(this.createDeadlineFailure(watchAccount));
+      }, this.accountDeadlineMs);
+    });
+
+    try {
+      return await Promise.race([
+        this.processAccount(watchAccount, deliveryTargets, effectiveSourceSets),
+        deadline,
+      ]);
+    } finally {
+      clearTimeout(deadlineTimer);
+    }
+  }
+
+  private createDeadlineFailure(watchAccount: WatchAccount): PollingAccountRunResult {
+    const sourceLabel = toWatchAccountLabel(watchAccount);
+    const timeoutSeconds = this.accountDeadlineMs / 1000;
+
+    this.logger?.warn(
+      {
+        deadlineMs: this.accountDeadlineMs,
+        sourceLabel,
+        watchAccountId: watchAccount.id,
+      },
+      '轮询账号超过单账号截止时间，本轮按失败跳过（底层流程不取消，结果丢弃）。',
+    );
+
+    return {
+      error: `轮询超时（${timeoutSeconds} 秒），本轮已跳过`,
+      eventsCreated: 0,
+      newPostsDetected: 0,
+      sourceLabel,
+      status: 'failed',
+      watchAccountId: watchAccount.id,
+    };
   }
 
   private async processAccount(

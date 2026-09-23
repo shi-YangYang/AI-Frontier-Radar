@@ -7,6 +7,7 @@ import { createSubscriptionRuleMatcher } from '../services';
 import { PollingOrchestrator, type PollingRunResult } from '../orchestrator';
 
 export interface RunPollingJobOptions {
+  accountDeadlineMs?: number;
   config: Pick<AppConfig, 'polling'>;
   logger?: AppLogger;
   sourceProviders: SourceProviderRegistry;
@@ -21,6 +22,7 @@ export async function runPollingJob(options: RunPollingJobOptions): Promise<Poll
     appSettings: options.storage.appSettings,
   }).getRules();
   const orchestrator = new PollingOrchestrator({
+    accountDeadlineMs: options.accountDeadlineMs,
     logger: options.logger,
     polling: options.config.polling,
     sourceProviders: options.sourceProviders,

@@ -1,4 +1,4 @@
-export { PollingOrchestrator } from './polling-orchestrator';
+export { ACCOUNT_DEADLINE_MS, PollingOrchestrator } from './polling-orchestrator';
 export type {
   PollingAccountRunResult,
   PollingOrchestratorOptions,

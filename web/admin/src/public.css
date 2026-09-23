@@ -186,7 +186,7 @@
 .public-theme .me-category-bar { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 24px 16px; max-width: calc(100% - 48px); width: fit-content; background: #f0f4f5; border: 1px solid var(--border); border-radius: 999px; padding: 3px; }
 .public-theme .me-messages-empty { min-height: 260px; border-top: 1px solid var(--border); display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 16px; padding: 40px 24px; text-align: center; }
 .public-theme .me-empty-icon { width: 48px; height: 48px; color: #78979b; }
-.public-theme .me-post-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: stretch; margin-top: 0; }
+.public-theme .me-post-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: stretch; margin-top: 0; padding: 0 24px 24px; }
 .public-theme .me-post { border: 1px solid var(--border); border-radius: 10px; padding: 20px; box-shadow: none; min-width: 0; }
 .public-theme .me-post:hover { border-color: var(--border-strong); box-shadow: 0 1px 4px #142b3608; }
 .public-theme .me-post-head { align-items: flex-start; gap: 16px; }
@@ -227,7 +227,7 @@
   .public-theme .me-post-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 640px) {
-  .public-theme .me-post-list { grid-template-columns: minmax(0, 1fr); }
+  .public-theme .me-post-list { grid-template-columns: minmax(0, 1fr); padding: 0 16px 16px; }
 }
 @media (max-width: 680px) {
   .public-theme .auth-brand { padding: 16px 16px 20px; }
