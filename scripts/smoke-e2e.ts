@@ -63,6 +63,7 @@ const TARGET_KEY = 'feishu-main';
 const RSS_FEED_PATH = '/feed.xml';
 const ATOM_FEED_PATH = '/atom.xml';
 const EMPTY_FEED_PATH = '/empty.xml';
+const HANGING_FEED_PATH = '/hanging.xml';
 
 async function main(): Promise<void> {
   const checks: SmokeCheck[] = [];
@@ -1262,6 +1263,94 @@ async function main(): Promise<void> {
       `unreachable proxy should fail the fetch, got ${unreachableProxyCode}`,
     );
     checks.push({ name: 'RSS 代理不可用时请求失败' });
+
+    rssApi.setFeed(HANGING_FEED_PATH, {
+      body: createRssDocument('Hanging Feed', [
+        createRssItem({
+          guid: 'hanging-item-1',
+          link: 'https://example.com/hanging/1',
+          pubDate: 'Wed, 06 May 2026 10:00:00 GMT',
+          title: '挂死条目',
+        }),
+      ]),
+      contentType: 'application/rss+xml; charset=utf-8',
+      statusCode: 200,
+    });
+    const hangingFeedUrl = `${rssApi.url}${HANGING_FEED_PATH}`;
+    const createHangingResponse = await app.inject({
+      method: 'POST',
+      payload: { sourceType: 'rss', sourceUrl: hangingFeedUrl },
+      url: '/admin/api/watch-accounts',
+    });
+    assert(
+      createHangingResponse.statusCode === 200,
+      `hanging RSS account create returned ${createHangingResponse.statusCode}`,
+    );
+    const hangingAccount = await storage.watchAccounts.findBySource({
+      sourceType: 'rss',
+      sourceUrl: hangingFeedUrl,
+    });
+    assert(hangingAccount !== null, 'hanging RSS watch account was not stored');
+
+    const hangingRssProvider = createRssSourceProvider({
+      fetchImplementation: async (input, init) =>
+        String(input) === hangingFeedUrl
+          ? new Promise<Response>(() => undefined)
+          : await fetch(input, init),
+      timeoutMs: 5_000,
+    });
+    const hangingSourceProviders = createSourceProviderRegistry({
+      ai2_blog: ai2BlogProvider,
+      anthropic_news: anthropicProvider,
+      github: githubProvider,
+      hf_papers: hfPapersProvider,
+      moonshot_blog: moonshotBlogProvider,
+      rss: hangingRssProvider,
+      x: sourceProvider,
+    });
+
+    const watchdogStartedAt = Date.now();
+    const watchdogPoll = await runPollingJob({
+      accountDeadlineMs: 1_000,
+      config,
+      logger,
+      sourceProviders: hangingSourceProviders,
+      storage,
+    });
+    const watchdogElapsedMs = Date.now() - watchdogStartedAt;
+    assert(
+      watchdogElapsedMs < 10_000,
+      `poll with a hung account should finish quickly, took ${watchdogElapsedMs}ms`,
+    );
+    assert(
+      watchdogPoll.status === 'partial_failed',
+      `watchdog poll status should be partial_failed, got ${watchdogPoll.status}`,
+    );
+    assert(
+      watchdogPoll.accountsFailed === 1,
+      `watchdog poll should fail exactly one account, got ${watchdogPoll.accountsFailed}`,
+    );
+    const hangingResult = watchdogPoll.watchAccounts.find(
+      (accountResult) => accountResult.watchAccountId === hangingAccount.id,
+    );
+    assert(
+      hangingResult?.status === 'failed' &&
+        hangingResult.error !== null &&
+        hangingResult.error.includes('轮询超时'),
+      `hanging account should be failed by the watchdog, got ${JSON.stringify(hangingResult)}`,
+    );
+    assert(
+      (watchdogPoll.errorSummary ?? '').includes(hangingResult?.sourceLabel ?? ''),
+      `watchdog errorSummary should contain the hanging account label, got ${watchdogPoll.errorSummary}`,
+    );
+    const otherResults = watchdogPoll.watchAccounts.filter(
+      (accountResult) => accountResult.watchAccountId !== hangingAccount.id,
+    );
+    assert(
+      otherResults.length > 0 && otherResults.every((accountResult) => accountResult.status === 'success'),
+      `other accounts should not be affected by the hung account, got ${JSON.stringify(otherResults)}`,
+    );
+    checks.push({ name: '单账号挂死触发看门狗：短截止时间内记失败且不影响其它账号' });
 
     const trendingPath = '/trending';
     const trendingUrl = `${rssApi.url}${trendingPath}`;
