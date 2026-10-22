@@ -3790,6 +3790,10 @@ async function main(): Promise<void> {
     );
     checks.push({ name: '旧体兼容：仅 sourceIds 数组仍按现状（空=全部）' });
 
+    // 静默汇总用例要求 target 指向 mock 桥；应用内 3 秒一次的绑定同步会把
+    // webhookUrl 改回真实桥地址，因此在本段开始前停掉后台同步，并等待可能在途的一次同步结束。
+    fakeWechatRunning = false;
+    await new Promise((resolve) => setTimeout(resolve, 500));
     const quietReference = new Date('2026-04-24T18:00:00.000Z');
     const quietWindow = findQuietWindow(quietReference, true);
     const openWindow = findQuietWindow(quietReference, false);
@@ -3852,6 +3856,11 @@ async function main(): Promise<void> {
       quietOffResponse.statusCode === 200,
       `closing quiet window returned ${quietOffResponse.statusCode}`,
     );
+    const quietTargetBeforeFlush = await storage.deliveryTargets.findByTargetKey(wechatTargetKey);
+    assert(
+      quietTargetBeforeFlush?.webhookUrl === webhook.urls.wechatBridge,
+      `quiet target should keep the mock bridge URL, got ${quietTargetBeforeFlush?.webhookUrl}`,
+    );
     await runDeliveryWorkerJob({ logger, now: () => quietReference, storage });
     const digestRequests = webhook.requests.filter((entry) =>
       entry.url.startsWith('/mock-wechat-bridge'),
@@ -3872,7 +3881,7 @@ async function main(): Promise<void> {
         digestText.includes('Quiet hours post two') &&
         quietEventOneAfterFlush?.status === 'sent' &&
         quietEventTwoAfterFlush?.status === 'sent',
-      `digest should combine both posts into one push, got ${JSON.stringify({ total: digestRequests.length, eventOne: quietEventOneAfterFlush?.status, eventTwo: quietEventTwoAfterFlush?.status })}`,
+      `digest should combine both posts into one push, got ${JSON.stringify({ total: digestRequests.length, eventOne: quietEventOneAfterFlush?.status, eventOneError: quietEventOneAfterFlush?.lastError, eventTwo: quietEventTwoAfterFlush?.status, eventTwoError: quietEventTwoAfterFlush?.lastError, requestUrl: digestRequest?.url })}`,
     );
     checks.push({ name: '静默结束后合并为一条汇总推送' });
 
