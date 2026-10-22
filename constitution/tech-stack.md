@@ -65,7 +65,7 @@
 | 单元测试框架 | 未引入 |
 | 端到端冒烟 | `scripts/smoke-e2e.ts`（`npm run smoke:e2e`） |
 | Lint / Format | 未配置，仅做类型检查 |
-| CI | 未配置 |
+| CI | GitHub Actions：PR 到 `master` 时执行 Prisma Client 生成、类型检查、构建与冒烟测试（`.github/workflows/ci.yml`） |
 
 ## 配置与运行
 

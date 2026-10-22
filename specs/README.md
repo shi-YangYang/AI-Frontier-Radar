@@ -44,6 +44,10 @@ specs/
 3. 实施完成后，由独立验收 Agent 验收并产出 `acceptance.md`。
 4. 验收失败进入返工流程，重新验收，直到 PASS。
 
+## 追溯验收记录
+
+`spec-022`～`spec-031` 的 `acceptance.md` 是后续补齐历史文档时，基于当前代码、测试与运行结果整理的追溯记录，不等同于原始实施时点的独立验收。追溯记录须注明该性质，`Validation` 中如实列出已执行与未执行的检查。更早的 `acceptance.md` 保留当时格式，不回溯改写。
+
 ## 验收结果
 
 `acceptance.md` 的 Result 只能是：
