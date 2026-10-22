@@ -12,23 +12,15 @@
   </p>
 </div>
 
-<div align="center">
-
-[![CI](https://github.com/shi-YangYang/AI-Frontier-Radar/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/shi-YangYang/AI-Frontier-Radar/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](./LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/shi-YangYang/AI-Frontier-Radar?style=flat-square)](https://github.com/shi-YangYang/AI-Frontier-Radar/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/shi-YangYang/AI-Frontier-Radar?style=flat-square)](https://github.com/shi-YangYang/AI-Frontier-Radar/forks)
-[![GitHub issues](https://img.shields.io/github/issues/shi-YangYang/AI-Frontier-Radar?style=flat-square)](https://github.com/shi-YangYang/AI-Frontier-Radar/issues)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](#支持这个项目)
-
-![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-3C873A?style=flat-square)
-![TypeScript 5.x](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square)
-![SQLite Local](https://img.shields.io/badge/SQLite-local-044A64?style=flat-square)
-![Vue 3](https://img.shields.io/badge/Vue-3-42B883?style=flat-square)
-![Playwright](https://img.shields.io/badge/Playwright-Chromium-2EAD33?style=flat-square)
-![Local-first](https://img.shields.io/badge/local--first-no%20cloud-4F46E5?style=flat-square)
-
-</div>
+<p align="center">
+  <img src="https://img.shields.io/badge/Node.js-20%2B-3C873A?style=flat-square" alt="Node.js 20+" />
+  <img src="https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square" alt="TypeScript 5.x" />
+  <img src="https://img.shields.io/badge/Fastify-5-000000?style=flat-square" alt="Fastify 5" />
+  <img src="https://img.shields.io/badge/Prisma-6-2D3748?style=flat-square" alt="Prisma 6" />
+  <img src="https://img.shields.io/badge/SQLite-local-044A64?style=flat-square" alt="SQLite" />
+  <img src="https://img.shields.io/badge/Vue-3-42B883?style=flat-square" alt="Vue 3" />
+  <img src="https://img.shields.io/badge/Playwright-Chromium-2EAD33?style=flat-square" alt="Playwright" />
+</p>
 
 ## English Summary
 
@@ -526,13 +518,13 @@ npm run db:restore -- .data/backups/backup-20260917-143646.sqlite
 
 ## CI
 
-向 `master`（或 `main`）发起 Pull Request 时会自动触发 GitHub Actions 校验：
+向 `master` 发起 Pull Request 时会自动触发 GitHub Actions 校验：
 
 ```text
 npm run prisma:generate → npm run typecheck → npm run build → npm run smoke:e2e
 ```
 
-工作流文件：`.github/workflows/ci.yml`。推送分支本身不触发；只有 PR 打开/更新时运行（上方 CI 徽章跟踪 `dev` 分支最近一次运行）。
+工作流文件：`.github/workflows/ci.yml`。推送分支本身不触发；只有 PR 打开/更新时运行，运行记录见 Actions 页面。
 
 ## CD（部署到自己的服务器）
 
@@ -634,32 +626,45 @@ npm run playwright:install
 AGENTS.md               Agent 开发规范与协作流程
 constitution/           项目使命、路线图、技术栈（长期约束）
 specs/                  SDD 规格目录（spec / plan / acceptance 与模板）
-.ai/                    决策留痕、工作流、提示词、规则
+.ai/                    决策留痕、工作流、提示词、项目规则
+docs/                   部署等文档
+deploy/                 Docker Compose 与 Caddy 配置
 prisma/                 SQLite schema 和 migrations
 scripts/                初始化、Prisma 包装、冒烟脚本
 src/app                 Fastify app 组装
 src/config              运行时配置加载
 src/modules/api         HTTP API 和管理 API
-src/modules/delivery    飞书发送、worker、retry
-src/modules/polling     X / RSS 数据源、轮询编排
+src/modules/auth        登录、会话与钉钉登录
+src/modules/delivery    多渠道投递、worker、retry
+src/modules/maintenance 数据保留与备份
+src/modules/polling     X / RSS / 官方源提供方与轮询编排
 src/modules/scheduler   运行时调度器
 src/modules/storage     Prisma storage 和 repository
-web/admin               Vue 管理前端
+src/modules/wechat      微信桥托管与绑定
+wechat-bridge/          个人微信 ClawBot 桥（独立子进程）
+web/admin               Vue 管理前端与用户端
 ```
 
 ## 开发
 
-项目遵循规格驱动开发（SDD），并融合多 Agent 协作模式，完整流程与硬性约束见 [AGENTS.md](./AGENTS.md)。
+项目遵循规格驱动开发（SDD），支持单 / 多 Agent 协作，完整流程、角色边界与硬性约束见 [AGENTS.md](./AGENTS.md)。
 
 | 结构 | 职责 |
 | --- | --- |
 | `constitution/` | 项目使命、路线图、技术栈等长期约束 |
-| `specs/spec-XXX-short-name/` | 需求规格 `spec.md`、实施计划 `plan.md`、验收记录 `acceptance.md` |
-| `.ai/` | 决策留痕、工作流、提示词、项目规则 |
+| `specs/history.md` | 已完成迭代的一句话摘要归档 |
+| `specs/spec-XXX-short-name/` | 新迭代的需求规格 `spec.md`、实施计划 `plan.md`、验收记录 `acceptance.md` |
+| `.ai/decisions/` | 重要决策汇总（`decisions.md`） |
+| `.ai/rules/` | 项目级 Agent 规则，含网页内容与信息设计规范 |
 
-较大的功能迭代：先维护 `specs/spec-XXX-*/` 下的 `spec.md` 与 `plan.md`，关键决策确认后实施；实施完成后由独立验收产出 `acceptance.md`，未通过则进入返工流程，直到 PASS。
+工作约定：
 
-任何 Agent 任务开始前，按 AGENTS.md 第 11 节顺序阅读固定必读与任务必读文档。项目行为变化时，同步更新本 README 与相关文档。
+- 开发分支为 `dev`，主分支为 `master`；功能完成后通过 `dev → master` PR 合并。
+- 较大的功能迭代先维护 `spec.md` 与 `plan.md`，关键决策确认后实施；实施完成后由独立验收 Agent 产出 `acceptance.md`，未通过则返工重验，直到 PASS；完成的迭代摘要归入 `specs/history.md`。
+- 提交信息使用 `<type>: <中文说明>`（如 `fix: 修复轮询超时`）；commit、push、PR 与合并按 AGENTS.md 第 19 节的授权边界执行。
+- 验证按改动风险分级（AGENTS.md 第 22 节 S0–S3）；CI 在 PR 到 `master` 时执行 Prisma Client 生成、类型检查、构建与冒烟测试。
+
+任何 Agent 任务开始前，按 AGENTS.md 第 11 节顺序阅读固定必读与任务必读文档。项目行为变化时，同步更新本 README、`constitution/` 与相关文档。
 
 ## 支持这个项目
 

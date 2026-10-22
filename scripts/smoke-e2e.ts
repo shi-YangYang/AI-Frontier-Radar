@@ -1582,13 +1582,20 @@ async function main(): Promise<void> {
 
     const anthropicPath = '/anthropic-news';
     const anthropicUrl = `${rssApi.url}${anthropicPath}`;
+    const formatAnthropicDate = (daysAgo: number): string =>
+      new Date(Date.now() - daysAgo * 86_400_000).toLocaleDateString('en-US', {
+        day: 'numeric',
+        month: 'short',
+        timeZone: 'UTC',
+        year: 'numeric',
+      });
     const createAnthropicHtml = (extraArticle: boolean): string => {
       const articles = [
-        '<a href="/news/article-two"><div><span class="caption bold">Product</span><time class="date">Sep 12, 2026</time></div><h4 class="title">Article Two</h4><p class="body">Summary two.</p></a>',
-        '<a href="/news/article-one"><div><time class="date">Sep 10, 2026</time><span class="subject">Announcements</span></div><span class="title">Article One</span></a>',
+        `<a href="/news/article-two"><div><span class="caption bold">Product</span><time class="date">${formatAnthropicDate(3)}</time></div><h4 class="title">Article Two</h4><p class="body">Summary two.</p></a>`,
+        `<a href="/news/article-one"><div><time class="date">${formatAnthropicDate(5)}</time><span class="subject">Announcements</span></div><span class="title">Article One</span></a>`,
         ...(extraArticle
           ? [
-              '<a href="/news/article-three"><div><span class="caption bold">Announcements</span><time class="date">Sep 14, 2026</time></div><h4 class="title">Article Three</h4><p class="body">Summary three.</p></a>',
+              `<a href="/news/article-three"><div><span class="caption bold">Announcements</span><time class="date">${formatAnthropicDate(1)}</time></div><h4 class="title">Article Three</h4><p class="body">Summary three.</p></a>`,
             ]
           : []),
       ];
