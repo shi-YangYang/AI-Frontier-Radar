@@ -36,6 +36,7 @@ constitution/
 └── tech-stack.md
 specs/
 ├── README.md
+├── history.md
 └── _template/
     ├── spec.md
     ├── plan.md
@@ -198,7 +199,7 @@ Spec 定义“实现什么、怎样算正确完成”，不只是代码修改清
 
 ## 9. Spec 目录与规范
 
-Spec 统一放在 `specs/spec-XXX-short-name/`，不得擅自改到 `.ai/specs/`、`docs/specs/` 等位置。保留 `specs/README.md`、`specs/_template/`；各 Spec 文件按本节和第 3.4 节组织。
+Spec 统一放在 `specs/`。已完成迭代的一句话摘要归档在 `specs/history.md`；新 Spec 仍按 `specs/spec-XXX-short-name/` 创建，不得擅自改到 `.ai/specs/`、`docs/specs/` 等位置。保留 `specs/README.md`、`specs/_template/`；各 Spec 文件按本节和第 3.4 节组织，详细文件可按项目维护策略归档到 Git 历史。
 
 ### 9.1 `spec.md`
 
@@ -642,7 +643,7 @@ Git 按第 19.7 节核实；开发 Done 不代表 Git 流程完成。保留有�
 
 ### 26.1 `specs/README.md`
 
-说明 Spec 命名、生命周期、`spec.md / plan.md / acceptance.md` 职责、PASS / FAIL 和返工规则。
+说明 Spec 命名、生命周期、`history.md` 历史归档、`spec.md / plan.md / acceptance.md` 职责、PASS / FAIL 和返工规则。
 
 ### 26.2 目录不能因“更好看”而调整
 

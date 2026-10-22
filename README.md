@@ -652,14 +652,15 @@ web/admin               Vue 管理前端与用户端
 | 结构 | 职责 |
 | --- | --- |
 | `constitution/` | 项目使命、路线图、技术栈等长期约束 |
-| `specs/spec-XXX-short-name/` | 需求规格 `spec.md`、实施计划 `plan.md`、验收记录 `acceptance.md` |
+| `specs/history.md` | 已完成迭代的一句话摘要归档 |
+| `specs/spec-XXX-short-name/` | 新迭代的需求规格 `spec.md`、实施计划 `plan.md`、验收记录 `acceptance.md` |
 | `.ai/decisions/` | 架构、数据模型、接口与业务规则等重要决策留痕 |
 | `.ai/rules/` | 项目级 Agent 规则，含网页内容与信息设计规范 |
 
 工作约定：
 
 - 开发分支为 `dev`，主分支为 `master`；功能完成后通过 `dev → master` PR 合并。
-- 较大的功能迭代先维护 `spec.md` 与 `plan.md`，关键决策确认后实施；实施完成后由独立验收 Agent 产出 `acceptance.md`，未通过则返工重验，直到 PASS。
+- 较大的功能迭代先维护 `spec.md` 与 `plan.md`，关键决策确认后实施；实施完成后由独立验收 Agent 产出 `acceptance.md`，未通过则返工重验，直到 PASS；完成的迭代摘要归入 `specs/history.md`。
 - 提交信息使用 `<type>: <中文说明>`（如 `fix: 修复轮询超时`）；commit、push、PR 与合并按 AGENTS.md 第 19 节的授权边界执行。
 - 验证按改动风险分级（AGENTS.md 第 22 节 S0–S3）；CI 在 PR 到 `master` 时执行 Prisma Client 生成、类型检查、构建与冒烟测试。
 
