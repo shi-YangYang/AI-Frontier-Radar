@@ -654,7 +654,7 @@ web/admin               Vue 管理前端与用户端
 | `constitution/` | 项目使命、路线图、技术栈等长期约束 |
 | `specs/history.md` | 已完成迭代的一句话摘要归档 |
 | `specs/spec-XXX-short-name/` | 新迭代的需求规格 `spec.md`、实施计划 `plan.md`、验收记录 `acceptance.md` |
-| `.ai/decisions/` | 架构、数据模型、接口与业务规则等重要决策留痕 |
+| `.ai/decisions/` | 重要决策汇总（`decisions.md`） |
 | `.ai/rules/` | 项目级 Agent 规则，含网页内容与信息设计规范 |
 
 工作约定：
